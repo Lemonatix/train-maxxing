@@ -74,12 +74,7 @@ final class Fares
         'ga-night' => [
             'country' => 'ch', 'factor' => 0.00, 'label' => 'GA Night',
             'hours' => [19, 5], 'maxClass' => 2,
-            'note' => 'Frei zwischen 19 und 5 Uhr, 2. Klasse.',
-        ],
-        'seven25' => [
-            'country' => 'ch', 'factor' => 0.00, 'label' => 'seven25',
-            'hours' => [19, 5], 'maxClass' => 2,
-            'note' => 'Frei zwischen 19 und 5 Uhr, 2. Klasse, bis 25 Jahre.',
+            'note' => 'Frei zwischen 19 und 5 Uhr, 2. Klasse. Heisst bei jungen Reisenden seven25.',
         ],
         'bc25' => [
             'country' => 'de', 'factor' => 0.75, 'label' => 'BahnCard 25',

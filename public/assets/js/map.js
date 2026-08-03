@@ -62,6 +62,80 @@ function stopsOf(journey) {
   return out;
 }
 
+const LABEL_FONT_PX = 10;
+const CHAR_W = 5.6;      // grobe Zeichenbreite bei JetBrains Mono, 10px
+const LABEL_H = 12;
+
+/** Überschneiden sich zwei Rechtecke? Mit etwas Puffer, damit es luftig bleibt. */
+function overlaps(a, b, pad = 2) {
+  return !(a.x + a.w + pad < b.x || b.x + b.w + pad < a.x ||
+           a.y + a.h + pad < b.y || b.y + b.h + pad < a.y);
+}
+
+/**
+ * Platziert Haltestellennamen ohne Überlappungen.
+ *
+ * Für jeden Halt werden mehrere Positionen um den Punkt herum durchprobiert.
+ * Passt keine, wird das Label weggelassen — ein fehlender Name ist besser als
+ * zwei übereinandergedruckte. Start und Ziel haben Vorrang, weil sie am
+ * wichtigsten sind.
+ */
+function placeLabels(svg, stops, toXY, W, H) {
+  const placed = [];
+
+  // Punkte selbst blockieren ebenfalls Fläche.
+  for (const s of stops) {
+    const [x, y] = toXY([s.lat, s.lon]);
+    placed.push({ x: x - 5, y: y - 5, w: 10, h: 10 });
+  }
+
+  // Erster und letzter Halt zuerst — sie sollen auf jeden Fall stehen.
+  const order = [...stops.keys()].sort((a, b) => {
+    const rank = (i) => (i === 0 || i === stops.length - 1 ? 0 : 1);
+    return rank(a) - rank(b);
+  });
+
+  for (const idx of order) {
+    const s = stops[idx];
+    const [x, y] = toXY([s.lat, s.lon]);
+    const text = s.name.length > 22 ? s.name.slice(0, 21) + '…' : s.name;
+    const w = text.length * CHAR_W;
+
+    // Kandidaten: rechts, links, oben, unten, dann diagonal.
+    const candidates = [
+      { x: x + 8,     y: y + 3.5,  anchor: 'start' },
+      { x: x - 8 - w, y: y + 3.5,  anchor: 'start' },
+      { x: x - w / 2, y: y - 9,    anchor: 'start' },
+      { x: x - w / 2, y: y + 16,   anchor: 'start' },
+      { x: x + 8,     y: y - 9,    anchor: 'start' },
+      { x: x + 8,     y: y + 16,   anchor: 'start' },
+      { x: x - 8 - w, y: y - 9,    anchor: 'start' },
+      { x: x - 8 - w, y: y + 16,   anchor: 'start' },
+    ];
+
+    let chosen = null;
+    for (const c of candidates) {
+      const box = { x: c.x, y: c.y - LABEL_H + 3, w, h: LABEL_H };
+      // Nicht aus dem Bild laufen lassen.
+      if (box.x < 2 || box.x + box.w > W - 2 || box.y < 2 || box.y + box.h > H - 2) continue;
+      if (placed.some((p) => overlaps(box, p))) continue;
+      chosen = { c, box };
+      break;
+    }
+
+    if (!chosen) continue; // lieber weglassen als überdrucken
+
+    const t = document.createElementNS(NS, 'text');
+    t.setAttribute('x', chosen.c.x.toFixed(1));
+    t.setAttribute('y', chosen.c.y.toFixed(1));
+    t.setAttribute('class', 'map__label');
+    t.textContent = text;
+    svg.append(t);
+
+    placed.push(chosen.box);
+  }
+}
+
 /**
  * Zeichnet die Karte.
  *
@@ -101,9 +175,12 @@ export function renderMap(container, ranked, activeIdx, onSelect) {
     if (y > maxY) maxY = y;
   }
 
+  // Auf dem Telefon ist vertikal mehr Platz als horizontal — dort lohnt ein
+  // hochformatiger Ausschnitt, sonst wird die Strecke zu einem dünnen Strich.
+  const narrow = container.clientWidth > 0 && container.clientWidth < 520;
   const W = 800;
-  const H = 460;
-  const PAD = 34;
+  const H = narrow ? 640 : 460;
+  const PAD = narrow ? 44 : 34;
 
   // Seitenverhältnis erhalten, sonst wird die Strecke verzerrt.
   const spanX = Math.max(maxX - minX, 1e-6);
@@ -190,16 +267,9 @@ export function renderMap(container, ranked, activeIdx, onSelect) {
     }
 
     // Namen nur für Start, Ziel und Umstiege - sonst wird es unlesbar.
-    const majors = stopsOf(active.journey).filter((s) => s.major);
-    for (const s of majors) {
-      const [x, y] = toXY([s.lat, s.lon]);
-      const t = document.createElementNS(NS, 'text');
-      t.setAttribute('x', (x + 7).toFixed(1));
-      t.setAttribute('y', (y + 4).toFixed(1));
-      t.setAttribute('class', 'map__label');
-      t.textContent = s.name.length > 24 ? s.name.slice(0, 23) + '…' : s.name;
-      svg.append(t);
-    }
+    // Bei nah beieinander liegenden Halten überlappen die Texte sonst, deshalb
+    // werden mehrere Positionen durchprobiert und kollidierende weggelassen.
+    placeLabels(svg, stopsOf(active.journey).filter((s) => s.major), toXY, W, H);
   }
 
   container.append(svg);

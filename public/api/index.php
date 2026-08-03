@@ -19,6 +19,8 @@ declare(strict_types=1);
 require __DIR__ . '/lib/Http.php';
 require __DIR__ . '/lib/Cache.php';
 require __DIR__ . '/lib/Fares.php';
+require __DIR__ . '/lib/Products.php';
+require __DIR__ . '/lib/Shops.php';
 require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
 require __DIR__ . '/lib/Providers/DbWagenreihung.php';
@@ -69,7 +71,10 @@ try {
             handleHealth($http, $config, $cache);
             break;
         case 'catalogue':
-            ok(['abos' => Fares::catalogue()]);
+            ok([
+                'abos'     => Fares::catalogue(),
+                'products' => Products::catalogue(),
+            ]);
             break;
         case 'locations':
             handleLocations($http, $config, $cache);
@@ -181,9 +186,16 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         static fn($v) => $v !== ''
     ));
 
+    // Verkehrsmittel-Auswahl. Fehlt der Parameter, ist alles erlaubt.
+    $products = array_values(array_filter(
+        array_map('trim', explode(',', (string) ($_GET['products'] ?? ''))),
+        static fn($p) => $p !== '' && in_array($p, Products::allIds(), true)
+    ));
+
     $cacheKey = 'jny:' . implode('|', [
         $from, $to, $date, $time, $arrival ? 'a' : 'd',
         $travelClass, $results, implode('+', $discounts), implode('+', $viaIds),
+        implode('+', $products),
     ]);
     $cached = $cache->get($cacheKey, (int) $config['cache_ttl']['journeys']);
     if ($cached !== null) {
@@ -194,7 +206,10 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 
     // --- 1. Fahrplan von der OeBB -------------------------------------
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
-    $sched = $oebb->journeys($from, $to, $date, $time, $arrival, $results, $travelClass, $viaIds);
+    $sched = $oebb->journeys(
+        $from, $to, $date, $time, $arrival, $results, $travelClass, $viaIds,
+        Products::bitmask($products)
+    );
 
     if (!$sched['ok']) {
         fail('Fahrplanabfrage fehlgeschlagen: ' . $sched['error'], 502);
@@ -202,7 +217,10 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 
     $journeys = $sched['data'];
     if ($journeys === []) {
-        ok(['journeys' => [], 'notices' => ['Keine Verbindungen gefunden.'], 'cached' => false]);
+        $hint = $products !== [] || $viaIds !== []
+            ? 'Keine Verbindungen gefunden. Vielleicht sind die Filter zu eng.'
+            : 'Keine Verbindungen gefunden.';
+        ok(['journeys' => [], 'notices' => [$hint], 'cached' => false]);
     }
 
     // --- 2. Preise von DB versuchen -----------------------------------
@@ -210,7 +228,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 
     if (($config['providers']['db']['enabled'] ?? false) === true) {
         $db     = new DbVendo($http, $config['providers']['db']);
-        $priced = $db->journeys($from, $to, $date, $time, $arrival, $travelClass, $discounts);
+        $priced = $db->journeys($from, $to, $date, $time, $arrival, $travelClass, $discounts, true, $products);
 
         if ($priced['ok'] && $priced['data'] !== []) {
             $matched = mergePrices($journeys, $priced['data']);
@@ -243,6 +261,8 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     // --- 4. Abos anwenden bzw. schaetzen ------------------------------
     foreach ($journeys as $i => $j) {
         $journeys[$i] = Fares::apply($j, $discounts, $travelClass);
+        // Ticketshops der beruehrten Laender, Startland zuerst.
+        $journeys[$i]['shops'] = Shops::forJourney($journeys[$i], $date, $time);
     }
 
     $payload = [

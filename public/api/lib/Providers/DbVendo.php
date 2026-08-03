@@ -98,7 +98,8 @@ final class DbVendo
         bool $arrival = false,
         int $travelClass = 2,
         array $discounts = [],
-        bool $fastOnly = true
+        bool $fastOnly = true,
+        array $products = []
     ): array {
         $ermaessigungen = $this->mapDiscounts($discounts, $travelClass);
 
@@ -108,7 +109,7 @@ final class DbVendo
             'anfrageZeitpunkt' => $date . 'T' . $time . ':00',
             'ankunftSuche'     => $arrival ? 'ANKUNFT' : 'ABFAHRT',
             'klasse'           => $travelClass === 1 ? 'KLASSE_1' : 'KLASSE_2',
-            'produktgattungen' => ['ICE', 'EC_IC', 'IR', 'REGIONAL', 'SBAHN', 'BUS', 'SCHIFF', 'UBAHN', 'TRAM', 'ANRUFPFLICHTIG'],
+            'produktgattungen' => Products::dbProducts($products),
             'reisende'         => [[
                 'typ'            => 'ERWACHSENER',
                 'ermaessigungen' => $ermaessigungen['payload'],

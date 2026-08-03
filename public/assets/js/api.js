@@ -60,6 +60,7 @@ export const api = {
         class: params.travelClass || 2,
         results: params.results || 8,
         discounts: (params.discounts || []).join(','),
+        products: (params.products || []).join(','),
         via: (params.via || []).join(','),
       },
       opts

@@ -125,16 +125,19 @@ function renderCard(entry, index, marks, state, onSelect) {
     const num = leg.trainNumber || leg.line || '';
     chip.textContent = num ? `${type.label} ${num}` : type.label;
 
-    // Baureihe aus der Wagenreihung, falls die DB sie geliefert hat.
-    // Steht nur für deutsche Züge am Reisetag zur Verfügung.
-    if (leg.series) {
+    // Fahrzeugmodell direkt am Chip, wenn wir es kennen.
+    const ce = entry.comfortPerLeg.find((c) => c.leg === leg);
+    if (ce?.model) {
+      chip.append(el('span', 'chip__series', ce.model.label));
+    } else if (leg.series) {
       chip.append(el('span', 'chip__series', leg.series));
     }
 
     chip.title = [
       type.long,
+      ce?.model ? `Fahrzeug: ${ce.model.label}` : null,
       leg.series ? `Baureihe ${leg.series}` : null,
-      type.note,
+      ce?.model?.note || type.note,
       leg.dTicket || null,
     ].filter(Boolean).join(' — ');
     chain.append(chip);
@@ -147,13 +150,29 @@ function renderCard(entry, index, marks, state, onSelect) {
   details.append(renderLegs(j, entry, state));
   card.append(details);
 
-  // --- Buchen ---
-  if (j.bookingUrl) {
-    const a = el('a', 'booking', 'Im ÖBB-Ticketshop öffnen');
-    a.href = j.bookingUrl;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer nofollow';
-    card.append(a);
+  // --- Buchen: Shops der berührten Länder, Startland zuerst ---
+  const shops = j.shops || [];
+  if (shops.length > 0) {
+    const box = el('div', 'shops');
+    box.append(el('span', 'shops__label', 'Buchen bei'));
+
+    for (const shop of shops) {
+      const a = el('a', 'shops__link', shop.label);
+      a.href = shop.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer nofollow';
+      if (!shop.prefilled) {
+        a.classList.add('shops__link--manual');
+        a.title = 'Öffnet die Suche — Orte und Datum müssen dort ggf. selbst eingetragen werden.';
+        a.append(el('span', 'shops__hint', '*'));
+      }
+      box.append(a);
+    }
+
+    if (shops.some((s) => !s.prefilled)) {
+      box.append(el('span', 'shops__note', '* nicht garantiert vorausgefüllt'));
+    }
+    card.append(box);
   }
 
   return card;
@@ -184,11 +203,20 @@ function renderLegs(journey, entry, state) {
     info.append(el('span', 'leg__long', type.long));
     info.append(el('span', 'leg__dur', formatDuration(leg.durationMin)));
 
-    if (leg.series) {
+    const comfortEntry = entry.comfortPerLeg.find((c) => c.leg === leg);
+
+    // Fahrzeugmodell, wenn bekannt — mit Angabe, woher wir es wissen.
+    if (comfortEntry?.model) {
+      const m = el('span', 'leg__model', comfortEntry.model.label);
+      m.title = comfortEntry.certainty === 'series'
+        ? `Aus der Wagenreihung ermittelt (Baureihe ${leg.series}).`
+        : 'Diese Gattung verkehrt nur mit diesem Fahrzeug.';
+      if (comfortEntry.certainty === 'sole') m.classList.add('leg__model--inferred');
+      info.append(m);
+    } else if (leg.series) {
       info.append(el('span', 'leg__series', `Baureihe ${leg.series}`));
     }
 
-    const comfortEntry = entry.comfortPerLeg.find((c) => c.leg === leg);
     if (state.mode === 'nerd' && comfortEntry) {
       info.append(el('span', 'leg__comfort', `Komfort ${comfortEntry.comfort}`));
     }

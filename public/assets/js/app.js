@@ -10,25 +10,28 @@ import { api } from './api.js';
 import { rank, highlights } from './scoring.js';
 import { renderResults, renderNotices } from './render.js';
 import { renderMap } from './map.js';
-import { TRAIN_TYPES, DEFAULT_RULES } from './data/trains.js';
+import { TRAIN_MODELS } from './data/trains.js';
 
-const STORAGE_KEY = 'train-maxxing:v1';
+// v2: Zugnummern-Regeln wurden durch Modellbewertungen ersetzt.
+const STORAGE_KEY = 'train-maxxing:v2';
 
 const state = {
   mode: 'normal',
   from: null,
   to: null,
+  via: null,
   date: todayISO(),
   time: '08:00',
   arrival: false,
   travelClass: 2,
   results: 8,
   discounts: [],
+  products: [],        // leer = alle erlaubt
   // Nerd-Parameter
   timeValue: 12,
   comfortValue: 2.5,
   changeCost: 4,
-  rules: [...DEFAULT_RULES],
+  modelPrefs: {},      // Modell-ID -> Bonus (-5 … +5)
   // Laufzeit
   lastPayload: null,
   ranked: [],
@@ -48,7 +51,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setupStationInputs();
   setupForm();
   setupNerdControls();
-  setupRules();
+  setupModels();
+  setupResize();
   loadCatalogue();
   applyStateToForm();
 });
@@ -63,8 +67,9 @@ function loadSettings() {
     if (!raw) return;
     const saved = JSON.parse(raw);
     for (const key of [
-      'mode', 'from', 'to', 'time', 'arrival', 'travelClass',
-      'results', 'discounts', 'timeValue', 'comfortValue', 'changeCost', 'rules',
+      'mode', 'from', 'to', 'via', 'time', 'arrival', 'travelClass',
+      'results', 'discounts', 'products', 'timeValue', 'comfortValue',
+      'changeCost', 'modelPrefs',
     ]) {
       if (saved[key] !== undefined) state[key] = saved[key];
     }
@@ -78,10 +83,11 @@ function saveSettings() {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        mode: state.mode, from: state.from, to: state.to, time: state.time,
-        arrival: state.arrival, travelClass: state.travelClass, results: state.results,
-        discounts: state.discounts, timeValue: state.timeValue,
-        comfortValue: state.comfortValue, changeCost: state.changeCost, rules: state.rules,
+        mode: state.mode, from: state.from, to: state.to, via: state.via,
+        time: state.time, arrival: state.arrival, travelClass: state.travelClass,
+        results: state.results, discounts: state.discounts, products: state.products,
+        timeValue: state.timeValue, comfortValue: state.comfortValue,
+        changeCost: state.changeCost, modelPrefs: state.modelPrefs,
       })
     );
   } catch {
@@ -92,6 +98,26 @@ function saveSettings() {
 // ======================================================================
 // Modus
 // ======================================================================
+
+/**
+ * Die Karte waehlt ihr Seitenverhaeltnis nach der Containerbreite. Dreht man
+ * das Telefon, muss sie deshalb neu gezeichnet werden.
+ */
+function setupResize() {
+  let timer = null;
+  let lastNarrow = window.innerWidth < 520;
+
+  window.addEventListener('resize', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const narrow = window.innerWidth < 520;
+      if (narrow !== lastNarrow && state.ranked.length > 0) {
+        lastNarrow = narrow;
+        draw();
+      }
+    }, 200);
+  });
+}
 
 function setupMode() {
   for (const btn of document.querySelectorAll('.mode-btn[data-mode]')) {
@@ -127,6 +153,19 @@ function setupStationInputs() {
     saveSettings();
   });
 
+  setupAutocomplete($('#via'), $('#via-list'), (loc) => {
+    state.via = loc;
+    renderVia();
+    saveSettings();
+  });
+
+  $('#via-clear').addEventListener('click', () => {
+    state.via = null;
+    $('#via').value = '';
+    renderVia();
+    saveSettings();
+  });
+
   $('#swap').addEventListener('click', () => {
     const a = state.from;
     state.from = state.to;
@@ -135,6 +174,13 @@ function setupStationInputs() {
     $('#to').value = state.to?.name || '';
     saveSettings();
   });
+}
+
+function renderVia() {
+  const box = $('#via-current');
+  box.textContent = state.via
+    ? `Route wird über ${state.via.name} geführt.`
+    : 'Kein Zwischenhalt gesetzt.';
 }
 
 function setupAutocomplete(input, list, onPick) {
@@ -235,6 +281,7 @@ async function loadCatalogue() {
   const box = $('#abos');
   try {
     const res = await api.catalogue();
+    renderProducts(res.products || []);
     box.replaceChildren();
 
     const byCountry = { ch: [], de: [], at: [] };
@@ -303,6 +350,55 @@ async function loadCatalogue() {
 }
 
 // ======================================================================
+// Verkehrsmittel
+// ======================================================================
+
+function renderProducts(products) {
+  const box = $('#products');
+  box.replaceChildren();
+  if (products.length === 0) return;
+
+  // Leerer Zustand bedeutet "alles erlaubt" - beim ersten Rendern also alles an.
+  const active = state.products.length === 0
+    ? products.map((p) => p.id)
+    : state.products;
+
+  for (const p of products) {
+    const label = document.createElement('label');
+    label.className = 'product';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = p.id;
+    cb.checked = active.includes(p.id);
+    cb.addEventListener('change', () => {
+      const checked = [...document.querySelectorAll('#products input:checked')].map((i) => i.value);
+      // Alles angehakt = keine Einschränkung, das sparen wir uns im Request.
+      state.products = checked.length === products.length ? [] : checked;
+      saveSettings();
+    });
+
+    const span = document.createElement('span');
+    span.textContent = p.label;
+    label.append(cb, span);
+
+    if (p.hint) {
+      const hint = document.createElement('span');
+      hint.className = 'product__hint';
+      hint.textContent = p.hint;
+      label.append(hint);
+    }
+    box.append(label);
+  }
+
+  $('#products-reset').addEventListener('click', () => {
+    state.products = [];
+    for (const cb of document.querySelectorAll('#products input')) cb.checked = true;
+    saveSettings();
+  });
+}
+
+// ======================================================================
 // Formular / Suche
 // ======================================================================
 
@@ -329,11 +425,12 @@ function applyStateToForm() {
   $('#class').value = String(state.travelClass);
   $('#results').value = String(state.results);
 
+  $('#via').value = state.via?.name || '';
   $('#time-value').value = state.timeValue;
   $('#comfort-value').value = state.comfortValue;
   $('#change-cost').value = state.changeCost;
   updateNerdLabels();
-  renderRules();
+  renderVia();
 }
 
 async function runSearch() {
@@ -368,6 +465,9 @@ async function runSearch() {
         travelClass: state.travelClass,
         results: state.results,
         discounts: state.discounts,
+        products: state.products,
+        // Der Zwischenhalt ist bewusst nur im Nerd-Modus wirksam.
+        via: state.mode === 'nerd' && state.via ? [state.via.id] : [],
       },
       { signal: searchAbort.signal }
     );
@@ -390,7 +490,7 @@ function rerank() {
 
   const ranked = rank(payload.journeys, {
     mode: state.mode,
-    rules: state.rules,
+    modelPrefs: state.modelPrefs,
     timeValue: state.timeValue,
     comfortValue: state.comfortValue,
     changeCost: state.changeCost,
@@ -445,86 +545,109 @@ function updateNerdLabels() {
 }
 
 // ======================================================================
-// Eigene Zugregeln
+// Lieblingszüge (Fahrzeugmodelle)
 // ======================================================================
 
-function setupRules() {
-  const select = $('#rule-category');
-  for (const [key, type] of Object.entries(TRAIN_TYPES)) {
-    if (!type.longDistance) continue;
-    const opt = document.createElement('option');
-    opt.value = key;
-    opt.textContent = `${type.label} — ${type.long}`;
-    select.append(opt);
-  }
-
-  $('#rule-add').addEventListener('click', () => {
-    const category = select.value;
-    const from = parseIntOrNull($('#rule-from').value);
-    const to = parseIntOrNull($('#rule-to').value);
-    const bonus = Number($('#rule-bonus').value);
-
-    if (!category) return;
-
-    const range = from != null || to != null ? ` ${from ?? ''}–${to ?? ''}` : '';
-    state.rules.push({
-      id: 'r-' + Date.now(),
-      category,
-      from,
-      to,
-      bonus,
-      label: `${category}${range} ${bonus > 0 ? '+' : ''}${bonus}`,
-    });
-
-    $('#rule-from').value = '';
-    $('#rule-to').value = '';
-    renderRules();
-    saveSettings();
-    if (state.lastPayload) rerank();
-  });
-
-  $('#rule-bonus').addEventListener('input', (e) => {
-    $('#rule-bonus-out').textContent = (e.target.value > 0 ? '+' : '') + e.target.value;
-  });
-}
-
-function renderRules() {
-  const box = $('#rule-list');
+function setupModels() {
+  const box = $('#models');
   box.replaceChildren();
 
-  const custom = state.rules.filter((r) => r.bonus !== 0);
-  if (custom.length === 0) {
-    const p = document.createElement('p');
-    p.className = 'hint';
-    p.textContent = 'Noch keine eigenen Regeln. Beispiel: ICE mit Bonus +3, wenn du ICE-Läufe magst.';
-    box.append(p);
-    return;
+  // Nach Gattung gruppieren, damit die Liste lesbar bleibt.
+  const groups = new Map();
+  for (const m of TRAIN_MODELS) {
+    const key = m.categories[0];
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m);
   }
 
-  for (const rule of custom) {
-    const row = document.createElement('div');
-    row.className = 'rule';
+  for (const [category, models] of groups) {
+    const group = document.createElement('fieldset');
+    group.className = 'model-group';
+    const legend = document.createElement('legend');
+    legend.textContent = category;
+    group.append(legend);
 
-    const text = document.createElement('span');
-    const range = rule.from != null || rule.to != null
-      ? ` (Nr. ${rule.from ?? '…'}–${rule.to ?? '…'})`
-      : '';
-    text.textContent = `${rule.category}${range}: ${rule.bonus > 0 ? '+' : ''}${rule.bonus}`;
+    for (const m of models) {
+      const row = document.createElement('div');
+      row.className = 'model';
 
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'rule__del';
-    del.textContent = 'entfernen';
-    del.addEventListener('click', () => {
-      state.rules = state.rules.filter((r) => r.id !== rule.id);
-      renderRules();
-      saveSettings();
-      if (state.lastPayload) rerank();
-    });
+      const head = document.createElement('div');
+      head.className = 'model__head';
 
-    row.append(text, del);
-    box.append(row);
+      const name = document.createElement('span');
+      name.className = 'model__name';
+      name.textContent = m.label;
+      head.append(name);
+
+      if (m.series.length) {
+        const br = document.createElement('span');
+        br.className = 'model__series';
+        br.textContent = 'BR ' + m.series.join('/');
+        head.append(br);
+      }
+      if (m.sole) {
+        const tag = document.createElement('span');
+        tag.className = 'model__tag';
+        tag.textContent = 'immer erkennbar';
+        head.append(tag);
+      }
+      row.append(head);
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '-5';
+      slider.max = '5';
+      slider.step = '1';
+      slider.value = String(state.modelPrefs[m.id] ?? 0);
+      slider.id = 'model-' + m.id;
+      slider.setAttribute('aria-label', `Bewertung ${m.label}`);
+
+      const out = document.createElement('output');
+      out.className = 'model__value';
+      const show = (v) => {
+        const n = Number(v);
+        out.textContent = n === 0 ? 'neutral' : (n > 0 ? `+${n} bevorzugen` : `${n} meiden`);
+        out.dataset.sign = n === 0 ? 'zero' : (n > 0 ? 'plus' : 'minus');
+      };
+      show(slider.value);
+
+      slider.addEventListener('input', (e) => {
+        const v = Number(e.target.value);
+        show(v);
+        if (v === 0) delete state.modelPrefs[m.id];
+        else state.modelPrefs[m.id] = v;
+        saveSettings();
+        if (state.lastPayload) rerank();
+      });
+
+      const ctl = document.createElement('div');
+      ctl.className = 'model__ctl';
+      ctl.append(slider, out);
+      row.append(ctl);
+
+      if (m.note) {
+        const note = document.createElement('p');
+        note.className = 'model__note';
+        note.textContent = m.note;
+        row.append(note);
+      }
+
+      group.append(row);
+    }
+    box.append(group);
   }
+
+  $('#models-reset').addEventListener('click', () => {
+    state.modelPrefs = {};
+    for (const m of TRAIN_MODELS) {
+      const s = document.querySelector('#model-' + m.id);
+      if (s) {
+        s.value = '0';
+        s.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    saveSettings();
+  });
 }
 
 // ======================================================================
@@ -536,7 +659,3 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function parseIntOrNull(v) {
-  const n = parseInt(v, 10);
-  return Number.isNaN(n) ? null : n;
-}

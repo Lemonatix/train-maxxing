@@ -88,7 +88,8 @@ final class OebbHafas
         bool $arrival = false,
         int $results = 6,
         int $travelClass = 2,
-        array $viaIds = []
+        array $viaIds = [],
+        int $productMask = 0
     ): array {
         $req = [
             'depLocL'     => [['type' => 'S', 'lid' => 'A=1@L=' . $fromId . '@']],
@@ -111,6 +112,15 @@ final class OebbHafas
 
         if ($arrival) {
             $req['outFrwd'] = false;
+        }
+
+        // Verkehrsmittel einschraenken. 0 heisst "keine Einschraenkung".
+        if ($productMask > 0) {
+            $req['jnyFltrL'] = [[
+                'type'  => 'PROD',
+                'mode'  => 'INC',
+                'value' => $productMask,
+            ]];
         }
 
         if ($viaIds !== []) {

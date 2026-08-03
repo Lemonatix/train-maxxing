@@ -19,7 +19,12 @@
 <div class="wrap">
 
   <header class="page-head">
-    <div>
+    <div class="page-head__title">
+      <!-- Zurück zur Hauptseite. Ziel hier anpassen, wenn das Tool
+           woanders eingebunden wird. -->
+      <a class="back" href="/" aria-label="Zurück zur Hauptseite">
+        <span aria-hidden="true">←</span> Hauptseite
+      </a>
       <h1>Zugverbindungen vergleichen</h1>
       <p class="sub">Schweiz · Deutschland · Österreich — nach Preis, Zeit und Zug.</p>
     </div>
@@ -98,8 +103,38 @@
       </div>
     </details>
 
+    <details class="section">
+      <summary>Verkehrsmittel</summary>
+      <p class="hint">
+        Abgewählte Verkehrsmittel werden schon bei der Suche ausgeschlossen —
+        praktisch, um Schienenersatzverkehr und Busse loszuwerden.
+      </p>
+      <div id="products" class="products">
+        <p class="hint">Wird geladen …</p>
+      </div>
+      <button type="button" id="products-reset" class="btn btn--ghost">Alle wieder aktivieren</button>
+    </details>
+
     <!-- Nur im Nerd-Modus sichtbar -->
     <div class="nerd-only">
+
+      <details class="section">
+        <summary>Über eine bestimmte Stadt</summary>
+        <p class="hint">
+          Erzwingt eine Route über diesen Ort — zum Beispiel, um den Gotthard
+          statt der Strecke über Österreich zu nehmen.
+        </p>
+        <div class="row">
+          <div class="field field--grow">
+            <label for="via">Zwischenhalt</label>
+            <input type="text" id="via" autocomplete="off" placeholder="z.B. Basel SBB"
+                   role="combobox" aria-expanded="false" aria-controls="via-list" aria-autocomplete="list">
+            <ul class="ac" id="via-list" role="listbox" hidden></ul>
+          </div>
+          <button type="button" id="via-clear" class="btn btn--ghost">Entfernen</button>
+        </div>
+        <div id="via-current" class="hint"></div>
+      </details>
 
       <details class="section" open>
         <summary>Was ist dir was wert?</summary>
@@ -132,35 +167,16 @@
       </details>
 
       <details class="section">
-        <summary>Eigene Zug-Regeln</summary>
+        <summary>Lieblingszüge</summary>
         <p class="hint">
-          Die Fahrplandaten enthalten Gattung und Zugnummer, aber <strong>nicht die Baureihe</strong> —
-          ob ein ICE ein ICE 4 ist, steht dort nicht drin. Mit Regeln auf Zugnummernbereiche
-          kannst du deine eigene Erfahrung abbilden und bestimmte Läufe bevorzugen oder meiden.
+          Bewerte die Fahrzeuge, die du magst oder meiden willst. Die Bewertung
+          zählt, sobald das Modell bekannt ist — entweder weil die Gattung nur
+          ein Fahrzeug kennt (railjet, Nightjet, WESTbahn) oder weil die
+          Wagenreihung die Baureihe liefert. Für welche Züge das gilt, steht
+          direkt an der Verbindung.
         </p>
-
-        <div class="rule-form">
-          <div class="field">
-            <label for="rule-category">Gattung</label>
-            <select id="rule-category"></select>
-          </div>
-          <div class="field field--narrow">
-            <label for="rule-from">Nr. ab</label>
-            <input type="number" id="rule-from" placeholder="beliebig">
-          </div>
-          <div class="field field--narrow">
-            <label for="rule-to">Nr. bis</label>
-            <input type="number" id="rule-to" placeholder="beliebig">
-          </div>
-          <div class="field field--narrow">
-            <label for="rule-bonus">Bewertung</label>
-            <input type="range" id="rule-bonus" min="-5" max="5" step="1" value="2">
-            <output id="rule-bonus-out">+2</output>
-          </div>
-          <button type="button" id="rule-add" class="btn btn--ghost">Regel hinzufügen</button>
-        </div>
-
-        <div id="rule-list" class="rule-list"></div>
+        <div id="models" class="models"></div>
+        <button type="button" id="models-reset" class="btn btn--ghost">Bewertungen zurücksetzen</button>
       </details>
 
     </div>

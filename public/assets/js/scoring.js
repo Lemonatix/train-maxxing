@@ -17,13 +17,13 @@
  *   ob eine halbe Stunde mehr Fahrt den bequemeren Zug rechtfertigt.
  */
 
-import { typeOf, applyRules } from './data/trains.js';
+import { typeOf, applyPreferences } from './data/trains.js';
 
 /**
  * Durchschnittlicher Komfort einer Verbindung, gewichtet nach Fahrzeit.
  * Fussweg- und Wartezeiten zaehlen nicht mit.
  */
-export function comfortOf(journey, rules) {
+export function comfortOf(journey, modelPrefs) {
   const legs = (journey.legs || []).filter((l) => l.mode === 'train');
   if (legs.length === 0) return { score: 5, hits: [], perLeg: [] };
 
@@ -34,12 +34,12 @@ export function comfortOf(journey, rules) {
 
   for (const leg of legs) {
     const minutes = Math.max(1, leg.durationMin || 1);
-    const { comfort, hits: ruleHits } = applyRules(leg, rules);
+    const res = applyPreferences(leg, modelPrefs);
 
-    weighted += comfort * minutes;
+    weighted += res.comfort * minutes;
     total += minutes;
-    perLeg.push({ leg, comfort });
-    hits.push(...ruleHits);
+    perLeg.push({ leg, comfort: res.comfort, model: res.model, certainty: res.certainty });
+    hits.push(...res.hits);
   }
 
   return {
@@ -63,7 +63,7 @@ export function priceOf(journey) {
  * @param {Array}  journeys
  * @param {Object} opts
  * @param {'normal'|'nerd'} opts.mode
- * @param {Array}  opts.rules       eigene Zugregeln
+ * @param {Object} opts.modelPrefs  Modell-ID -> Bonus (-5 … +5)
  * @param {number} opts.timeValue   Wert einer Stunde (Nerd)
  * @param {number} opts.comfortValue Wert einer Komfortstufe pro Stunde (Nerd)
  * @param {number} opts.changeCost  Kosten je Umstieg (Nerd)
@@ -72,7 +72,7 @@ export function priceOf(journey) {
 export function rank(journeys, opts) {
   const {
     mode = 'normal',
-    rules = [],
+    modelPrefs = {},
     timeValue = 12,
     comfortValue = 2.5,
     changeCost = 4,
@@ -82,7 +82,7 @@ export function rank(journeys, opts) {
   if (!journeys || journeys.length === 0) return [];
 
   const enriched = journeys.map((j) => {
-    const comfort = comfortOf(j, rules);
+    const comfort = comfortOf(j, modelPrefs);
     return {
       journey: j,
       price: priceOf(j),

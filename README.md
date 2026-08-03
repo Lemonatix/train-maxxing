@@ -5,12 +5,18 @@ nach Preis und Dauer, sondern auch danach, in welchem Zug du sitzt. Mit Abo-Ausw
 (Halbtax, GA, BahnCard, Vorteilscard, KlimaTicket) und zwei Modi:
 
 - **Normal** — Preis und Zeit, eine sortierte Liste, fertig.
-- **Nerd** — Zuggattung, Zugnummer, Streckenverlauf, Komfortbewertung und ein
-  Zeitwert-Modell, das ausrechnet, ob sich die halbe Stunde mehr Fahrt für den
-  bequemeren Zug lohnt.
+- **Nerd** — Zuggattung, Zugnummer, Streckenverlauf, Fahrzeugmodell,
+  Routenzwang über eine bestimmte Stadt und ein Zeitwert-Modell, das
+  ausrechnet, ob sich die halbe Stunde mehr Fahrt für den bequemeren Zug lohnt.
+
+Dazu eine Routenkarte, ein Verkehrsmittel-Filter (Bus und
+Schienenersatzverkehr lassen sich vorab ausschließen) und Buchungslinks zu SBB,
+DB oder ÖBB, je nachdem welche Länder die Reise berührt.
 
 Gebaut als statisches Frontend plus schlankes PHP-Backend, damit du den Ordner
-einfach auf deinen Webspace ziehen kannst.
+einfach auf deinen Webspace ziehen kannst. Die Oberfläche ist für Telefone
+ausgelegt: keine horizontalen Scrollleisten, Touch-Flächen ab 44 px, und die
+Karte wechselt auf schmalen Bildschirmen ins Hochformat.
 
 ---
 
@@ -143,6 +149,16 @@ Die Seite ist bewusst **dark-only**, passend zu deiner Website. Für einen
 hellen Modus reicht es, in `:root` die Flächen- und Textvariablen zu tauschen —
 alle Komponenten leiten ihre Farben davon ab.
 
+**Zurück-Link anpassen:** Oben links führt ein Knopf zurück zur Hauptseite. Das
+Ziel steht in `index.html` und zeigt standardmäßig auf `/`:
+
+```html
+<a class="back" href="/" aria-label="Zurück zur Hauptseite">
+```
+
+Liegt das Tool in einem Unterordner einer größeren Seite, trag dort die
+gewünschte Adresse ein.
+
 **Als Teilseite einbetten:** Übernimm den Inhalt von `<div class="wrap">` in deine
 Seite und binde `style.css` sowie `<script type="module" src="assets/js/app.js">`
 ein. Wichtig: Das Skript braucht `type="module"`.
@@ -177,15 +193,22 @@ werden kann), sondern der **Abstand zur besten Option**: „+43 gegenüber Platz
 (`ICE 118`, `RJX 262`), aber nirgends steht, ob das ein ICE 4 (BR 412) oder ein
 ICE 3neo (BR 408) ist.
 
-Drei Ebenen, um trotzdem hinzukommen:
+Im Nerd-Modus bewertest du deshalb unter **Lieblingszüge** die Fahrzeuge selbst —
+ICE 4, ICE 3neo, Giruno, railjet und so weiter, jeweils von −5 (meiden) bis +5
+(bevorzugen). Die Bewertung greift, sobald das Fahrzeug bekannt ist. Dafür gibt
+es genau zwei Wege:
 
-1. **Grundbewertung je Gattung** in `assets/js/data/trains.js` — ICE 8, RJX 8,
-   EC 6, IC 6, Regionalzug 4 usw. Kannst du direkt in der Datei ändern.
-2. **Eigene Regeln** im Nerd-Modus: Gattung plus optionaler Zugnummernbereich,
-   Bewertung −5 bis +5. Damit bildest du deine Erfahrung ab, etwa „ICE-Läufe in
-   diesem Nummernbereich sind meist ICE 4". Die Regeln liegen im localStorage.
-3. **Wagenreihung** (optional, siehe unten) — liefert die echte Baureihe, aber
-   nur für deutsche Fernzüge am Reisetag.
+1. **Die Gattung lässt nur ein Fahrzeug zu.** railjet, Nightjet, WESTbahn und
+   TGV sind damit immer eindeutig — im UI mit „immer erkennbar" markiert.
+2. **Die Wagenreihung liefert die Baureihe** (BR 412 → ICE 4). Nur deutscher
+   Fernverkehr, nur am Reisetag, und nur wenn in `config.php` aktiviert.
+
+Ist das Fahrzeug unbekannt, greift die Gattungsbewertung aus
+`assets/js/data/trains.js` — das Tool rät nicht. An jeder Verbindung steht, ob
+das Modell erkannt wurde und woher.
+
+Die frühere Variante mit Zugnummernbereichen ist entfallen: Nummernkreise sind
+nicht stabil genug, um daraus verlässlich auf eine Baureihe zu schließen.
 
 ### Wagenreihung aktivieren
 
@@ -224,6 +247,54 @@ damit funktioniert sie auch hinter strengen Content-Security-Policies. Pro
 Abschnitt werden höchstens 60 Stützpunkte übertragen, das reicht für eine
 Übersicht und hält die Antwort klein.
 
+**Beschriftungen überlappen nicht.** Für jeden Halt werden acht Positionen rund
+um den Punkt durchprobiert; passt keine kollisionsfrei ins Bild, bleibt der Name
+weg — ein fehlender Name ist besser als zwei übereinandergedruckte. Start und
+Ziel haben dabei Vorrang.
+
+Auf schmalen Bildschirmen wechselt die Karte ins Hochformat, weil dort vertikal
+mehr Platz ist. Beim Drehen des Telefons wird sie neu gezeichnet.
+
+### Verkehrsmittel filtern
+
+Unter **Verkehrsmittel** lassen sich Gruppen abwählen — am häufigsten wohl Bus
+und Schienenersatzverkehr. Der Filter greift schon bei der Suche, nicht erst in
+der Anzeige, und gilt für Fahrplan und Preisabfrage gleichermaßen.
+
+Die zugrunde liegenden HAFAS-Produktklassen sind nicht geraten, sondern
+nachgemessen (`api/lib/Products.php`):
+
+| Bit | Wert | Gattungen |
+|---|---|---|
+| 0 | 1 | ICE, RJ, RJX |
+| 1 | 2 | Schienenersatzverkehr |
+| 2 | 4 | EC, IC, IR |
+| 3 | 8 | NJ, EN, FLX |
+| 4 | 16 | RE, RB, R, REX |
+| 5 | 32 | S-Bahn |
+| 6 | 64 | Bus |
+| 8 | 256 | U-Bahn |
+| 9 | 512 | Tram |
+| 12 | 4096 | WESTbahn |
+
+### Über eine bestimmte Stadt
+
+Im Nerd-Modus lässt sich ein Zwischenhalt erzwingen — etwa um Zürich–Wien über
+München statt über den Arlberg zu führen. Verifiziert: ohne Vorgabe liefert die
+Suche die Arlberg-Route, mit Vorgabe „München" ausschließlich Verbindungen über
+München.
+
+### Ticketshops
+
+An jeder Verbindung stehen die Shops der berührten Länder, das Startland zuerst:
+Zürich–München ergibt SBB und DB, Wien–München ÖBB und DB.
+
+Die ÖBB- und DB-Links sind mit Orten, Datum und Zeit vorbelegt. Der SBB-Link ist
+mit `*` markiert: Der alte Deeplink `fahrplan.xhtml` liefert inzwischen
+durchgehend HTTP 400, und ob die Nachfolgeseite die Parameter übernimmt, lässt
+sich serverseitig nicht prüfen, weil die Suche clientseitig aufgebaut wird. Im
+Zweifel landest du auf der Fahrplansuche und trägst die Orte selbst ein.
+
 ### Abos und Preisschätzung
 
 Die Reise wird in Länderanteile zerlegt — über die **Zwischenhalte**, die jeweils
@@ -235,12 +306,14 @@ angewendet:
 |---|---|---|
 | Halbtax | 50 % auf den CH-Anteil | |
 | GA | CH-Anteil frei | |
-| **GA Night** | CH-Anteil frei | nur 19–5 Uhr, 2. Klasse |
-| **seven25** | CH-Anteil frei | nur 19–5 Uhr, 2. Klasse |
+| GA Night | CH-Anteil frei | nur 19–5 Uhr, 2. Klasse |
 | BahnCard 25 / 50 / 100 | 25 % / 50 % / ganz auf den DE-Anteil | Echtpreis von der DB |
-| **Deutschlandticket** | DE-Anteil frei | **nur Nahverkehr**, nicht ICE/IC/EC |
+| Deutschlandticket | DE-Anteil frei | **nur Nahverkehr**, nicht ICE/IC/EC |
 | VORTEILScard | 45 % auf den AT-Anteil | |
 | KlimaTicket | AT-Anteil frei | |
+
+*seven25* ist kein eigener Eintrag — es ist dasselbe Produkt wie GA Night, nur
+der Tarif für unter 25-Jährige.
 
 Zwei Sonderfälle sind hinterlegt: Die BahnCard 50 gibt auf Sparpreise nur 25 %.
 Und beim Deutschlandticket verlässt sich das Tool nicht auf die Gattung allein —
@@ -277,8 +350,8 @@ public/
 │       ├── api.js                Aufrufe ans eigene Backend
 │       ├── scoring.js            Bewertungsmodelle
 │       ├── render.js             Ergebnisdarstellung
-│       ├── map.js                SVG-Routenkarte
-│       └── data/trains.js        Zuggattungen und Komfortwerte
+│       ├── map.js                SVG-Routenkarte inkl. Label-Platzierung
+│       └── data/trains.js        Gattungen, Fahrzeugmodelle, Komfortwerte
 └── api/
     ├── index.php                 Router, führt Fahrplan und Preise zusammen
     ├── config.php                Einzige Datei, die du anfassen musst
@@ -286,6 +359,8 @@ public/
         ├── Http.php              cURL-Wrapper inkl. Browser-TLS-Profil
         ├── Cache.php             Dateicache, degradiert still
         ├── Fares.php             Abo- und Preislogik
+        ├── Products.php          Verkehrsmittel-Gruppen und Bitmasken
+        ├── Shops.php             Buchungs-Deeplinks je Land
         └── Providers/
             ├── OebbHafas.php     Fahrplan, Zuggattungen, Ländercodes, Geometrie
             ├── DbVendo.php       Echtpreise
@@ -303,8 +378,9 @@ Alles per GET auf `api/`:
 | `?action=locations&q=Bern` | Stationssuche |
 | `?action=journeys&from=…&to=…&date=…&time=…` | Verbindungen inklusive Preis |
 
-`journeys` versteht zusätzlich `discounts` (kommagetrennt), `class` (1/2),
-`results`, `arrival=1` und `via`.
+`journeys` versteht zusätzlich `discounts` (kommagetrennt), `products`
+(kommagetrennt, leer = alle), `class` (1/2), `results`, `arrival=1` und `via`
+(EVA-Nummern, kommagetrennt).
 
 ---
 
@@ -318,7 +394,15 @@ Alles per GET auf `api/`:
 `?action=catalogue` — im UI musst du nichts anfassen. Soll das Abo auch an die DB
 durchgereicht werden, zusätzlich in `DbVendo::DISCOUNT_MAP` eintragen.
 
-**Zugkomfort:** `assets/js/data/trains.js`, Feld `comfort` je Gattung.
+**Zugkomfort:** `assets/js/data/trains.js` — `TRAIN_TYPES` für die Gattungen,
+`TRAIN_MODELS` für die Fahrzeuge. Ein neues Modell braucht `label`, die
+`categories`, unter denen es fährt, und — falls die Wagenreihung es melden soll —
+die `series` (Baureihennummern). `sole: true` bedeutet: diese Gattung fährt
+praktisch nur dieses Fahrzeug, die Zuordnung ist dann auch ohne Wagenreihung
+eindeutig.
+
+**Verkehrsmittel-Gruppen:** `api/lib/Products.php`. Dort stehen Bitmaske und
+DB-Gattungsnamen nebeneinander; das Frontend zieht die Liste automatisch.
 
 **Cache-Zeiten:** `api/config.php` → `cache_ttl`. Standard: Orte 1 Tag,
 Verbindungen 5 Minuten.
