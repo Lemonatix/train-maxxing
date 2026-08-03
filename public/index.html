@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zugverbindungen vergleichen — CH · DE · AT</title>
+  <meta name="description" content="Vergleicht Zugverbindungen durch die Schweiz, Deutschland und Österreich nach Preis, Zeit und Zugkomfort — mit Berücksichtigung von Abos.">
+
+  <!-- Gleiche Schriften wie mika-riesterer.de. Ist das Tool in die Website
+       eingebettet, sind sie ohnehin geladen und diese Zeilen können weg. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body data-mode="normal">
+
+<div class="wrap">
+
+  <header class="page-head">
+    <div>
+      <h1>Zugverbindungen vergleichen</h1>
+      <p class="sub">Schweiz · Deutschland · Österreich — nach Preis, Zeit und Zug.</p>
+    </div>
+    <div class="modes" role="group" aria-label="Modus">
+      <button type="button" data-mode="normal" class="mode-btn is-active" aria-pressed="true">
+        Normal
+        <small>Preis &amp; Zeit</small>
+      </button>
+      <button type="button" data-mode="nerd" class="mode-btn" aria-pressed="false">
+        Nerd
+        <small>Zug, Strecke, Komfort</small>
+      </button>
+    </div>
+  </header>
+
+  <form id="search-form" class="panel">
+
+    <div class="row row--stations">
+      <div class="field field--grow">
+        <label for="from">Von</label>
+        <input type="text" id="from" autocomplete="off" placeholder="z.B. Zürich HB"
+               role="combobox" aria-expanded="false" aria-controls="from-list" aria-autocomplete="list">
+        <ul class="ac" id="from-list" role="listbox" hidden></ul>
+      </div>
+
+      <button type="button" id="swap" class="swap" title="Start und Ziel tauschen" aria-label="Start und Ziel tauschen">⇅</button>
+
+      <div class="field field--grow">
+        <label for="to">Nach</label>
+        <input type="text" id="to" autocomplete="off" placeholder="z.B. Wien Hbf"
+               role="combobox" aria-expanded="false" aria-controls="to-list" aria-autocomplete="list">
+        <ul class="ac" id="to-list" role="listbox" hidden></ul>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="date">Datum</label>
+        <input type="date" id="date">
+      </div>
+      <div class="field">
+        <label for="time">Uhrzeit</label>
+        <input type="time" id="time" value="08:00">
+      </div>
+      <div class="field field--check">
+        <label class="check">
+          <input type="checkbox" id="arrival">
+          <span>als Ankunftszeit</span>
+        </label>
+      </div>
+      <div class="field">
+        <label for="class">Klasse</label>
+        <select id="class">
+          <option value="2">2. Klasse</option>
+          <option value="1">1. Klasse</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="results">Anzahl</label>
+        <select id="results">
+          <option value="6">6 Verbindungen</option>
+          <option value="8" selected>8 Verbindungen</option>
+          <option value="12">12 Verbindungen</option>
+        </select>
+      </div>
+    </div>
+
+    <details class="section" open>
+      <summary>Meine Abos</summary>
+      <p class="hint">
+        Wähle aus, was du besitzt. Die Abos werden bei der Preisberechnung auf den
+        jeweiligen Länderanteil der Strecke angewendet.
+      </p>
+      <div id="abos" class="abos">
+        <p class="hint">Wird geladen …</p>
+      </div>
+    </details>
+
+    <!-- Nur im Nerd-Modus sichtbar -->
+    <div class="nerd-only">
+
+      <details class="section" open>
+        <summary>Was ist dir was wert?</summary>
+        <p class="hint">
+          Damit wird ausgerechnet, ob sich eine längere, aber angenehmere Fahrt lohnt.
+          Alle Verbindungen bekommen „effektive Kosten“ aus Preis, Zeit, Umstiegen und Komfort.
+        </p>
+
+        <div class="slider">
+          <label for="time-value">Wert einer Reisestunde</label>
+          <input type="range" id="time-value" min="0" max="40" step="1" value="12">
+          <output id="time-value-out">12 € / Stunde</output>
+          <p class="hint">Hoch = du willst schnell ankommen. Niedrig = Zeit im Zug stört dich nicht.</p>
+        </div>
+
+        <div class="slider">
+          <label for="comfort-value">Wert einer Komfortstufe</label>
+          <input type="range" id="comfort-value" min="0" max="10" step="0.5" value="2.5">
+          <output id="comfort-value-out">2.5 € je Komfortstufe und Stunde</output>
+          <p class="hint">
+            Hoch = du nimmst Umwege für den bequemeren Zug in Kauf. Der Bonus wächst mit der Fahrzeit.
+          </p>
+        </div>
+
+        <div class="slider">
+          <label for="change-cost">Aufwand je Umstieg</label>
+          <input type="range" id="change-cost" min="0" max="30" step="1" value="4">
+          <output id="change-cost-out">4 € je Umstieg</output>
+        </div>
+      </details>
+
+      <details class="section">
+        <summary>Eigene Zug-Regeln</summary>
+        <p class="hint">
+          Die Fahrplandaten enthalten Gattung und Zugnummer, aber <strong>nicht die Baureihe</strong> —
+          ob ein ICE ein ICE 4 ist, steht dort nicht drin. Mit Regeln auf Zugnummernbereiche
+          kannst du deine eigene Erfahrung abbilden und bestimmte Läufe bevorzugen oder meiden.
+        </p>
+
+        <div class="rule-form">
+          <div class="field">
+            <label for="rule-category">Gattung</label>
+            <select id="rule-category"></select>
+          </div>
+          <div class="field field--narrow">
+            <label for="rule-from">Nr. ab</label>
+            <input type="number" id="rule-from" placeholder="beliebig">
+          </div>
+          <div class="field field--narrow">
+            <label for="rule-to">Nr. bis</label>
+            <input type="number" id="rule-to" placeholder="beliebig">
+          </div>
+          <div class="field field--narrow">
+            <label for="rule-bonus">Bewertung</label>
+            <input type="range" id="rule-bonus" min="-5" max="5" step="1" value="2">
+            <output id="rule-bonus-out">+2</output>
+          </div>
+          <button type="button" id="rule-add" class="btn btn--ghost">Regel hinzufügen</button>
+        </div>
+
+        <div id="rule-list" class="rule-list"></div>
+      </details>
+
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="btn btn--primary">Verbindungen suchen</button>
+      <span id="status" class="status"></span>
+    </div>
+
+  </form>
+
+  <div id="notices" class="notices"></div>
+
+  <!-- Routenkarte: reines SVG aus den Fahrplandaten, keine Kartenkacheln
+       und keine externen Requests. -->
+  <section id="map" class="map is-empty" aria-label="Routenkarte"></section>
+
+  <main id="results-list" class="results" aria-live="polite"></main>
+
+  <footer class="page-foot">
+    <p>
+      Fahrplandaten von der ÖBB, Preise soweit verfügbar von der DB. Preise ohne
+      Kennzeichnung „Echtpreis“ sind Schätzungen und nicht verbindlich —
+      maßgeblich ist immer der Ticketshop.
+    </p>
+  </footer>
+
+</div>
+
+<script type="module" src="assets/js/app.js"></script>
+</body>
+</html>

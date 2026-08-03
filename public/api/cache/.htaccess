@@ -1,0 +1,9 @@
+# Cache-Dateien enthalten deine Suchanfragen und duerfen nicht oeffentlich
+# abrufbar sein. Apache 2.4 und aelter.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

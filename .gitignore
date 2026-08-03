@@ -1,0 +1,7 @@
+# Laufzeit-Cache des Backends (enthaelt Suchanfragen)
+public/api/cache/*
+!public/api/cache/.gitkeep
+!public/api/cache/.htaccess
+
+.DS_Store
+*.log

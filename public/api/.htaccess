@@ -1,0 +1,11 @@
+# config.php nicht direkt ausliefern (greift nur, falls PHP mal nicht laeuft
+# und der Server die Datei als Text ausgibt).
+<Files "config.php">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</Files>
