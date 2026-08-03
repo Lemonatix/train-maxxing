@@ -27,7 +27,7 @@ final class Products
 {
     private const GROUPS = [
         'highspeed' => [
-            'label' => 'Hochgeschwindigkeit',
+            'label' => 'High-speed',
             'hint'  => 'ICE, railjet',
             'bits'  => 1,
             'db'    => ['ICE'],
@@ -70,7 +70,7 @@ final class Products
         ],
         'bus' => [
             'label' => 'Bus',
-            'hint'  => 'inkl. Schienenersatzverkehr',
+            'hint'  => 'inkl. SEV',
             'bits'  => 64 | 2,
             'db'    => ['BUS'],
         ],
