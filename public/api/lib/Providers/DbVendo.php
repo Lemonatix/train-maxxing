@@ -70,14 +70,22 @@ final class DbVendo
             if (!is_array($item)) {
                 continue;
             }
-            $eva = (string) ($item['extId'] ?? '');
+            // Adressen und Sehenswuerdigkeiten sind fuer eine Zugsuche nutzlos.
+            if (($item['type'] ?? 'ST') !== 'ST') {
+                continue;
+            }
+            $eva  = (string) ($item['extId'] ?? '');
+            $id   = (string) ($item['id'] ?? '');
+            $crd  = $this->coordsFromId($id);
+
             $out[] = [
-                'id'      => (string) ($item['id'] ?? ''),   // "A=1@O=...@L=8503000@"
-                'evaId'   => $eva,
-                'name'    => (string) ($item['name'] ?? ''),
-                'country' => $this->countryFromEva($eva),
-                'lat'     => $item['lat'] ?? null,
-                'lon'     => $item['lon'] ?? null,
+                'id'       => $id,                 // "A=1@O=...@X=...@Y=...@L=8503000@"
+                'evaId'    => $eva,
+                'name'     => (string) ($item['name'] ?? ''),
+                'country'  => $this->countryFromEva($eva),
+                'lat'      => $item['lat'] ?? $crd['lat'],
+                'lon'      => $item['lon'] ?? $crd['lon'],
+                'products' => array_values((array) ($item['products'] ?? [])),
             ];
         }
 
@@ -214,12 +222,14 @@ final class DbVendo
             $stops = [];
             foreach (($a['halte'] ?? []) as $h) {
                 $eva = (string) ($h['extId'] ?? '');
+                // Die Koordinaten stecken nur in der ID, nicht in eigenen Feldern.
+                $crd = $this->coordsFromId((string) ($h['id'] ?? ''));
                 $stops[] = [
                     'id'        => $eva,
                     'name'      => (string) ($h['name'] ?? ''),
                     'country'   => $this->countryFromEva($eva),
-                    'lat'       => null,
-                    'lon'       => null,
+                    'lat'       => $crd['lat'],
+                    'lon'       => $crd['lon'],
                     'arrival'   => $h['ankunft']['sollzeit'] ?? null,
                     'departure' => $h['abfahrt']['sollzeit'] ?? null,
                     'platform'  => $h['gleis'] ?? null,
@@ -295,6 +305,29 @@ final class DbVendo
             }
         }
         return '';
+    }
+
+    /**
+     * Zieht die Koordinaten aus einer DB-Location-ID.
+     *
+     * Die IDs sehen so aus:
+     *   A=1@O=Zürich HB@X=8540211@Y=47378177@U=80@L=8503000@
+     * X ist die Laenge, Y die Breite, beide mal 1e6. Ein eigenes Feld dafuer
+     * gibt es in den Halten nicht - deshalb dieser Weg.
+     *
+     * @return array{lat:?float,lon:?float}
+     */
+    private function coordsFromId(string $id): array
+    {
+        $lat = null;
+        $lon = null;
+        if (preg_match('/@Y=(-?\d+)@/', $id, $m)) {
+            $lat = ((int) $m[1]) / 1000000;
+        }
+        if (preg_match('/@X=(-?\d+)@/', $id, $m)) {
+            $lon = ((int) $m[1]) / 1000000;
+        }
+        return ['lat' => $lat, 'lon' => $lon];
     }
 
     private function countryFromEva(string $eva): string

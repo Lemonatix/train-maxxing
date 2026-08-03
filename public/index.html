@@ -190,9 +190,18 @@
 
   <div id="notices" class="notices"></div>
 
-  <!-- Routenkarte: reines SVG aus den Fahrplandaten, keine Kartenkacheln
-       und keine externen Requests. -->
-  <section id="map" class="map is-empty" aria-label="Routenkarte"></section>
+  <div class="map-wrap">
+    <div class="map-bar">
+      <label class="check">
+        <input type="checkbox" id="live-trains" checked>
+        <span>Züge live anzeigen</span>
+      </label>
+      <span id="live-note" class="map-bar__note"></span>
+    </div>
+    <!-- Routenkarte: Kacheln von OpenStreetMap/CARTO, darüber die Routen
+         als SVG. Die Kachelquelle steht in assets/js/map.js. -->
+    <section id="map" class="map is-empty" aria-label="Routenkarte"></section>
+  </div>
 
   <main id="results-list" class="results" aria-live="polite"></main>
 

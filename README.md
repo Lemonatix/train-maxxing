@@ -237,23 +237,39 @@ drei Wochen gibt es keine Wagenreihung — dafür sind die eigenen Regeln da.
 
 ### Karte
 
-Unter den Hinweisen liegt eine Karte mit allen gefundenen Routen; die ausgewählte
-ist hervorgehoben. Klick auf eine Linie wählt die Verbindung aus, Klick auf eine
-Verbindung hebt die Linie hervor — beides ist synchron.
+Eine echte Slippy-Map mit Kartenhintergrund: ziehen zum Verschieben, scrollen
+oder Pinch zum Zoomen, dazu Knöpfe für Zoom und „ganze Route zeigen". Alle
+gefundenen Routen liegen übereinander, die ausgewählte ist hervorgehoben. Klick
+auf eine Linie wählt die Verbindung, Klick auf eine Verbindung hebt die Linie
+hervor — beides synchron.
 
-Die Karte ist **reines SVG**, gezeichnet aus den Polylines der Fahrplandaten in
-Web-Mercator. Keine Kartenkacheln, keine externen Requests, kein Tracking —
-damit funktioniert sie auch hinter strengen Content-Security-Policies. Pro
-Abschnitt werden höchstens 60 Stützpunkte übertragen, das reicht für eine
-Übersicht und hält die Antwort klein.
+Gebaut ohne Leaflet: ein Kachel-Layer aus `<img>`-Elementen, darüber ein SVG mit
+Routen, Halten und Zugpositionen. Das spart ein mitzulieferndes Paket und hält
+die Kachelquelle an einer Stelle (`TILES` in `assets/js/map.js`).
+
+**Zur Kachelquelle:** Voreingestellt ist CARTO „dark matter" auf
+OpenStreetMap-Basis, passend zum dunklen Design. Damit sieht ein fremder Server
+die IP-Adressen deiner Besucher — das ist der Preis für den Hintergrund. Wer das
+nicht will, setzt `TILES.url` auf `null`; dann rendert die Karte wie zuvor nur
+die Routen, ganz ohne externe Requests. Die Attribution unten rechts ist bei
+OSM-Kacheln Pflicht und darf nicht entfernt werden.
 
 **Beschriftungen überlappen nicht.** Für jeden Halt werden acht Positionen rund
 um den Punkt durchprobiert; passt keine kollisionsfrei ins Bild, bleibt der Name
-weg — ein fehlender Name ist besser als zwei übereinandergedruckte. Start und
-Ziel haben dabei Vorrang.
+weg — ein fehlender Name ist besser als zwei übereinandergedruckte. Ab Zoomstufe
+9 werden auch Zwischenhalte beschriftet.
 
-Auf schmalen Bildschirmen wechselt die Karte ins Hochformat, weil dort vertikal
-mehr Platz ist. Beim Drehen des Telefons wird sie neu gezeichnet.
+### Wo fährt der Zug gerade?
+
+Über der Karte lässt sich **„Züge live anzeigen"** einschalten. Dann erscheinen
+alle Züge, die im sichtbaren Ausschnitt gerade unterwegs sind, als pulsierende
+Punkte — mit Gattung, Nummer und Ziel im Tooltip.
+
+Die Positionen kommen von HAFAS (`JourneyGeoPos`) und werden aus Fahrplan und
+Echtzeitlage **berechnet**, nicht per GPS geortet. Sie sind also eine gute
+Näherung, keine Ortung auf den Meter. Beim Verschieben und Zoomen wird
+nachgeladen (gedrosselt, 30 Sekunden Cache); ein zu großer Ausschnitt liefert
+bewusst nichts, weil das nur Rauschen wäre und die Quelle belastet.
 
 ### Verkehrsmittel filtern
 
@@ -284,16 +300,45 @@ München statt über den Arlberg zu führen. Verifiziert: ohne Vorgabe liefert d
 Suche die Arlberg-Route, mit Vorgabe „München" ausschließlich Verbindungen über
 München.
 
+### Ortssuche
+
+Zwei Quellen werden zusammengeführt, weil keine allein reicht: Die ÖBB-Suche ist
+auf Österreich geeicht — „Marienplatz" liefert dort Graz, Viehofen und
+Hafnerbach, aber kein München. Die DB-Suche kennt den deutschen Nahverkehr bis
+zur einzelnen U-Bahn-Station, ist dafür bei kleinen Halten in AT und CH dünner.
+
+Sortiert wird in drei Stufen:
+
+1. **Namensrelevanz** — exakt, als ganzes Wort, enthalten. Das dominiert alles
+   andere. Ohne diese Stufe gewinnt „Schendlingen (Bregenz)" gegen „Sendlinger
+   Tor, München", weil HAFAS unscharf sucht und Schendlingen ein
+   Fernverkehrshalt ist. Treffer ohne jeden Namensbezug fliegen raus.
+2. **Bedeutung des Ortes** — gewichtet nach Verkehrsangebot. U-Bahn und S-Bahn
+   zählen hoch, weil es sie nur in Großstädten gibt; das ist der beste
+   verfügbare Ersatz für „Größe der Stadt", die keine der APIs mitliefert.
+3. **Rang der Quelle**, bei Gleichstand mit Vorrang für die DB.
+
+Die Fahrplansuche läuft weiter über die ÖBB — die kennt deutsche EVA-Nummern
+problemlos, geprüft mit `8004135` (München Marienplatz).
+
 ### Ticketshops
 
 An jeder Verbindung stehen die Shops der berührten Länder, das Startland zuerst:
 Zürich–München ergibt SBB und DB, Wien–München ÖBB und DB.
 
-Die ÖBB- und DB-Links sind mit Orten, Datum und Zeit vorbelegt. Der SBB-Link ist
-mit `*` markiert: Der alte Deeplink `fahrplan.xhtml` liefert inzwischen
-durchgehend HTTP 400, und ob die Nachfolgeseite die Parameter übernimmt, lässt
-sich serverseitig nicht prüfen, weil die Suche clientseitig aufgebaut wird. Im
-Zweifel landest du auf der Fahrplansuche und trägst die Orte selbst ein.
+**Der ÖBB-Link** kommt fertig aus der Fahrplanantwort und ist zuverlässig
+vorbelegt.
+
+**Der DB-Link** war mit bloßen Ortsnamen kaputt — die Buchungsstrecke meldete
+„Keine Verbindungen gefunden" und ignorierte das Datum. Er enthält jetzt die
+vollständigen Location-IDs samt Koordinaten (`soid`, `zoid`, `soei`, `zoei`).
+Abschließend verifizieren ließ sich das nicht: bahn.de sperrte den Testbrowser
+nach wenigen Aufrufen mit Fehler 751 aus. Deshalb ist er wie der SBB-Link mit
+`*` markiert — bitte einmal gegenprüfen.
+
+**Der SBB-Link** führt auf die Fahrplansuche. Der alte Deeplink
+`fahrplan.xhtml` liefert durchgehend HTTP 400, und ob die Nachfolgeseite die
+Parameter übernimmt, lässt sich serverseitig nicht feststellen.
 
 ### Abos und Preisschätzung
 
@@ -360,6 +405,7 @@ public/
         ├── Cache.php             Dateicache, degradiert still
         ├── Fares.php             Abo- und Preislogik
         ├── Products.php          Verkehrsmittel-Gruppen und Bitmasken
+        ├── Locations.php         Ortssuche aus beiden Quellen
         ├── Shops.php             Buchungs-Deeplinks je Land
         └── Providers/
             ├── OebbHafas.php     Fahrplan, Zuggattungen, Ländercodes, Geometrie
@@ -377,6 +423,7 @@ Alles per GET auf `api/`:
 | `?action=catalogue` | Abo-Liste fürs Frontend |
 | `?action=locations&q=Bern` | Stationssuche |
 | `?action=journeys&from=…&to=…&date=…&time=…` | Verbindungen inklusive Preis |
+| `?action=livetrains&bbox=süd,west,nord,ost` | Züge, die dort gerade fahren |
 
 `journeys` versteht zusätzlich `discounts` (kommagetrennt), `products`
 (kommagetrennt, leer = alle), `class` (1/2), `results`, `arrival=1` und `via`

@@ -22,6 +22,37 @@ final class OebbHafas
     /** Stuetzpunkte je Abschnitt fuer die Karte - haelt die Antwort klein. */
     private const MAX_GEOMETRY_POINTS = 60;
 
+    /**
+     * HAFAS-Produktklassen auf die Gattungsnamen der DB abbilden.
+     * Nur so lassen sich Treffer beider Quellen gleich bewerten - sonst
+     * gewinnt ein oesterreichischer Dorfhalt gegen einen Muenchner
+     * U-Bahn-Knoten, bloss weil er pauschal eingestuft wurde.
+     */
+    private const CLS_TO_PRODUCT = [
+        1    => 'ICE',
+        2    => 'BUS',
+        4    => 'EC_IC',
+        8    => 'EC_IC',
+        16   => 'REGIONAL',
+        32   => 'SBAHN',
+        64   => 'BUS',
+        256  => 'UBAHN',
+        512  => 'TRAM',
+        4096 => 'REGIONAL',
+    ];
+
+    /** @return string[] */
+    private static function productsFromCls(int $pCls): array
+    {
+        $out = [];
+        foreach (self::CLS_TO_PRODUCT as $bit => $name) {
+            if (($pCls & $bit) !== 0) {
+                $out[$name] = true;
+            }
+        }
+        return array_keys($out);
+    }
+
     private Http $http;
     private array $cfg;
 
@@ -60,6 +91,9 @@ final class OebbHafas
                 'lat'          => isset($l['crd']['y']) ? $l['crd']['y'] / 1000000 : null,
                 'lon'          => isset($l['crd']['x']) ? $l['crd']['x'] / 1000000 : null,
                 'longDistance' => ($pCls & self::CLS_LONG_DISTANCE) !== 0,
+                // Gleiche Produktnamen wie bei der DB, damit beide Quellen
+                // nach denselben Massstaeben bewertet werden koennen.
+                'products'     => self::productsFromCls($pCls),
             ];
         }
 
@@ -148,6 +182,67 @@ final class OebbHafas
         }
 
         return ['ok' => true, 'error' => null, 'data' => $journeys];
+    }
+
+    /**
+     * Zuege, die gerade in einem Kartenausschnitt unterwegs sind.
+     *
+     * HAFAS berechnet die Position aus Fahrplan und Echtzeitlage
+     * (trainPosMode CALC). Das ist keine GPS-Ortung, kommt der Realitaet aber
+     * nahe genug, um zu sehen wo ein Zug gerade steckt.
+     *
+     * @param float $south,$west,$north,$east Grad
+     * @return array{ok:bool,error:?string,data:array}
+     */
+    public function liveTrains(float $south, float $west, float $north, float $east, int $max = 40, int $productMask = 0): array
+    {
+        $req = [
+            'maxJny'       => $max,
+            'onlyRT'       => false,
+            'date'         => (new DateTimeImmutable('now'))->format('Ymd'),
+            'time'         => (new DateTimeImmutable('now'))->format('His'),
+            'rect'         => [
+                'llCrd' => ['x' => (int) round($west * 1000000), 'y' => (int) round($south * 1000000)],
+                'urCrd' => ['x' => (int) round($east * 1000000), 'y' => (int) round($north * 1000000)],
+            ],
+            'perSize'      => 120000,
+            'perStep'      => 30000,
+            'ageOfReport'  => true,
+            'trainPosMode' => 'CALC',
+        ];
+
+        if ($productMask > 0) {
+            $req['jnyFltrL'] = [['type' => 'PROD', 'mode' => 'INC', 'value' => $productMask]];
+        }
+
+        $res = $this->call('JourneyGeoPos', $req);
+        if (!$res['ok']) {
+            return $res;
+        }
+
+        $body  = $res['data']['res'] ?? [];
+        $prodL = $body['common']['prodL'] ?? [];
+        $out   = [];
+
+        foreach (($body['jnyL'] ?? []) as $jny) {
+            $pos = $jny['pos'] ?? null;
+            if ($pos === null || !isset($pos['x'], $pos['y'])) {
+                continue;
+            }
+            $prod = $prodL[$jny['prodX'] ?? -1] ?? [];
+            $ctx  = $prod['prodCtx'] ?? [];
+
+            $out[] = [
+                'lat'         => $pos['y'] / 1000000,
+                'lon'         => $pos['x'] / 1000000,
+                'category'    => trim((string) ($ctx['catOut'] ?? '')),
+                'trainNumber' => trim((string) ($ctx['num'] ?? '')),
+                'name'        => trim((string) ($prod['nameS'] ?? $prod['name'] ?? '')),
+                'direction'   => trim((string) ($jny['dirTxt'] ?? '')),
+            ];
+        }
+
+        return ['ok' => true, 'error' => null, 'data' => $out];
     }
 
     // ------------------------------------------------------------------

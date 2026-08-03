@@ -35,7 +35,7 @@ final class Shops
      * @param string  $time       HH:MM
      * @return array<int,array{id:string,label:string,url:string,prefilled:bool}>
      */
-    public static function forJourney(array $journey, string $date, string $time): array
+    public static function forJourney(array $journey, string $date, string $time, int $travelClass = 2): array
     {
         $legs = array_values(array_filter(
             $journey['legs'] ?? [],
@@ -83,13 +83,60 @@ final class Shops
 
         $out = [];
         foreach ($countries as $c) {
-            $entry = self::build($c, $journey, $fromName, $toName, $fromEva, $toEva, $depDate, $depTime);
+            $entry = self::build($c, $journey, $fromName, $toName, $fromEva, $toEva, $depDate, $depTime, $travelClass);
             if ($entry !== null) {
                 $out[] = $entry;
             }
         }
 
         return $out;
+    }
+
+    /**
+     * Start- und Zielhalt einer Verbindung.
+     *
+     * @return array{from:array,to:array}
+     */
+    private static function endpoints(array $journey): array
+    {
+        $legs = array_values(array_filter(
+            $journey['legs'] ?? [],
+            static fn($l) => ($l['mode'] ?? '') === 'train'
+        ));
+        if ($legs === []) {
+            return ['from' => [], 'to' => []];
+        }
+        return [
+            'from' => $legs[0]['from'] ?? [],
+            'to'   => $legs[count($legs) - 1]['to'] ?? [],
+        ];
+    }
+
+    /**
+     * Baut eine DB-Location-ID im HAFAS-Format nach.
+     *
+     *   A=1@O=Zürich HB@X=8540211@Y=47378177@U=80@L=8503000@
+     *
+     * X und Y sind Laenge und Breite mal 1e6. Ohne Koordinaten bleibt die ID
+     * unvollstaendig, wird von der Buchungsstrecke aber trotzdem akzeptiert.
+     */
+    private static function dbLocationId(string $name, array $loc, string $eva): string
+    {
+        $parts = ['A=1', 'O=' . $name];
+
+        $lon = $loc['lon'] ?? null;
+        $lat = $loc['lat'] ?? null;
+        if ($lon !== null && $lat !== null) {
+            $parts[] = 'X=' . (int) round($lon * 1000000);
+            $parts[] = 'Y=' . (int) round($lat * 1000000);
+        }
+
+        $parts[] = 'U=80';
+        if ($eva !== '') {
+            $parts[] = 'L=' . $eva;
+        }
+
+        return implode('@', $parts) . '@';
     }
 
     private static function build(
@@ -100,7 +147,8 @@ final class Shops
         string $fromEva,
         string $toEva,
         string $date,
-        string $time
+        string $time,
+        int $travelClass
     ): ?array {
         switch ($country) {
             case 'at':
@@ -120,16 +168,39 @@ final class Shops
 
             case 'de':
                 // Die Buchungsstrecke liest ihre Parameter aus dem Fragment.
-                $frag = 'sts=true'
-                    . '&so=' . rawurlencode($fromName)
-                    . '&zo=' . rawurlencode($toName)
-                    . '&hd=' . rawurlencode($date . 'T' . $time . ':00')
-                    . '&hza=D&ar=false&s=true&d=false&hz=%5B%5D&fm=false&cb=0';
+                // Mit blossen Ortsnamen (so/zo) meldet sie "Keine Verbindungen
+                // gefunden" und ignoriert das Datum - sie braucht die
+                // vollstaendigen Location-IDs inklusive Koordinaten.
+                $ends = self::endpoints($journey);
+                $soid = self::dbLocationId($fromName, $ends['from'], $fromEva);
+                $zoid = self::dbLocationId($toName, $ends['to'], $toEva);
+
+                $frag = implode('&', [
+                    'sts=true',
+                    'so=' . rawurlencode($fromName),
+                    'zo=' . rawurlencode($toName),
+                    'soid=' . rawurlencode($soid),
+                    'zoid=' . rawurlencode($zoid),
+                    'sot=ST',
+                    'zot=ST',
+                    'soei=' . rawurlencode($fromEva),
+                    'zoei=' . rawurlencode($toEva),
+                    'hd=' . rawurlencode($date . 'T' . $time . ':00'),
+                    'hza=D',
+                    'hz=' . rawurlencode('[]'),
+                    'ar=false', 's=true', 'd=false',
+                    'vm=00,01,02,03,04,05,06,07,08,09',
+                    'fm=false', 'bp=false',
+                    'kl=' . $travelClass,
+                    'r=' . rawurlencode('13:16:KLASSENLOS:1'),
+                ]);
+
                 return [
                     'id'        => 'de',
                     'label'     => 'DB',
                     'url'       => 'https://www.bahn.de/buchung/fahrplan/suche#' . $frag,
-                    'prefilled' => true,
+                    // Siehe Klassenkommentar: Format nicht abschliessend geprueft.
+                    'prefilled' => false,
                 ];
 
             case 'ch':

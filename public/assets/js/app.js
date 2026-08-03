@@ -9,7 +9,7 @@
 import { api } from './api.js';
 import { rank, highlights } from './scoring.js';
 import { renderResults, renderNotices } from './render.js';
-import { renderMap } from './map.js';
+import { RouteMap } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
 
 // v2: Zugnummern-Regeln wurden durch Modellbewertungen ersetzt.
@@ -21,7 +21,7 @@ const state = {
   to: null,
   via: null,
   date: todayISO(),
-  time: '08:00',
+  time: nowHHMM(),
   arrival: false,
   travelClass: 2,
   results: 8,
@@ -32,6 +32,7 @@ const state = {
   comfortValue: 2.5,
   changeCost: 4,
   modelPrefs: {},      // Modell-ID -> Bonus (-5 … +5)
+  liveTrains: true,    // Zugpositionen auf der Karte
   // Laufzeit
   lastPayload: null,
   ranked: [],
@@ -40,6 +41,7 @@ const state = {
 
 const $ = (sel) => document.querySelector(sel);
 let searchAbort = null;
+let map = null;
 
 // ======================================================================
 // Start
@@ -47,7 +49,11 @@ let searchAbort = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
+  map = new RouteMap($('#map'));
+  // Nach Verschieben oder Zoomen die Zuege im neuen Ausschnitt nachladen.
+  map.onViewChange = scheduleLiveTrains;
   setupMode();
+  setupLiveToggle();
   setupStationInputs();
   setupForm();
   setupNerdControls();
@@ -66,10 +72,12 @@ function loadSettings() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw);
+    // 'time' und 'date' bewusst nicht wiederherstellen: beim Aufruf soll immer
+    // der aktuelle Zeitpunkt stehen, nicht der von letzter Woche.
     for (const key of [
-      'mode', 'from', 'to', 'via', 'time', 'arrival', 'travelClass',
+      'mode', 'from', 'to', 'via', 'arrival', 'travelClass',
       'results', 'discounts', 'products', 'timeValue', 'comfortValue',
-      'changeCost', 'modelPrefs',
+      'changeCost', 'modelPrefs', 'liveTrains',
     ]) {
       if (saved[key] !== undefined) state[key] = saved[key];
     }
@@ -88,6 +96,7 @@ function saveSettings() {
         results: state.results, discounts: state.discounts, products: state.products,
         timeValue: state.timeValue, comfortValue: state.comfortValue,
         changeCost: state.changeCost, modelPrefs: state.modelPrefs,
+        liveTrains: state.liveTrains,
       })
     );
   } catch {
@@ -100,22 +109,31 @@ function saveSettings() {
 // ======================================================================
 
 /**
- * Die Karte waehlt ihr Seitenverhaeltnis nach der Containerbreite. Dreht man
- * das Telefon, muss sie deshalb neu gezeichnet werden.
+ * Die Karte rechnet in Pixeln ihres Containers. Aendert sich dessen Groesse -
+ * Fenster skaliert, Telefon gedreht - muss sie neu gezeichnet werden.
  */
 function setupResize() {
   let timer = null;
-  let lastNarrow = window.innerWidth < 520;
-
   window.addEventListener('resize', () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
-      const narrow = window.innerWidth < 520;
-      if (narrow !== lastNarrow && state.ranked.length > 0) {
-        lastNarrow = narrow;
-        draw();
-      }
-    }, 200);
+      if (state.ranked.length > 0) map.render();
+    }, 180);
+  });
+}
+
+function setupLiveToggle() {
+  const cb = $('#live-trains');
+  if (!cb) return;
+  cb.checked = state.liveTrains;
+  cb.addEventListener('change', (e) => {
+    state.liveTrains = e.target.checked;
+    saveSettings();
+    if (state.liveTrains) scheduleLiveTrains();
+    else {
+      map.setLiveTrains([]);
+      $('#live-note').textContent = '';
+    }
   });
 }
 
@@ -507,7 +525,48 @@ function rerank() {
 function draw() {
   const ranked = state.ranked;
   renderResults($('#results-list'), ranked, highlights(ranked), state, select);
-  renderMap($('#map'), ranked, state.selectedIndex, select);
+  map.setData(ranked, state.selectedIndex, select);
+  scheduleLiveTrains();
+}
+
+// ======================================================================
+// Live-Zuege
+// ======================================================================
+
+let liveTimer = null;
+let liveAbort = null;
+
+/**
+ * Holt die Zuege im aktuellen Kartenausschnitt. Gedrosselt, damit Ziehen und
+ * Zoomen nicht bei jedem Frame eine Anfrage ausloest.
+ */
+function scheduleLiveTrains() {
+  if (!state.liveTrains) {
+    map.setLiveTrains([]);
+    return;
+  }
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(fetchLiveTrains, 600);
+}
+
+async function fetchLiveTrains() {
+  if (!state.liveTrains || state.ranked.length === 0) return;
+
+  if (liveAbort) liveAbort.abort();
+  liveAbort = new AbortController();
+
+  try {
+    const res = await api.liveTrains(map.bounds(), state.products, { signal: liveAbort.signal });
+    map.setLiveTrains(res.trains || []);
+    const box = $('#live-note');
+    if (box) {
+      box.textContent = res.note
+        ? res.note
+        : `${(res.trains || []).length} Züge gerade unterwegs im Ausschnitt`;
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') map.setLiveTrains([]);
+  }
 }
 
 /** Auswahl wechseln - egal ob per Klick auf Karte oder Liste. */
@@ -657,5 +716,11 @@ function setupModels() {
 function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Aktuelle Uhrzeit als HH:MM. */
+function nowHHMM() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 

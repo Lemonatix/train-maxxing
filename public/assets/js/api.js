@@ -48,6 +48,13 @@ export const api = {
 
   locations: (q, opts) => call('locations', { q }, opts),
 
+  /** @param {number[]} bounds [süd, west, nord, ost] */
+  liveTrains: (bounds, products, opts) =>
+    call('livetrains', {
+      bbox: bounds.map((v) => v.toFixed(4)).join(','),
+      products: (products || []).join(','),
+    }, opts),
+
   journeys(params, opts) {
     return call(
       'journeys',

@@ -60,7 +60,7 @@ function renderCard(entry, index, marks, state, onSelect) {
     )
   );
 
-  const left = el('div');
+  const left = el('div', 'journey__main');
   left.append(times, meta);
 
   const right = el('div', 'journey__price-box');

@@ -21,6 +21,7 @@ require __DIR__ . '/lib/Cache.php';
 require __DIR__ . '/lib/Fares.php';
 require __DIR__ . '/lib/Products.php';
 require __DIR__ . '/lib/Shops.php';
+require __DIR__ . '/lib/Locations.php';
 require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
 require __DIR__ . '/lib/Providers/DbWagenreihung.php';
@@ -81,6 +82,9 @@ try {
             break;
         case 'journeys':
             handleJourneys($http, $config, $cache);
+            break;
+        case 'livetrains':
+            handleLiveTrains($http, $config, $cache);
             break;
         default:
             fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys', 400);
@@ -144,15 +148,62 @@ function handleLocations(Http $http, array $config, Cache $cache): void
         ok(['locations' => $cached, 'cached' => true]);
     }
 
-    $oebb = new OebbHafas($http, $config['providers']['oebb']);
-    $res  = $oebb->locations($q, 8);
+    // Beide Quellen: die DB kennt den deutschen Stadtverkehr, die OeBB die
+    // kleinen Halte in AT und CH.
+    $loc = new Locations($http, $config['providers']);
+    $res = $loc->search($q, 10);
 
-    if (!$res['ok']) {
-        fail('Ortssuche fehlgeschlagen: ' . $res['error'], 502);
+    if (!$res['ok'] && $res['data'] === []) {
+        fail('Ortssuche fehlgeschlagen: ' . ($res['error'] ?? 'unbekannt'), 502);
     }
 
     $cache->set($key, $res['data']);
-    ok(['locations' => $res['data'], 'cached' => false]);
+    ok(['locations' => $res['data'], 'sources' => $res['sources'], 'cached' => false]);
+}
+
+/**
+ * Zuege, die gerade im Kartenausschnitt unterwegs sind.
+ * Kurz gecacht, damit Zoomen und Verschieben nicht jedes Mal eine Anfrage
+ * ausloest.
+ */
+function handleLiveTrains(Http $http, array $config, Cache $cache): void
+{
+    $bbox = array_map('trim', explode(',', (string) ($_GET['bbox'] ?? '')));
+    if (count($bbox) !== 4) {
+        fail('Parameter "bbox" erwartet vier Werte: sued,west,nord,ost', 400);
+    }
+
+    [$south, $west, $north, $east] = array_map('floatval', $bbox);
+    if ($south >= $north || $west >= $east) {
+        fail('Ungueltiger Kartenausschnitt.', 400);
+    }
+    // Zu grosse Ausschnitte liefern nur Rauschen und belasten die Quelle.
+    if (($north - $south) > 6 || ($east - $west) > 10) {
+        ok(['trains' => [], 'note' => 'Ausschnitt zu gross - bitte weiter hineinzoomen.']);
+    }
+
+    $products = array_values(array_filter(
+        array_map('trim', explode(',', (string) ($_GET['products'] ?? ''))),
+        static fn($p) => $p !== '' && in_array($p, Products::allIds(), true)
+    ));
+
+    $key = 'live:' . implode(',', array_map(static fn($v) => round((float) $v, 2), $bbox))
+         . ':' . implode('+', $products);
+    $cached = $cache->get($key, 30);
+    if ($cached !== null) {
+        ok(['trains' => $cached, 'cached' => true]);
+    }
+
+    $oebb = new OebbHafas($http, $config['providers']['oebb']);
+    $res  = $oebb->liveTrains($south, $west, $north, $east, 40, Products::bitmask($products));
+
+    if (!$res['ok']) {
+        // Live-Positionen sind Beiwerk - ein Fehler darf die Karte nicht stoeren.
+        ok(['trains' => [], 'error' => $res['error']]);
+    }
+
+    $cache->set($key, $res['data']);
+    ok(['trains' => $res['data'], 'cached' => false]);
 }
 
 function handleJourneys(Http $http, array $config, Cache $cache): void
@@ -262,7 +313,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     foreach ($journeys as $i => $j) {
         $journeys[$i] = Fares::apply($j, $discounts, $travelClass);
         // Ticketshops der beruehrten Laender, Startland zuerst.
-        $journeys[$i]['shops'] = Shops::forJourney($journeys[$i], $date, $time);
+        $journeys[$i]['shops'] = Shops::forJourney($journeys[$i], $date, $time, $travelClass);
     }
 
     $payload = [
