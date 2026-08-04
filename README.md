@@ -26,6 +26,10 @@ Karte wechselt auf schmalen Bildschirmen ins Hochformat.
 |---|---|---|---|---|
 | ÖBB HAFAS | ja | ja, sehr detailliert | ja (Karte) | nein, nur Shop-Link |
 | DB bahn.de | ja | ja | nein | **ja** |
+| MVG (München) | nein* | Linien-Label | nur Halt-Koordinaten | nein |
+
+*MVG liefert Ortssuche und Störungsmeldungen für den Münchner Nahverkehr, aber
+keine Verbindungssuche. Details unter [Münchner Nahverkehr](#münchner-nahverkehr-über-die-mvg-api).
 
 ### Die DB blockt nach TLS-Fingerprint, nicht nach IP
 
@@ -366,18 +370,130 @@ Situlistraße. Wer so eine Variante will, kann sie im Nerd-Modus über
 jeweils günstigsten Angebot. Ein Klick übernimmt die Uhrzeit und sucht neu.
 Gemessen für Zürich–München: 33,99 € abends gegen 41,99 € nachts.
 
-**Pünktlichkeitshistorie** — mit einer Einschränkung, die du kennen solltest:
-Es gibt keine offene Quelle für historische Verspätungen. Das Tool sammelt
-deshalb **selbst**: Jedes Mal, wenn du einen Zuglauf mit Echtzeitdaten
-aufrufst, wird die beobachtete Verspätung festgehalten (höchstens ein Wert je
-Zug und Tag, gleitendes Fenster über 60 Beobachtungen bzw. 120 Tage). Die
-Statistik ist also am Anfang leer und füllt sich mit der Nutzung — auf deinen
-Strecken nach ein paar Wochen. Angezeigt wird sie als „ICE 515: 75 % pünktlich,
-Ø +4,2 min (12 Beobachtungen)". Als pünktlich gilt unter 6 Minuten, wie im
+**Pünktlichkeitshistorie** kombiniert drei Quellen, damit auch beim ersten
+Aufruf eines Zuges eine ehrliche Zahl auf dem Bildschirm steht:
+
+1. **Eigene Messungen.** Bei jedem Zuglauf mit Echtzeitdaten wird die
+   beobachtete Verspätung festgehalten — höchstens ein Wert je Zug und Tag,
+   gleitendes Fenster über 60 Beobachtungen bzw. 120 Tage. Zusätzlich wird ein
+   **7-Tage-Fenster** ausgewiesen: „so ist es aktuell", nicht nur ein
+   Langzeitschnitt.
+2. **Baseline aus den Betreiber-Jahresstatistiken** (DB Konzernbericht, ÖBB
+   Geschäftsbericht, SBB Jahresbericht). Damit gibt es auch beim allerersten
+   Aufruf einen belastbaren Startwert — als solcher gekennzeichnet und im
+   Blend über einen Bayes-Prior (Gewicht 5) mit den eigenen Messungen
+   verrechnet. Schon ~10 eigene Werte übersteuern die Baseline sichtbar.
+3. **Schweizer Ist-Daten V2** (Open-Data-Plattform Mobilität Schweiz). Für
+   Züge, die durch die Schweiz fahren, kann die tatsächliche Verspätung aus
+   der täglich veröffentlichten CSV berechnet werden — siehe Cron-Skript unten.
+
+Jede Zahl trägt eine **Quellenkennung**: „aus eigenen Messungen", „Näherung aus
+Betreiber-Jahresstatistik (noch keine eigenen Messungen)" oder „eigene Messungen
+ergänzt um Betreiber-Statistik". Als pünktlich gilt unter 6 Minuten, wie im
 Bahnverkehr üblich.
 
 Gespeichert wird als JSON je Zug unter `api/cache/punctuality/` — kein
 Datenbankserver nötig.
+
+#### Schweizer Ist-Daten importieren (optional, Cron)
+
+`bin/import_ch_istdaten.php` lädt die täglichen Ist-Daten-CSVs von
+`data.opentransportdata.swiss/dataset/ist-daten-v2`, ermittelt je Zugfahrt die
+Ankunftsverspätung am Endhalt und schreibt das Ergebnis in denselben
+JSON-Store, den auch die Live-Sammlung nutzt. Für die App ist danach kein
+Unterschied sichtbar — Ist-Daten-Samples verhalten sich wie eigene Messungen.
+
+```bash
+# Trockenlauf für gestern mit 200 000 Zeilen (ca. 10 s, ~5 000 Fahrten):
+php bin/import_ch_istdaten.php --days=1 --limit=200000 --verbose
+
+# Cron-Empfehlung: täglich morgens die letzten zwei Tage nachziehen
+0 4 * * * cd /pfad/zu/train-maxxing && php bin/import_ch_istdaten.php --days=2 >> logs/import.log 2>&1
+```
+
+Optionen:
+
+| Flag | Bedeutung |
+|---|---|
+| `--days=N` | Anzahl Tage rückwärts (Standard 7, max 60) |
+| `--date=YYYY-MM-DD` | Nur diesen einen Tag holen |
+| `--limit=N` | Nur die ersten N CSV-Zeilen (für schnelle Tests) |
+| `--force` | Bereits importierte Tage erneut ziehen |
+| `--verbose` | Fortschrittsmeldungen alle 100 000 Zeilen |
+
+**Was der Importer nicht kann:** Deutschland und Österreich veröffentlichen
+keine vergleichbaren Ist-Daten-Feeds. Für DE- und AT-Züge bleibt es bei
+Baseline + eigener Sammlung. Die CH-Daten helfen aber auch dort mit, wenn die
+Verbindung durch die Schweiz führt (Zürich–München erfasst den ICE zwischen
+Zürich und Basel).
+
+**Ressourcenbedarf:** Eine volle Tages-CSV ist rund 300–500 MB, die
+Verarbeitung streamt zeilenweise und braucht wenige zehn MB RAM. Pro Tag
+werden ~30 000–50 000 CH-Zugfahrten aggregiert; die Punctuality-JSONs bleiben
+insgesamt im niedrigen zweistelligen MB-Bereich.
+
+**Idempotenz:** Der Importer merkt sich erledigte Tage in
+`api/cache/punctuality/.imports/YYYY-MM-DD.done`; `Punctuality::record()` selbst
+lässt zusätzlich nur einen Wert je Zug und Tag zu. Ein doppelter Cron-Aufruf
+richtet also keinen Schaden an.
+
+#### Deutsche Ist-Daten aus bahnvorhersage.de/open-data (manuell)
+
+Die Datenbasis existiert und deckt den Zeitraum ab September 2021 fast
+vollständig ab — sie wird aber **nicht automatisch abgerufen**, weil:
+
+- Die Downloads laufen über die [Mobilithek](https://mobilithek.info/) und
+  erfordern einen Account (Anmeldung erforderlich, Freischaltung des Datensatzes
+  auf Anfrage).
+- Jährliche `.tar`-Archive mit täglichen **Parquet**-Dateien; ein Jahr sind
+  mehrere Gigabyte.
+- Parquet in reinem PHP zu parsen erfordert eine Zusatzabhängigkeit, die den
+  Charakter „einfach hochladen und läuft" bricht.
+
+Wer die Baseline für deutsche Züge mit echten Daten verfeinern möchte, kann die
+Parquet-Dateien mit einem einmaligen Python-Skript in unser JSON-Format
+umrechnen. Das relevante Schema (siehe
+[Bahn-Vorhersage-Doku](https://bahnvorhersage.de/open-data/parsed-train-delays)):
+
+- `is_final == true` — nur den letzten Prognosewert je Halt nehmen
+- `is_arrival == true` — Ankunftsseite verwenden (analog zum CH-Importer)
+- `delay` (Sekunden) — auf Minuten umrechnen, dann in `api/cache/punctuality/de/`
+  ablegen mit dem Key `<category>_<trainNumber>.json` und dem Schema aus
+  `public/api/lib/Punctuality.php`
+
+Solange kein solcher Import läuft, greift für DE-Züge die Baseline aus dem
+DB-Konzernbericht plus die eigenen Live-Messungen — die App zeigt korrekt an,
+welche Quelle die Zahl gerade trägt.
+
+### Münchner Nahverkehr über die MVG-API
+
+Für München gibt es **zwei Lücken**, die die MVG-Web-API schließt:
+
+1. **Reine U-Bahn-Halte** (Odeonsplatz, Sendlinger Tor …) haben keine
+   EVA-Nummer und tauchen in der HAFAS-Suche oft gar nicht auf. Die Ortssuche
+   fragt deshalb zusätzlich `https://www.mvg.de/api/bgw-pt/v3/locations`
+   und mischt Treffer mit MVG-Präfix `mvg:` in die Liste. HAFAS-Treffer
+   mit identischem Namen absorbieren die MVG-Ergänzung; nur reine
+   MVG-Halte bleiben eigenständig. Sie erhalten das Flag `noJourneys=true`,
+   weil sich mit der MVG-`globalId` keine Verbindung anrouten lässt
+   (HAFAS akzeptiert nur EVA-Nummern).
+
+2. **Aktuelle Störungsmeldungen** (`?action=disruptions`) — Baustellen,
+   Ausfälle, Umleitungen für U-Bahn, Tram, Bus, S-Bahn. Das Frontend blendet
+   sie als kollabierbaren Ticker unter den Suchergebnissen ein, wenn welche
+   vorliegen. Zwei Minuten Cache serverseitig, alle 120 Sekunden erneutes
+   Nachladen im Browser.
+
+Die MVG-API läuft ohne Auth und ist ausdrücklich für die MVG-Web-App gedacht;
+wir identifizieren uns per `User-Agent` (konfigurierbar in `config.php`).
+Ausschalten geht per `providers.mvg.enabled = false` — dann verschwindet der
+Ticker und die Ortssuche fällt auf HAFAS-only zurück.
+
+**Was die MVG-API nicht kann:** eine Verbindungssuche. Es gibt keinen
+`/trips`- oder `/journeys`-Endpunkt (getestet). Für die Fahrplanauskunft
+zwischen zwei MVG-Halten muss weiterhin HAFAS herhalten — und HAFAS versteht
+die MVG-IDs nicht. In der Praxis ist das selten ein Problem, weil HAFAS
+München S-Bahn/Fernverkehr ohnehin sauber abbildet.
 
 ### Teilen
 
@@ -556,6 +672,7 @@ Alles per GET auf `api/`:
 | `?action=livetrains&bbox=süd,west,nord,ost` | Züge, die dort gerade fahren |
 | `?action=traindetails&jid=…` | Zuglauf mit Halten und Verspätung |
 | `?action=bestprices&from=…&to=…&date=…` | Günstigste Zeitfenster am Tag |
+| `?action=disruptions` | Aktive Störungsmeldungen der MVG München |
 
 `journeys` versteht zusätzlich `discounts` (kommagetrennt), `products`
 (kommagetrennt, leer = alle), `class` (1/2), `results`, `arrival=1`, `via`

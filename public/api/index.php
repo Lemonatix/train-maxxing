@@ -5,8 +5,12 @@
  * Routen (alle GET):
  *   ?action=health                          Welche Quellen sind erreichbar?
  *   ?action=catalogue                       Abo-Katalog fuer das Frontend
- *   ?action=locations&q=Bern                Ortssuche
+ *   ?action=locations&q=Bern                Ortssuche (inkl. MVG-Halte)
  *   ?action=journeys&from=..&to=..&date=..  Verbindungen inkl. Preis
+ *   ?action=livetrains&bbox=..              Live-Positionen im Ausschnitt
+ *   ?action=traindetails&jid=..             Zuglauf mit Halten und Verspaetung
+ *   ?action=bestprices&from=..&to=..&date=.. Preisstrecke fuer eine Woche
+ *   ?action=disruptions                     MVG-Stoerungsticker Muenchen
  *
  * Strategie bei journeys:
  *   1. Fahrplan von der OeBB holen (zuverlaessig, mit Zuggattung + Laendercodes)
@@ -15,6 +19,27 @@
  */
 
 declare(strict_types=1);
+
+// Fallbacks fuer die mbstring-Extension. Auf produktiven Hostings ist sie
+// praktisch immer da; fuer schlanke lokale CLI-Setups ohne php-mbstring
+// koennen die Kernfunktionen aus mbstring hier durch strlen/strtolower
+// ersetzt werden, ohne dass die Ortssuche kaputt geht. Fuer reine
+// Laengenpruefungen und Cache-Keys reicht die ASCII-Semantik voellig.
+if (!function_exists('mb_strlen')) {
+    /** @return int */
+    function mb_strlen(string $s, ?string $encoding = null): int
+    {
+        // strlen zaehlt Bytes; fuer die Untergrenze "mindestens N Zeichen"
+        // ist das eine sichere Ueberschaetzung (jedes UTF-8-Zeichen >= 1 Byte).
+        return strlen($s);
+    }
+}
+if (!function_exists('mb_strtolower')) {
+    function mb_strtolower(string $s, ?string $encoding = null): string
+    {
+        return strtolower($s);
+    }
+}
 
 require __DIR__ . '/lib/Http.php';
 require __DIR__ . '/lib/Cache.php';
@@ -26,6 +51,7 @@ require __DIR__ . '/lib/Punctuality.php';
 require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
 require __DIR__ . '/lib/Providers/CoachSequence.php';
+require __DIR__ . '/lib/Providers/Mvg.php';
 
 $config = require __DIR__ . '/config.php';
 
@@ -93,8 +119,11 @@ try {
         case 'bestprices':
             handleBestPrices($http, $config, $cache);
             break;
+        case 'disruptions':
+            handleDisruptions($http, $config, $cache);
+            break;
         default:
-            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys', 400);
+            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, disruptions', 400);
     }
 } catch (Throwable $e) {
     // Details bleiben im Log, der Client bekommt nur eine generische Meldung.
@@ -138,6 +167,20 @@ function handleHealth(Http $http, array $config, Cache $cache): void
         'ms'      => (int) round((microtime(true) - $t0) * 1000),
         'critical' => false,
     ];
+
+    // MVG - nur wenn aktiviert, sonst ist der Health-Check laenger als noetig.
+    if (($config['providers']['mvg']['enabled'] ?? false) === true) {
+        $mvg = new Mvg($http, $config['providers']['mvg']);
+        $t0  = microtime(true);
+        $r   = $mvg->locations('Marienplatz', 1);
+        $out['providers']['mvg'] = [
+            'label'   => 'MVG (Muenchner Nahverkehr, Stoerungsticker)',
+            'ok'      => $r['ok'],
+            'error'   => $r['error'],
+            'ms'      => (int) round((microtime(true) - $t0) * 1000),
+            'critical' => false,
+        ];
+    }
 
     ok($out);
 }
@@ -469,7 +512,14 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         'notices'     => $notices,
     ];
 
-    $cache->set($cacheKey, $payload);
+    // Leere Ergebnisse NICHT cachen. Sonst friert eine einmalige leere
+    // Antwort (temporaerer Provider-Aussetzer, kaputter Konfig-Zustand,
+    // exotische Kombination) den Nutzer fuer die naechsten Minuten in
+    // "0 Verbindungen" ein, obwohl schon der naechste Live-Aufruf wieder
+    // Treffer haette.
+    if ($journeys !== []) {
+        $cache->set($cacheKey, $payload);
+    }
     ok($payload + ['cached' => false]);
 }
 
@@ -638,6 +688,40 @@ function toTimestamp(?string $iso): ?int
     } catch (Exception $e) {
         return null;
     }
+}
+
+/**
+ * MVG-Stoerungsticker.
+ *
+ * Aktive Meldungen der Muenchner Verkehrsgesellschaft. Beste Aktualitaet ist
+ * nicht das Ziel - die App zeigt einen Ueberblick, die Detailseite bleibt
+ * die MVG-App. Deshalb kurz cachen (2 Minuten), das schuetzt auch die MVG.
+ *
+ * Bei ausgeschaltetem MVG-Provider oder Fehler wird eine leere Liste
+ * zurueckgegeben statt hart zu scheitern - der Ticker ist Beiwerk, kein
+ * Kernfeature.
+ */
+function handleDisruptions(Http $http, array $config, Cache $cache): void
+{
+    if (($config['providers']['mvg']['enabled'] ?? false) !== true) {
+        ok(['disruptions' => [], 'note' => 'MVG-Provider ist in der Konfiguration deaktiviert.']);
+    }
+
+    $key    = 'mvg:disruptions';
+    $cached = $cache->get($key, (int) ($config['cache_ttl']['disruptions'] ?? 120));
+    if ($cached !== null) {
+        ok(['disruptions' => $cached, 'cached' => true]);
+    }
+
+    $mvg = new Mvg($http, $config['providers']['mvg']);
+    $res = $mvg->messages();
+    if (!$res['ok']) {
+        // Fehler nicht durchreichen, damit ein MVG-Ausfall die UI nicht bricht.
+        ok(['disruptions' => [], 'error' => $res['error']]);
+    }
+
+    $cache->set($key, $res['data']);
+    ok(['disruptions' => $res['data'], 'cached' => false]);
 }
 
 function rateLimitOk(Cache $cache, array $config): bool

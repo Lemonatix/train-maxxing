@@ -17,16 +17,39 @@
 const NS = 'http://www.w3.org/2000/svg';
 
 /**
- * Kachel-Quelle. CARTO "dark matter" passt zum dunklen Design.
+ * Zwei Kachel-Quellen von CARTO:
+ * - light: "Voyager"     — farbige, aber dezente Kacheln fürs helle Layout.
+ * - dark:  "dark matter" — dunkle Kacheln fürs dunkle Layout.
  * Attribution ist bei OSM-basierten Kacheln Pflicht und steht unten im Bild.
  */
-const TILES = {
-  url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  subdomains: ['a', 'b', 'c', 'd'],
-  maxZoom: 18,
-  minZoom: 3,
-  attribution: '© OpenStreetMap · © CARTO',
+const TILE_SOURCES = {
+  light: {
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    subdomains: ['a', 'b', 'c', 'd'],
+    maxZoom: 19,
+    minZoom: 3,
+    attribution: '© OpenStreetMap · © CARTO',
+  },
+  dark: {
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    subdomains: ['a', 'b', 'c', 'd'],
+    maxZoom: 19,
+    minZoom: 3,
+    attribution: '© OpenStreetMap · © CARTO',
+  },
 };
+
+// Aktuelle Kachel-Quelle. Über setMapTheme() aus app.js umschaltbar.
+let TILES = TILE_SOURCES.light;
+
+/**
+ * Wählt die Kachel-Quelle passend zum Theme aus. Wird von app.js beim
+ * Umschalten des Themes aufgerufen — die Karte selbst lädt die vorhandenen
+ * Kacheln danach über applyTheme() neu.
+ */
+export function setMapTheme(theme) {
+  TILES = TILE_SOURCES[theme] || TILE_SOURCES.light;
+}
 
 const TILE_SIZE = 256;
 
@@ -107,6 +130,15 @@ export class RouteMap {
     this.onSelect = null;
     this.liveTrains = [];
     this.built = false;
+    // Maßstabsleiste unten links; wird bei jedem render() aktualisiert.
+    this.scaleEl = null;
+    // Zuletzt ermittelter Nutzer-Standort ({ lat, lon, acc } in m). Wird
+    // vom "◎"-Button gefüllt und in renderOverlay() als Marker gezeichnet.
+    this.userLocation = null;
+    // Laufende watchPosition-ID zum Verfeinern der Genauigkeit; wird
+    // gestoppt, sobald acc <= LOCATE_TARGET_ACC oder LOCATE_MAX_WATCH_MS.
+    this._geoWatchId = null;
+    this._geoWatchStop = null;
   }
 
   /** Baut das Grundgerüst einmalig auf. */
@@ -132,20 +164,22 @@ export class RouteMap {
     // --- Bedienelemente ---
     const controls = document.createElement('div');
     controls.className = 'map__controls';
-    const btn = (label, title, fn) => {
+    const btn = (label, title, fn, extraClass = '') => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'map__btn';
+      b.className = 'map__btn' + (extraClass ? ' ' + extraClass : '');
       b.textContent = label;
       b.title = title;
       b.setAttribute('aria-label', title);
-      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(b); });
       return b;
     };
     controls.append(
       btn('+', 'Hineinzoomen', () => this.zoomBy(1)),
       btn('−', 'Herauszoomen', () => this.zoomBy(-1)),
-      btn('⤢', 'Ganze Route zeigen', () => { this.fit(); this.render(); })
+      btn('⤢', 'Ganze Route zeigen', () => { this.fit(); this.render(); }),
+      // Kleine Lücke vor dem Standort-Button, damit er als eigene Gruppe wirkt.
+      btn('◎', 'Meinen Standort zeigen', (b) => this.locate(b), 'map__btn--locate'),
     );
 
     const attr = document.createElement('a');
@@ -155,8 +189,24 @@ export class RouteMap {
     attr.rel = 'noopener noreferrer';
     attr.textContent = TILES.attribution;
 
-    this.viewport.append(controls, attr);
+    // Maßstabsleiste — Standard-UX-Element unten links; wird pro Render neu skaliert.
+    this.scaleEl = document.createElement('div');
+    this.scaleEl.className = 'map__scale';
+    this.scaleEl.setAttribute('aria-hidden', 'true');
+    const scaleBar = document.createElement('span');
+    scaleBar.className = 'map__scale-bar';
+    const scaleLbl = document.createElement('span');
+    scaleLbl.className = 'map__scale-label';
+    this.scaleEl.append(scaleBar, scaleLbl);
+
+    this.viewport.append(controls, attr, this.scaleEl);
     this.el.append(this.viewport);
+
+    // Karte tastaturbedienbar machen (Pfeile / +- / Home).
+    this.viewport.setAttribute('tabindex', '0');
+    this.viewport.setAttribute('role', 'application');
+    this.viewport.setAttribute('aria-label',
+      'Karte — Pfeiltasten verschieben, Plus und Minus zoomen, Home zeigt alles');
 
     this.hint = document.createElement('p');
     this.hint.className = 'map__hint';
@@ -244,11 +294,33 @@ export class RouteMap {
     vp.addEventListener('pointerup', end);
     vp.addEventListener('pointercancel', end);
 
-    // Zoom auf den Mauszeiger
+    // Zoom auf den Mauszeiger — gedrosselt, damit Trackpads mit hoher
+    // Event-Rate nicht durch die Zoomstufen rasen. Zwei Kniffe:
+    //   1. deltaY sammeln und höchstens einmal pro Animationsframe anwenden.
+    //   2. Schrittweite proportional zur Rolle, gedeckelt auf ±0.4 pro Frame.
+    // Ergebnis: Mausrad-Ticks fühlen sich träger an, Trackpad-Wischer laufen
+    // in einer flüssigen Bewegung statt in Sprüngen.
+    let wheelAccum = 0;
+    let wheelPos = null;
+    let wheelRaf = 0;
     vp.addEventListener('wheel', (e) => {
       e.preventDefault();
+      // deltaMode LINE (Firefox) und PAGE liefern kleine Zahlen — hochskalieren.
+      const factor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+      wheelAccum += e.deltaY * factor;
       const r = vp.getBoundingClientRect();
-      this.zoomBy(e.deltaY < 0 ? 0.6 : -0.6, e.clientX - r.left, e.clientY - r.top);
+      wheelPos = { x: e.clientX - r.left, y: e.clientY - r.top };
+
+      if (wheelRaf) return;
+      wheelRaf = requestAnimationFrame(() => {
+        wheelRaf = 0;
+        if (Math.abs(wheelAccum) < 1) { wheelAccum = 0; return; }
+        // 240 = "Ein voller Maus-Klick" (≈ deltaY 120 * 2) ergibt +0.5 Zoom.
+        const raw = -wheelAccum / 240;
+        const step = Math.max(-0.4, Math.min(0.4, raw));
+        wheelAccum = 0;
+        this.zoomBy(step, wheelPos?.x, wheelPos?.y);
+      });
     }, { passive: false });
 
     // Ein Klick, der kein Ziehen war, trifft Zug oder Route.
@@ -271,6 +343,38 @@ export class RouteMap {
 
       const g = hit.closest?.('.map__route');
       if (g && this.onSelect) this.onSelect(Number(g.dataset.index));
+    });
+
+    // Doppelklick zum Reinzoomen auf den Zeiger — klassisches Karten-UX.
+    // Auf Bedienelemente nicht reagieren, sonst zoomt der Klick auf "+".
+    vp.addEventListener('dblclick', (e) => {
+      if (e.target.closest?.('.map__controls, .map__attr')) return;
+      e.preventDefault();
+      const r = vp.getBoundingClientRect();
+      this.zoomBy(1, e.clientX - r.left, e.clientY - r.top);
+    });
+
+    // Tastaturbedienung bei fokussierter Karte.
+    vp.addEventListener('keydown', (e) => {
+      // Nur reagieren, wenn der Viewport selbst den Fokus hat — sonst
+      // greift die Route-Tastaturlogik (Enter/Space) zusätzlich zu.
+      if (e.target !== vp) return;
+      const step = e.shiftKey ? 160 : 80;
+      let handled = true;
+      switch (e.key) {
+        case '+': case '=':  this.zoomBy(1); break;
+        case '-': case '_':  this.zoomBy(-1); break;
+        case 'ArrowLeft':    this.panBy(-step, 0); break;
+        case 'ArrowRight':   this.panBy( step, 0); break;
+        case 'ArrowUp':      this.panBy(0, -step); break;
+        case 'ArrowDown':    this.panBy(0,  step); break;
+        case 'Home':         this.fit(); this.render(); break;
+        default:             handled = false;
+      }
+      if (handled) {
+        e.preventDefault();
+        this.onViewChange && this.onViewChange();
+      }
     });
   }
 
@@ -365,6 +469,7 @@ export class RouteMap {
 
   updateHint() {
     if (!this.hint) return;
+    this.hint.classList.remove('is-error');
     this.hint.textContent = this.ranked.length === 0
       ? 'Start und Ziel wählen — die Routen erscheinen hier.'
       : 'Ziehen zum Verschieben, Scrollen zum Zoomen. Auf eine Linie tippen wählt die Verbindung.';
@@ -402,6 +507,223 @@ export class RouteMap {
 
     this.renderTiles(w, h, cx, cy);
     this.renderOverlay(w, h, toPx);
+    this.renderScale();
+  }
+
+  /**
+   * Aktualisiert die Maßstabsleiste. Ausgangspunkt ist die klassische
+   * Web-Mercator-Formel meters_per_pixel = 156543,03 · cos(lat) / 2^zoom.
+   * Anschließend wird eine "schöne" Zahl aus 1/2/5·10^n gesucht, die
+   * ungefähr 100 px breit ist.
+   */
+  renderScale() {
+    if (!this.scaleEl) return;
+    const mPerPx = 156543.03392 * Math.cos((this.center.lat * Math.PI) / 180) / 2 ** this.zoom;
+    const rawM = mPerPx * 100;
+
+    const pow = Math.pow(10, Math.floor(Math.log10(rawM)));
+    const rel = rawM / pow;
+    const nice = rel < 1.5 ? 1 : rel < 3.5 ? 2 : rel < 7.5 ? 5 : 10;
+    const meters = nice * pow;
+    const px = meters / mPerPx;
+
+    const label = meters >= 1000
+      ? `${(meters / 1000).toFixed(meters >= 10000 ? 0 : 1).replace(/\.0$/, '')} km`
+      : `${Math.round(meters)} m`;
+
+    const [bar, lbl] = this.scaleEl.children;
+    bar.style.width = `${Math.round(px)}px`;
+    lbl.textContent = label;
+  }
+
+  /**
+   * Nach einem Theme-Wechsel: alle Kacheln verwerfen (sie kommen ja von
+   * einer anderen Quelle) und neu rendern. Die Attribution wird ebenfalls
+   * angepasst, falls sich die Quelle ändert.
+   */
+  applyTheme() {
+    if (!this.built) return;
+    if (this.tiles) {
+      for (const img of this.tiles.values()) img.remove();
+      this.tiles.clear();
+    }
+    const attr = this.viewport.querySelector('.map__attr');
+    if (attr) attr.textContent = TILES.attribution;
+    this.render();
+  }
+
+  /**
+   * Fragt per Browser-Geolocation-API den aktuellen Standort ab und zoomt
+   * die Karte darauf. Zeigt einen Marker mit Genauigkeitshalo, so lange
+   * die Position bekannt ist.
+   *
+   * Ablauf (auf maximale Genauigkeit optimiert):
+   *   1) Hochgenau (enableHighAccuracy: true, maximumAge: 0) — nutzt GPS
+   *      wenn vorhanden, sonst WLAN-Ortung; kein Cache, damit wir eine
+   *      frische Position bekommen.
+   *   2) Netzbasiert (enableHighAccuracy: false) — falls (1) fehlschlägt,
+   *      z.B. weil GPS abgeschaltet ist.
+   *   3) IP-Fallback (ipapi.co) — nur, wenn beide Browser-Wege scheitern.
+   *   4) Anschließend läuft watchPosition weiter und aktualisiert die
+   *      Position, bis eine Zielgenauigkeit erreicht ist oder ein Timeout
+   *      abläuft. So wird der erste GPS-Fix mit der Zeit präziser.
+   *
+   * Geolocation braucht einen Secure Context (HTTPS oder localhost).
+   * Fehler landen im Hinweis-Text unter der Karte, mit dem tatsächlichen
+   * Grund in der Konsole.
+   */
+  locate(btn) {
+    if (!('geolocation' in navigator)) {
+      this.setHint('Der Browser unterstützt keine Standortermittlung.', true);
+      return;
+    }
+    if (!window.isSecureContext) {
+      this.setHint('Standort geht nur über HTTPS oder localhost.', true);
+      return;
+    }
+    // Falls ein alter Watch noch läuft: erst aufräumen.
+    this.stopGeoWatch();
+    btn?.classList.add('is-busy');
+    btn?.setAttribute('aria-busy', 'true');
+    const done = () => {
+      btn?.classList.remove('is-busy');
+      btn?.removeAttribute('aria-busy');
+    };
+    const apply = (lat, lon, accuracy, source) => {
+      done();
+      this.setUserLocation(lat, lon, accuracy);
+      this.center = { lat, lon };
+      // Erst hineinzoomen, wenn wir noch weit draußen sind — sonst behält
+      // der Nutzer seinen Detailgrad.
+      if (this.zoom < 12) this.zoom = 13;
+      this.render();
+      this.onViewChange && this.onViewChange();
+      if (source === 'ip') {
+        this.setHint('Ungefährer Standort per IP (Browser-GPS nicht verfügbar).');
+      } else if (accuracy > 100) {
+        this.setHint('Position verfeinert sich… (aktuell ±' + Math.round(accuracy) + ' m)');
+      }
+    };
+    const errMsg = (err) => (
+      err.code === err.PERMISSION_DENIED ? 'Standortzugriff wurde abgelehnt.' :
+      err.code === err.POSITION_UNAVAILABLE ? 'Standort ist gerade nicht verfügbar (kein GPS/Location-Service).' :
+      err.code === err.TIMEOUT ? 'Standortabfrage hat zu lange gedauert.' :
+      'Standort konnte nicht ermittelt werden.'
+    );
+
+    // Schritt 1: hochgenau, ohne Cache — maximale Präzision.
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        apply(latitude, longitude, accuracy, 'fine');
+        // Wenn der erste Fix noch nicht sehr präzise ist, watchPosition
+        // starten, damit spätere GPS-Fixes die Position verfeinern.
+        if (accuracy > 20) this.startGeoWatch();
+      },
+      (errFine) => {
+        console.warn('[locate] fine failed:', errFine.code, errFine.message);
+        if (errFine.code === errFine.PERMISSION_DENIED) {
+          done();
+          this.setHint(errMsg(errFine), true);
+          return;
+        }
+        // Schritt 2: netzbasiert als Fallback.
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const { latitude, longitude, accuracy } = pos.coords;
+            apply(latitude, longitude, accuracy, 'coarse');
+          },
+          (errCoarse) => {
+            console.warn('[locate] coarse failed:', errCoarse.code, errCoarse.message);
+            // Schritt 3: IP-Fallback.
+            this.locateByIp()
+              .then(({ lat, lon, acc }) => apply(lat, lon, acc, 'ip'))
+              .catch((ipErr) => {
+                console.warn('[locate] ip fallback failed:', ipErr);
+                done();
+                this.setHint(errMsg(errCoarse), true);
+              });
+          },
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 },
+        );
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+    );
+  }
+
+  /**
+   * Startet watchPosition und verfeinert die Position, bis
+   * entweder die Zielgenauigkeit (~15 m) erreicht ist oder das
+   * Zeitfenster (30 s) abläuft. Danach wird der Watch beendet.
+   */
+  startGeoWatch() {
+    const TARGET_ACC = 15;      // Meter — GPS-typische Zielgenauigkeit
+    const MAX_WATCH_MS = 30000; // 30 s — danach reicht es, um Akku zu schonen
+    this._geoWatchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const prevAcc = this.userLocation?.acc ?? Infinity;
+        // Nur übernehmen, wenn die neue Messung mindestens so gut ist
+        // wie die alte — sonst springt der Marker unnötig hin und her.
+        if (accuracy <= prevAcc + 5) {
+          this.setUserLocation(latitude, longitude, accuracy);
+          this.center = { lat: latitude, lon: longitude };
+          this.render();
+        }
+        if (accuracy <= TARGET_ACC) this.stopGeoWatch();
+      },
+      (err) => {
+        console.warn('[locate] watch error:', err.code, err.message);
+        this.stopGeoWatch();
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+    );
+    this._geoWatchStop = setTimeout(() => this.stopGeoWatch(), MAX_WATCH_MS);
+  }
+
+  /** Beendet einen laufenden watchPosition-Aufruf. */
+  stopGeoWatch() {
+    if (this._geoWatchId != null) {
+      navigator.geolocation.clearWatch(this._geoWatchId);
+      this._geoWatchId = null;
+    }
+    if (this._geoWatchStop) {
+      clearTimeout(this._geoWatchStop);
+      this._geoWatchStop = null;
+    }
+  }
+
+  /**
+   * Notfall-Fallback: fragt einen kostenlosen IP-Geolocation-Dienst an,
+   * wenn der Browser den Standort nicht liefern kann. Genauigkeit ist grob
+   * (meist stadtgenau), reicht aber, um die Karte sinnvoll zu zentrieren.
+   */
+  async locateByIp() {
+    const res = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
+    if (!res.ok) throw new Error('ipapi: HTTP ' + res.status);
+    const data = await res.json();
+    const lat = Number(data.latitude);
+    const lon = Number(data.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      throw new Error('ipapi: keine Koordinaten');
+    }
+    // IP-Ortung ist typischerweise auf Stadt genau; ~5 km Halo als Hinweis.
+    return { lat, lon, acc: 5000 };
+  }
+
+  /** Speichert den letzten Standort und rendert die Karte neu. */
+  setUserLocation(lat, lon, accuracy = 0) {
+    this.userLocation = { lat, lon, acc: accuracy };
+    if (this.built) this.render();
+  }
+
+  /** Zeigt kurz einen Text unter der Karte an; bei err=true rötlich. */
+  setHint(text, err = false) {
+    if (!this.hint) return;
+    this.hint.textContent = text;
+    this.hint.classList.toggle('is-error', !!err);
+    clearTimeout(this._hintTimer);
+    this._hintTimer = setTimeout(() => this.updateHint(), 4000);
   }
 
   renderTiles(w, h, cx, cy) {
@@ -466,6 +788,8 @@ export class RouteMap {
           .replace('{r}', retina);
         // Fehlende Kacheln nicht als kaputtes Bild stehen lassen.
         img.addEventListener('error', () => img.classList.add('is-error'), { once: true });
+        // Sanftes Einblenden nach dem Laden, damit Zoom-Wechsel nicht flackert.
+        img.addEventListener('load', () => img.classList.add('is-loaded'), { once: true });
         this.tileLayer.append(img);
         this.tiles.set(key, img);
       }
@@ -511,6 +835,16 @@ export class RouteMap {
         hit.setAttribute('class', 'map__hit');
         g.append(hit);
 
+        // Aktive Route bekommt zusätzlich einen hellen Casing-Strich darunter
+        // — klassische Kartografie, damit die farbige Linie auf bunten
+        // Kacheln immer eindeutig lesbar bleibt.
+        if (active) {
+          const casing = document.createElementNS(NS, 'path');
+          casing.setAttribute('d', d);
+          casing.setAttribute('class', 'map__casing');
+          g.append(casing);
+        }
+
         const p = document.createElementNS(NS, 'path');
         p.setAttribute('d', d);
         p.setAttribute('class', 'map__line');
@@ -549,6 +883,35 @@ export class RouteMap {
     }
 
     this.renderLiveTrains(svg, w, h, toPx);
+    this.renderUserLocation(svg, w, h, toPx);
+  }
+
+  /**
+   * Zeichnet den Standortmarker (ein einfacher blauer Punkt),
+   * sofern der Nutzer per "◎"-Button seinen Standort freigegeben hat.
+   */
+  renderUserLocation(svg, w, h, toPx) {
+    const u = this.userLocation;
+    if (!u) return;
+    const [x, y] = toPx([u.lat, u.lon]);
+    if (x < -50 || y < -50 || x > w + 50 || y > h + 50) return;
+
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', 'map__me');
+    g.setAttribute('aria-hidden', 'true');
+
+    const dot = document.createElementNS(NS, 'circle');
+    dot.setAttribute('cx', x.toFixed(1));
+    dot.setAttribute('cy', y.toFixed(1));
+    dot.setAttribute('r', '6');
+    dot.setAttribute('class', 'map__me-dot');
+    g.append(dot);
+
+    const title = document.createElementNS(NS, 'title');
+    title.textContent = 'Dein Standort';
+    g.append(title);
+
+    svg.append(g);
   }
 
   renderLiveTrains(svg, w, h, toPx) {
