@@ -79,6 +79,7 @@ export const api = {
         discounts: (params.discounts || []).join(','),
         products: (params.products || []).join(','),
         via: (params.via || []).join(','),
+        minchange: params.minChange || '',
       },
       opts
     );

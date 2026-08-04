@@ -337,10 +337,16 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         static fn($p) => $p !== '' && in_array($p, Products::allIds(), true)
     ));
 
+    // Mindestumsteigezeit. Unter einer Minute ist keine Umsteigezeit, deshalb
+    // ist 1 die Untergrenze; 60 Minuten sind die sinnvolle Obergrenze.
+    $minChange = isset($_GET['minchange'])
+        ? max(1, min(60, (int) $_GET['minchange']))
+        : null;
+
     $cacheKey = 'jny:' . implode('|', [
         $from, $to, $date, $time, $arrival ? 'a' : 'd',
         $travelClass, $results, implode('+', $discounts), implode('+', $viaIds),
-        implode('+', $products),
+        implode('+', $products), $minChange ?? '-',
     ]);
     $cached = $cache->get($cacheKey, (int) $config['cache_ttl']['journeys']);
     if ($cached !== null) {
@@ -353,7 +359,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
     $sched = $oebb->journeys(
         $from, $to, $date, $time, $arrival, $results, $travelClass, $viaIds,
-        Products::bitmask($products)
+        Products::bitmask($products), $minChange
     );
 
     $journeys    = $sched['ok'] ? $sched['data'] : [];
@@ -368,7 +374,9 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     // mit "location missing or invalid" abgelehnt. Die DB kennt sie - also
     // uebernimmt sie in dem Fall auch den Fahrplan.
     if ($db !== null) {
-        $priced = $db->journeys($from, $to, $date, $time, $arrival, $travelClass, $discounts, true, $products);
+        $priced = $db->journeys(
+            $from, $to, $date, $time, $arrival, $travelClass, $discounts, true, $products, $minChange
+        );
 
         if ($journeys === [] && $priced['ok'] && $priced['data'] !== []) {
             $journeys    = $priced['data'];
@@ -413,9 +421,31 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         }
     }
 
-    // --- 4. Abos anwenden bzw. schaetzen ------------------------------
+    // --- 4. Umstiege bewerten, zu knappe aussortieren ------------------
     foreach ($journeys as $i => $j) {
         $journeys[$i] = annotateTransfers($j);
+    }
+
+    // Beide Quellen kennen eine Mindestumsteigezeit und wurden entsprechend
+    // gefragt. Dieser Nachfilter ist nur das Sicherheitsnetz, falls doch
+    // etwas Zu-Knappes durchrutscht. Bleibt nichts uebrig, zeigen wir lieber
+    // die knappen Verbindungen als eine leere Liste.
+    if ($minChange !== null) {
+        $kept = array_values(array_filter(
+            $journeys,
+            static fn($j) => ($j['minTransferMin'] ?? null) === null
+                          || $j['minTransferMin'] >= $minChange
+        ));
+        if ($kept !== []) {
+            $journeys = $kept;
+        } else {
+            $notices[] = 'Keine Verbindung erreicht ' . $minChange
+                . ' Minuten Umsteigezeit — es werden die knapperen gezeigt.';
+        }
+    }
+
+    // --- 5. Abos anwenden bzw. schaetzen ------------------------------
+    foreach ($journeys as $i => $j) {
         $journeys[$i] = Fares::apply($journeys[$i], $discounts, $travelClass);
         // Ticketshops der beruehrten Laender, Startland zuerst.
         $journeys[$i]['shops'] = Shops::forJourney($journeys[$i], $date, $time, $travelClass);

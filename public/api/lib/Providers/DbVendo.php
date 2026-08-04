@@ -107,7 +107,8 @@ final class DbVendo
         int $travelClass = 2,
         array $discounts = [],
         bool $fastOnly = true,
-        array $products = []
+        array $products = [],
+        ?int $minChangeMin = null
     ): array {
         $ermaessigungen = $this->mapDiscounts($discounts, $travelClass);
 
@@ -129,6 +130,14 @@ final class DbVendo
             'bikeCarriage'                      => false,
             'reservierungsKontingenteVorhanden' => false,
         ];
+
+        // Die DB kennt eine Mindestumsteigezeit. Sie durchzureichen ist besser
+        // als hinterher zu filtern: so sucht sie passende Verbindungen, statt
+        // dass wir die knappen nur wegwerfen. Nachgemessen: ohne den Parameter
+        // Umstiege von 3-4 Minuten, mit minUmstiegszeit=10 dann 13-14.
+        if ($minChangeMin !== null && $minChangeMin > 0) {
+            $payload['minUmstiegszeit'] = $minChangeMin;
+        }
 
         $res = $this->http->postJson($this->cfg['bahnde']['journeys'], $payload, $this->browserHeaders());
 
@@ -242,7 +251,6 @@ final class DbVendo
         $dTicketSegments  = [];
 
         foreach ($abs as $a) {
-            $typ = (string) ($a['typ'] ?? 'FAHRZEUG');
             $dep = $a['abfahrt']['sollzeit'] ?? $a['abfahrt']['ezZeit'] ?? null;
             $arr = $a['ankunft']['sollzeit'] ?? $a['ankunft']['ezZeit'] ?? null;
 
@@ -272,7 +280,9 @@ final class DbVendo
                 }
             }
 
-            if ($typ === 'FUSSWEG') {
+            $vm = $a['verkehrsmittel'] ?? [];
+
+            if ($this->isWalk($a, $vm)) {
                 $legs[] = [
                     'mode'        => 'walk',
                     'from'        => $from,
@@ -280,11 +290,12 @@ final class DbVendo
                     'departure'   => $dep,
                     'arrival'     => $arr,
                     'durationMin' => (int) round(((int) ($a['abschnittsDauer'] ?? 0)) / 60),
+                    // Wechselt der Halt, muss man tatsaechlich ein Stueck gehen.
+                    'changesPlace' => ($from['name'] ?? '') !== ($to['name'] ?? ''),
                 ];
                 continue;
             }
 
-            $vm    = $a['verkehrsmittel'] ?? [];
             $stops = [];
             foreach (($a['halte'] ?? []) as $h) {
                 $eva = (string) ($h['extId'] ?? '');
@@ -392,6 +403,35 @@ final class DbVendo
         }
 
         return $any ? $out : null;
+    }
+
+    /**
+     * Ist dieser Abschnitt ein Fussweg?
+     *
+     * Verlassen kann man sich auf das Feld 'typ' nicht: im Nahverkehr fehlt es
+     * regelmaessig komplett, und dann wuerde ein Fussweg als Fahrzeug ohne
+     * Gattung durchgehen und im Frontend als "Unbekannt" erscheinen.
+     * Zuverlaessiger ist das Verkehrsmittel selbst - ein Fussweg hat weder
+     * Gattung noch Liniennummer und heisst schlicht "Fußweg".
+     */
+    private function isWalk(array $abschnitt, array $vm): bool
+    {
+        $typ = strtoupper((string) ($abschnitt['typ'] ?? ''));
+        if ($typ === 'FUSSWEG' || $typ === 'TRANSFER') {
+            return true;
+        }
+
+        $name = (string) ($vm['name'] ?? '');
+        if (preg_match('/fu(ss|ß)weg|umstieg|transfer|zu\s+fu(ss|ß)/iu', $name) === 1) {
+            return true;
+        }
+
+        // Weder Gattung noch Nummer: da faehrt nichts.
+        $kat = trim((string) ($vm['kategorie'] ?? ''));
+        $nr  = trim((string) ($vm['nummer'] ?? ''));
+        $gat = trim((string) ($vm['produktGattung'] ?? ''));
+
+        return $kat === '' && $nr === '' && $gat === '';
     }
 
     private function operatorOf(array $vm): string

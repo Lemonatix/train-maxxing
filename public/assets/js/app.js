@@ -25,6 +25,7 @@ const state = {
   arrival: false,
   travelClass: 2,
   results: 8,
+  minChange: 5,        // Mindestumsteigezeit in Minuten, null = egal
   discounts: [],
   products: [],        // leer = alle erlaubt
   // Nerd-Parameter
@@ -85,8 +86,8 @@ function loadSettings() {
     // der aktuelle Zeitpunkt stehen, nicht der von letzter Woche.
     for (const key of [
       'mode', 'from', 'to', 'via', 'arrival', 'travelClass',
-      'results', 'discounts', 'products', 'timeValue', 'comfortValue',
-      'changeCost', 'modelPrefs', 'liveTrains',
+      'results', 'minChange', 'discounts', 'products', 'timeValue',
+      'comfortValue', 'changeCost', 'modelPrefs', 'liveTrains',
     ]) {
       if (saved[key] !== undefined) state[key] = saved[key];
     }
@@ -102,7 +103,8 @@ function saveSettings() {
       JSON.stringify({
         mode: state.mode, from: state.from, to: state.to, via: state.via,
         time: state.time, arrival: state.arrival, travelClass: state.travelClass,
-        results: state.results, discounts: state.discounts, products: state.products,
+        results: state.results, minChange: state.minChange,
+        discounts: state.discounts, products: state.products,
         timeValue: state.timeValue, comfortValue: state.comfortValue,
         changeCost: state.changeCost, modelPrefs: state.modelPrefs,
         liveTrains: state.liveTrains,
@@ -440,6 +442,10 @@ function setupForm() {
   $('#arrival').addEventListener('change', (e) => { state.arrival = e.target.checked; saveSettings(); });
   $('#class').addEventListener('change', (e) => { state.travelClass = Number(e.target.value); saveSettings(); });
   $('#results').addEventListener('change', (e) => { state.results = Number(e.target.value); saveSettings(); });
+  $('#min-change').addEventListener('change', (e) => {
+    state.minChange = e.target.value === '' ? null : Number(e.target.value);
+    saveSettings();
+  });
 }
 
 function applyStateToForm() {
@@ -451,6 +457,7 @@ function applyStateToForm() {
   $('#arrival').checked = state.arrival;
   $('#class').value = String(state.travelClass);
   $('#results').value = String(state.results);
+  $('#min-change').value = state.minChange == null ? '' : String(state.minChange);
 
   $('#via').value = state.via?.name || '';
   $('#time-value').value = state.timeValue;
@@ -489,6 +496,7 @@ async function runSearch() {
         arrival: state.arrival,
         travelClass: state.travelClass,
         results: state.results,
+        minChange: state.minChange,
         discounts: state.discounts,
         products: state.products,
         // Der Zwischenhalt ist bewusst nur im Nerd-Modus wirksam.

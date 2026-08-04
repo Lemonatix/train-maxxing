@@ -123,7 +123,8 @@ final class OebbHafas
         int $results = 6,
         int $travelClass = 2,
         array $viaIds = [],
-        int $productMask = 0
+        int $productMask = 0,
+        ?int $minChangeMin = null
     ): array {
         $req = [
             'depLocL'     => [['type' => 'S', 'lid' => 'A=1@L=' . $fromId . '@']],
@@ -146,6 +147,13 @@ final class OebbHafas
 
         if ($arrival) {
             $req['outFrwd'] = false;
+        }
+
+        // Mindestumsteigezeit. HAFAS wirft dann nicht nur zu knappe
+        // Verbindungen weg, sondern sucht auch andere Wege - etwa ueber eine
+        // Nachbarhaltestelle, zu der man laeuft.
+        if ($minChangeMin !== null && $minChangeMin >= 0) {
+            $req['minChgTime'] = $minChangeMin;
         }
 
         // Verkehrsmittel einschraenken. 0 heisst "keine Einschraenkung".
@@ -414,14 +422,20 @@ final class OebbHafas
                     'durationMin'  => $this->diffMinutes($depTime, $arrTime),
                     'cancelled'    => (bool) ($jny['isCncl'] ?? false),
                 ];
-            } elseif ($type === 'WALK' || $type === 'TRSF') {
+            } else {
+                // Alles ausser einer Fahrt ist ein Weg zu Fuss: WALK, TRSF,
+                // aber auch seltenere Typen wie DEVI oder KISS. Sie hier
+                // aufzufuehren waere zu eng - was kein JNY ist, faehrt nicht.
                 $legs[] = [
                     'mode'        => 'walk',
+                    'kind'        => strtolower($type),
                     'from'        => $fromLoc,
                     'to'          => $toLoc,
                     'departure'   => $depTime,
                     'arrival'     => $arrTime,
                     'durationMin' => $this->diffMinutes($depTime, $arrTime),
+                    // Wechselt der Halt, geht man wirklich ein Stueck.
+                    'changesPlace' => ($fromLoc['name'] ?? '') !== ($toLoc['name'] ?? ''),
                 ];
             }
         }

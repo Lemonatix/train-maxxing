@@ -125,6 +125,13 @@ function renderCard(entry, index, marks, state, onSelect) {
   }
   for (const hit of entry.comfortHits) add(hit, 'badge--rule');
 
+  // Fußwege zwischen verschiedenen Halten — oft der Grund, warum eine
+  // Verbindung schneller ist als erwartet.
+  const walks = (j.legs || []).filter((l) => l.mode === 'walk' && l.changesPlace);
+  if (walks.length > 0) {
+    add(walks.length === 1 ? 'mit Fussweg' : `${walks.length} Fusswege`, 'badge--walk');
+  }
+
   // Knappe Umstiege sind der häufigste Grund, warum eine Verbindung platzt.
   if (j.transferRisk === 'risky') {
     add(`nur ${j.minTransferMin} min Umstieg`, 'badge--risky');
@@ -216,8 +223,19 @@ function renderLegs(journey, entry, state) {
 
   for (const leg of journey.legs) {
     if (leg.mode === 'walk') {
-      if ((leg.durationMin || 0) < 1) continue;
-      wrap.append(el('div', 'leg leg--walk', `Umstieg / Fussweg · ${formatDuration(leg.durationMin)}`));
+      // Wechselt der Halt, läuft man wirklich ein Stück — das gehört
+      // sichtbar gemacht, samt Start und Ziel des Fußwegs.
+      const walksBetween = leg.changesPlace && leg.from?.name && leg.to?.name;
+      if (!walksBetween && (leg.durationMin || 0) < 1) continue;
+
+      const text = walksBetween
+        ? `Zu Fuss: ${leg.from.name} → ${leg.to.name} · ${formatDuration(leg.durationMin)}`
+        : `Umstieg am selben Halt · ${formatDuration(leg.durationMin)}`;
+
+      const row = el('div', 'leg leg--walk');
+      if (walksBetween) row.classList.add('leg--walk-between');
+      row.append(el('span', 'leg__walk-text', text));
+      wrap.append(row);
       continue;
     }
 

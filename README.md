@@ -334,6 +334,34 @@ Weiterfahrt, Fußwege eingerechnet. Unter 5 Minuten gilt als riskant (rot), unte
 10 als knapp (gelb). Bei drei bis fünf Umstiegen ist das meist der Punkt, an dem
 eine Verbindung in der Praxis platzt.
 
+**Mindestumsteigezeit** lässt sich im Suchformular einstellen (Standard 5 min,
+„egal" bis 30 min). Der Wert wird an **beide** Quellen durchgereicht — HAFAS
+kennt `minChgTime`, die DB `minUmstiegszeit`. Das ist deutlich besser als
+nachträglich zu filtern: Die Quellen suchen dann passende Verbindungen, statt
+dass knappe einfach wegfallen. Nachgemessen für Josef-Wirth-Weg → Garching
+Forschungszentrum: ohne Vorgabe Umstiege von 3–4 Minuten, mit `5` dann 8–9, mit
+`12` dann 13–14. Ein Nachfilter bleibt als Sicherheitsnetz; bliebe dadurch
+nichts übrig, werden lieber die knappen Verbindungen gezeigt als eine leere
+Liste.
+
+**Fußwege** werden jetzt zuverlässig erkannt. Vorher tauchten sie als
+„Unbekannt" auf, weil die DB im Nahverkehr das Feld `typ` schlicht weglässt und
+der Abschnitt dadurch als Fahrzeug ohne Gattung durchging. Erkannt wird
+stattdessen am Verkehrsmittel selbst: kein Gattungskürzel, keine Liniennummer,
+Name „Fußweg". Bei der ÖBB gilt umgekehrt, dass alles außer einer Fahrt (`JNY`)
+ein Weg zu Fuß ist — das deckt auch seltenere Abschnittstypen ab.
+
+Unterschieden wird dabei, ob der Halt wechselt: „Umstieg am selben Halt" ist
+etwas anderes als „Zu Fuss: Studentenstadt → Situlistraße". Letzteres bekommt
+eine eigene Kennzeichnung, weil so ein Fußweg oft der Grund ist, warum eine
+Verbindung schneller oder entspannter ist.
+
+**Was nicht geht:** Von sich aus schlägt keine der beiden Quellen einen Fußweg
+zu einer *anderen* Haltestelle vor, um dort besser umzusteigen. Für Josef-Wirth-Weg
+→ Garching liefern beide ausschließlich die Route über Studentenstadt, nie über
+Situlistraße. Wer so eine Variante will, kann sie im Nerd-Modus über
+**„Über eine bestimmte Stadt"** erzwingen — dort Situlistraße eintragen.
+
 **Bestpreis über den Tag:** Unter den Hinweisen stehen sechs Zeitfenster mit dem
 jeweils günstigsten Angebot. Ein Klick übernimmt die Uhrzeit und sucht neu.
 Gemessen für Zürich–München: 33,99 € abends gegen 41,99 € nachts.
@@ -530,8 +558,9 @@ Alles per GET auf `api/`:
 | `?action=bestprices&from=…&to=…&date=…` | Günstigste Zeitfenster am Tag |
 
 `journeys` versteht zusätzlich `discounts` (kommagetrennt), `products`
-(kommagetrennt, leer = alle), `class` (1/2), `results`, `arrival=1` und `via`
-(EVA-Nummern, kommagetrennt).
+(kommagetrennt, leer = alle), `class` (1/2), `results`, `arrival=1`, `via`
+(EVA-Nummern, kommagetrennt) und `minchange` (Mindestumsteigezeit in Minuten,
+1–60).
 
 ---
 
