@@ -657,7 +657,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   border-radius: var(--radius);
 }
 
-.map.is-empty { display: none; }
+/* Die Karte bleibt immer sichtbar; ohne Ergebnisse zeigt sie den Überblick. */
 
 /* Der Ausschnitt, in dem Kacheln und Overlay liegen. */
 .map__viewport {
@@ -735,7 +735,22 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.6));
 }
 
-.map__route:focus-visible .map__line { stroke: var(--purple); opacity: 1; }
+/* Beim Klicken keinen Rahmen zeichnen - der Browser umrandet sonst die
+   gesamte Bounding-Box der Route mit einem Kasten. Für Tastaturbedienung
+   bleibt die Hervorhebung über die Linienfarbe erhalten. */
+.map__route:focus { outline: none; }
+.map__train:focus { outline: none; }
+
+.map__route:focus-visible .map__line {
+  stroke: var(--purple);
+  opacity: 1;
+  stroke-width: 4;
+}
+
+.map__train:focus-visible .map__train-dot {
+  fill: var(--purple);
+  stroke: #ffffff;
+}
 
 .map__stop {
   fill: var(--bg-deep);
@@ -1433,14 +1448,28 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
   /* Ergebnisse */
   .journey { padding: 0.85rem; }
-  .journey__head { gap: 0.5rem 0.7rem; }
-  .journey__time { font-size: 1.15rem; }
-  .journey__price { font-size: 1rem; }
-  .journey__price-box { text-align: right; }
-  .journey__meta { gap: 0.6rem; font-size: 0.76rem; }
-  /* Reicht der Platz für Zeiten und Preis nebeneinander nicht, rutscht der
-     Preis in eine eigene Zeile statt sich zu überlappen. */
-  .journey__main { flex: 1 1 190px; }
+  /* Auf dem Telefon Zeiten und Preis strikt untereinander. Nebeneinander
+     wird es bei langen Preisen ("ca. 85,87–156,12 €") zu eng und die
+     Blöcke schieben sich ineinander. */
+  .journey__head { flex-direction: column; align-items: stretch; gap: 0.5rem; }
+  .journey__main { flex: 1 1 auto; width: 100%; }
+  .journey__time { font-size: 1.3rem; }
+  .journey__times { gap: 0.5rem; }
+  .journey__meta { gap: 0.7rem; font-size: 0.78rem; }
+
+  .journey__price-box {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    width: 100%;
+    margin-left: 0;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--border);
+    text-align: left;
+  }
+
+  .journey__price { font-size: 1.05rem; }
+  .journey__price-label { margin-left: auto; text-align: right; }
 
   .chain { gap: 0.25rem; }
   .chip { font-size: 0.72rem; padding: 0.15rem 0.4rem; }

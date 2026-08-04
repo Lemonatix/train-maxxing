@@ -174,6 +174,10 @@ export class RouteMap {
     let last = null;
     const pointers = new Map();
     let pinchDist = 0;
+    // Das beim Drücken getroffene Element merken. Nötig, weil
+    // setPointerCapture das Ziel späterer Events auf den Viewport umbiegt -
+    // beim Klick wäre e.target dann der Viewport und nicht die Route.
+    let downTarget = null;
 
     vp.addEventListener('pointerdown', (e) => {
       // Bedienelemente nicht abfangen: sonst schnappt sich der Viewport per
@@ -185,7 +189,9 @@ export class RouteMap {
         dragging = true;
         moved = 0;
         last = { x: e.clientX, y: e.clientY };
-        vp.setPointerCapture(e.pointerId);
+        downTarget = e.target;
+        // Kein setPointerCapture hier: das würde den Klick auf Routen und
+        // Züge verschlucken. Es wird erst gesetzt, wenn wirklich gezogen wird.
         vp.classList.add('is-dragging');
       } else if (pointers.size === 2) {
         dragging = false;
@@ -212,6 +218,14 @@ export class RouteMap {
       const dx = e.clientX - last.x;
       const dy = e.clientY - last.y;
       moved += Math.abs(dx) + Math.abs(dy);
+
+      // Erst ab einer echten Ziehbewegung den Pointer einfangen. Bis dahin
+      // bleibt ein Klick ein Klick - auch wenn die Maus ein, zwei Pixel wackelt.
+      if (moved > 6 && !vp.hasPointerCapture?.(e.pointerId)) {
+        try { vp.setPointerCapture(e.pointerId); } catch { /* egal */ }
+      }
+      if (moved <= 6) return;
+
       last = { x: e.clientX, y: e.clientY };
       this.panBy(-dx, -dy);
     });
@@ -241,8 +255,12 @@ export class RouteMap {
     vp.addEventListener('click', (e) => {
       if (moved > 6) return;
 
+      // Bevorzugt das beim Drücken getroffene Element - nach einem
+      // Pointer-Capture zeigt e.target sonst auf den Viewport.
+      const hit = downTarget && vp.contains(downTarget) ? downTarget : e.target;
+
       // Züge zuerst: sie liegen über den Linien.
-      const train = e.target.closest?.('.map__train');
+      const train = hit.closest?.('.map__train');
       if (train?.dataset.jid) {
         const t = this.liveTrains.find((x) => x.jid === train.dataset.jid);
         if (t && this.onTrainClick) {
@@ -251,7 +269,7 @@ export class RouteMap {
         }
       }
 
-      const g = e.target.closest?.('.map__route');
+      const g = hit.closest?.('.map__route');
       if (g && this.onSelect) this.onSelect(Number(g.dataset.index));
     });
   }
@@ -331,18 +349,25 @@ export class RouteMap {
   }
 
   setData(ranked, activeIdx, onSelect) {
-    const first = this.ranked.length === 0;
+    const hadNone = this.ranked.length === 0;
     this.ranked = ranked || [];
     this.activeIdx = activeIdx || 0;
     this.onSelect = onSelect;
 
-    if (this.ranked.length === 0) {
-      this.el.classList.add('is-empty');
-      return;
-    }
+    // Die Karte bleibt immer sichtbar - ohne Ergebnisse zeigt sie den
+    // Überblick über den deutschsprachigen Raum, und die Routen kommen dazu,
+    // sobald eine Suche läuft.
     this.build();
-    if (first) this.fit();
+    if (this.ranked.length > 0 && hadNone) this.fit();
     this.render();
+    this.updateHint();
+  }
+
+  updateHint() {
+    if (!this.hint) return;
+    this.hint.textContent = this.ranked.length === 0
+      ? 'Start und Ziel wählen — die Routen erscheinen hier.'
+      : 'Ziehen zum Verschieben, Scrollen zum Zoomen. Auf eine Linie tippen wählt die Verbindung.';
   }
 
   setLiveTrains(trains) {

@@ -356,26 +356,26 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         Products::bitmask($products)
     );
 
-    if (!$sched['ok']) {
-        fail('Fahrplanabfrage fehlgeschlagen: ' . $sched['error'], 502);
-    }
-
-    $journeys = $sched['data'];
-    if ($journeys === []) {
-        $hint = $products !== [] || $viaIds !== []
-            ? 'Keine Verbindungen gefunden. Vielleicht sind die Filter zu eng.'
-            : 'Keine Verbindungen gefunden.';
-        ok(['journeys' => [], 'notices' => [$hint], 'cached' => false]);
-    }
-
-    // --- 2. Preise von DB versuchen -----------------------------------
+    $journeys    = $sched['ok'] ? $sched['data'] : [];
     $priceSource = 'estimate';
+    $dbEnabled   = ($config['providers']['db']['enabled'] ?? false) === true;
+    $db          = $dbEnabled ? new DbVendo($http, $config['providers']['db']) : null;
 
-    if (($config['providers']['db']['enabled'] ?? false) === true) {
-        $db     = new DbVendo($http, $config['providers']['db']);
+    // --- 2. Preise von der DB, notfalls auch den Fahrplan --------------
+    //
+    // Die OeBB kennt nur Stationen mit echter EVA-Nummer. Nahverkehrshalte
+    // wie "Sendlinger Tor, Muenchen" haben lokale Kennungen und werden dort
+    // mit "location missing or invalid" abgelehnt. Die DB kennt sie - also
+    // uebernimmt sie in dem Fall auch den Fahrplan.
+    if ($db !== null) {
         $priced = $db->journeys($from, $to, $date, $time, $arrival, $travelClass, $discounts, true, $products);
 
-        if ($priced['ok'] && $priced['data'] !== []) {
+        if ($journeys === [] && $priced['ok'] && $priced['data'] !== []) {
+            $journeys    = $priced['data'];
+            $priceSource = 'db';
+            $notices[]   = 'Fahrplan von der DB — die ÖBB kennt diese Station nicht. '
+                         . 'Auf der Karte fehlt dadurch der genaue Streckenverlauf.';
+        } elseif ($journeys !== [] && $priced['ok'] && $priced['data'] !== []) {
             $matched = mergePrices($journeys, $priced['data']);
             if ($matched > 0) {
                 $priceSource = 'db';
@@ -390,9 +390,19 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
                     . implode(', ', $ownAbos)
                     . ' wird auf den Echtpreis hochgerechnet und ist damit eine Schaetzung.';
             }
-        } elseif (!$priced['ok']) {
+        } elseif (!$priced['ok'] && $journeys !== []) {
             $notices[] = $priced['error'];
         }
+    }
+
+    if ($journeys === []) {
+        if (!$sched['ok'] && $db === null) {
+            fail('Fahrplanabfrage fehlgeschlagen: ' . $sched['error'], 502);
+        }
+        $hint = $products !== [] || $viaIds !== []
+            ? 'Keine Verbindungen gefunden. Vielleicht sind die Filter zu eng.'
+            : 'Keine Verbindungen gefunden.';
+        ok(['journeys' => [], 'priceSource' => $priceSource, 'notices' => [$hint], 'cached' => false]);
     }
 
     // --- 3. Baureihe ergaenzen (nur am Reisetag, nur deutscher Fernverkehr) ---

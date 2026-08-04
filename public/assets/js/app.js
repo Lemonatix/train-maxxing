@@ -55,6 +55,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Nach Verschieben oder Zoomen die Zuege im neuen Ausschnitt nachladen.
   map.onViewChange = scheduleLiveTrains;
   map.onTrainClick = showTrainDetails;
+  // Karte sofort aufbauen, damit sie nicht erst nach der ersten Suche erscheint.
+  map.setData([], 0, select);
   setupMode();
   setupLiveToggle();
   setupStationInputs();
@@ -475,8 +477,6 @@ async function runSearch() {
   status.textContent = 'Suche Verbindungen …';
   results.replaceChildren();
   $('#notices').replaceChildren();
-  $('#map').replaceChildren();
-  $('#map').classList.add('is-empty');
   state.selectedIndex = 0;
 
   try {

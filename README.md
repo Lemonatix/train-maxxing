@@ -276,10 +276,17 @@ Gattungsbewertung da.
 ### Karte
 
 Eine echte Slippy-Map mit Kartenhintergrund: ziehen zum Verschieben, scrollen
-oder Pinch zum Zoomen, dazu Knöpfe für Zoom und „ganze Route zeigen". Alle
-gefundenen Routen liegen übereinander, die ausgewählte ist hervorgehoben. Klick
-auf eine Linie wählt die Verbindung, Klick auf eine Verbindung hebt die Linie
-hervor — beides synchron.
+oder Pinch zum Zoomen, dazu Knöpfe für Zoom und „ganze Route zeigen". Sie ist
+**immer sichtbar** — ohne Suche zeigt sie den Überblick, die Routen kommen
+dazu, sobald Start und Ziel stehen. Alle gefundenen Routen liegen übereinander,
+die ausgewählte ist hervorgehoben. Klick auf eine Linie wählt die Verbindung,
+Klick auf eine Verbindung hebt die Linie hervor — beides synchron.
+
+**Zur Bedienung mit der Maus:** Der Pointer wird erst nach mehr als sechs Pixel
+Bewegung eingefangen. Vorher bleibt ein Klick ein Klick, auch wenn die Maus
+dabei leicht wackelt — sonst verschluckt `setPointerCapture` die Auswahl von
+Routen und Zügen. Und das beim Drücken getroffene Element wird gemerkt, weil
+`event.target` nach einem Capture auf den Viewport zeigt statt auf die Linie.
 
 Gebaut ohne Leaflet: ein Kachel-Layer aus `<img>`-Elementen, darüber ein SVG mit
 Routen, Halten und Zugpositionen. Das spart ein mitzulieferndes Paket und hält
@@ -398,8 +405,22 @@ Sortiert wird in drei Stufen:
    verfügbare Ersatz für „Größe der Stadt", die keine der APIs mitliefert.
 3. **Rang der Quelle**, bei Gleichstand mit Vorrang für die DB.
 
-Die Fahrplansuche läuft weiter über die ÖBB — die kennt deutsche EVA-Nummern
-problemlos, geprüft mit `8004135` (München Marienplatz).
+### Wenn die ÖBB die Station nicht kennt
+
+Die Fahrplansuche läuft normalerweise über die ÖBB. Die kennt deutsche
+EVA-Nummern problemlos (geprüft mit `8004135`, München Marienplatz), aber
+**keine lokalen Kennungen**. Nahverkehrshalte wie „Sendlinger Tor, München"
+tragen Nummern wie `625176` — dort antwortet HAFAS mit
+`location missing or invalid`.
+
+Deshalb gibt es einen Fallback: Findet die ÖBB nichts, übernimmt die DB auch den
+Fahrplan. Geprüft für Sendlinger Tor → München Hbf: ÖBB null Treffer, DB fünf
+Verbindungen (U7, U2). Alle Halte tragen Koordinaten, die Karte kann sie also
+zeichnen — nur der genaue Streckenverlauf fehlt, weil die DB keine Polylines
+liefert. Das steht dann als Hinweis über den Ergebnissen.
+
+Damit lassen sich auch reine U-Bahn- und Tram-Halte als Start oder Ziel
+verwenden.
 
 ### Ticketshops
 
