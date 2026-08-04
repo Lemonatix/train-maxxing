@@ -489,6 +489,14 @@ angewendet:
 *seven25* ist kein eigener Eintrag — es ist dasselbe Produkt wie GA Night, nur
 der Tarif für unter 25-Jährige.
 
+**Zeitfenster gelten je Teilstück, nicht je Verbindung.** Maßgeblich ist die
+Uhrzeit, zu der der Zug das jeweilige Teilstück tatsächlich befährt — dafür
+werden die Zeiten der Zwischenhalte ausgewertet (fehlen sie, werden sie über die
+Distanz interpoliert). Der ECE München–Zürich ab 17:03 ist damit korrekt vom GA
+Night gedeckt, weil er den Schweizer Abschnitt erst nach 19:00 erreicht. Liegt
+ein Teilstück auf der Fenstergrenze, wirkt der Rabatt anteilig: 18:45–19:15
+ergibt den halben Nachlass.
+
 Zwei Sonderfälle sind hinterlegt: Die BahnCard 50 gibt auf Sparpreise nur 25 %.
 Und beim Deutschlandticket verlässt sich das Tool nicht auf die Gattung allein —
 die DB markiert in ihrer Antwort selbst, auf welchen Teilstrecken es gilt

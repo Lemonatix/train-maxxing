@@ -1293,12 +1293,22 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .leg__stops { display: flex; flex-wrap: wrap; gap: 0.25rem; padding-left: 0.3rem; }
 
 .leg__stop {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
   padding: 0.08rem 0.35rem;
   border-radius: 3px;
   background: var(--surface-inset);
   font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--text-muted);
+}
+
+/* Uhrzeit vor dem Namen, damit die Halte zeitlich lesbar bleiben. */
+.leg__stop-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  opacity: 0.75;
 }
 
 .leg__stops-count {

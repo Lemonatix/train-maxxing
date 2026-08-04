@@ -295,7 +295,10 @@ function renderLegs(journey, entry, state) {
       row.append(el('div', 'leg__stops-count', leg.dTicket));
     }
 
-    // Zwischenhalte: im Nerd-Mode alle, sonst nur die Anzahl.
+    // Zwischenhalte: im Nerd-Mode alle mit Uhrzeit, sonst nur die Anzahl.
+    // Die Zeiten stehen hier nicht zur Zierde: zeitlich begrenzte Abos wie das
+    // GA Night gelten je Teilstueck, ein ECE ab Muenchen 17:03 ist in der
+    // Schweiz also trotzdem im Fenster.
     const stops = leg.stops || [];
     if (stops.length > 2) {
       const mid = stops.slice(1, -1);
@@ -303,9 +306,11 @@ function renderLegs(journey, entry, state) {
         const list = el('div', 'leg__stops');
         for (const s of mid) {
           const item = el('span', 'leg__stop');
-          item.textContent = s.name;
+          const time = formatTime(s.arrival || s.departure);
+          if (time !== '--:--') item.append(el('span', 'leg__stop-time', time));
+          item.append(el('span', 'leg__stop-name', s.name));
           if (s.country) item.dataset.country = s.country;
-          item.title = `${formatTime(s.arrival || s.departure)} · ${(s.country || '').toUpperCase()}`;
+          item.title = `${time} · ${(s.country || '').toUpperCase()}`;
           list.append(item);
         }
         row.append(list);

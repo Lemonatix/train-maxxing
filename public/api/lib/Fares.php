@@ -187,7 +187,7 @@ final class Fares
     /**
      * Preis fuer eine Segmentliste unter Beruecksichtigung der Abos.
      *
-     * @param array<int,array{country:string,km:float,category:string,hour:?int,dTicket:bool}> $segments
+     * @param array<int,array{country:string,km:float,category:string,start:?int,end:?int,dTicket:bool}> $segments
      * @param string[] $discounts
      */
     private static function price(array $segments, array $discounts, int $travelClass): array
@@ -196,7 +196,7 @@ final class Fares
         $saver      = 0.0;
         $perCountry = [];
         $applied    = [];
-        $countries  = [];
+        $paidKm     = [];
 
         foreach ($segments as $seg) {
             $c    = $seg['country'];
@@ -210,12 +210,23 @@ final class Fares
 
             foreach ($discounts as $id) {
                 $rule = self::DISCOUNTS[$id] ?? null;
-                if ($rule === null || !self::ruleApplies($rule, $seg, $travelClass)) {
+                if ($rule === null) {
                     continue;
                 }
-                if ($rule['factor'] < $bestFlex) {
-                    $bestFlex  = $rule['factor'];
-                    $bestSaver = $rule['saverFactor'] ?? $rule['factor'];
+                $share = self::ruleShare($rule, $seg, $travelClass);
+                if ($share <= 0.0) {
+                    continue;
+                }
+
+                // Zeitlich begrenzte Abos koennen ein Teilstueck nur anteilig
+                // decken: faehrt der Zug von 18:45 bis 19:15, gilt das GA Night
+                // fuer die Haelfte der Strecke.
+                $ruleFlex  = 1.0 - $share * (1.0 - $rule['factor']);
+                $ruleSaver = 1.0 - $share * (1.0 - ($rule['saverFactor'] ?? $rule['factor']));
+
+                if ($ruleFlex < $bestFlex) {
+                    $bestFlex  = $ruleFlex;
+                    $bestSaver = $ruleSaver;
                     $applied[] = $rule['label'];
                 }
             }
@@ -223,30 +234,14 @@ final class Fares
             $flex  += $segFlex * $bestFlex;
             $saver += $segSaver * $bestSaver;
 
-            $perCountry[$c]  = ($perCountry[$c] ?? 0) + $seg['km'];
-            $countries[$c]   = true;
+            $perCountry[$c] = ($perCountry[$c] ?? 0) + $seg['km'];
+            $paidKm[$c]     = ($paidKm[$c] ?? 0.0) + ($bestFlex < 0.001 ? 0.0 : $seg['km']);
         }
 
         // Grundgebuehr einmal pro beteiligtem Land, sofern dort ueberhaupt
         // etwas zu zahlen ist.
-        foreach (array_keys($countries) as $c) {
-            $paidKm = 0.0;
-            $freeKm = 0.0;
-            foreach ($segments as $seg) {
-                if ($seg['country'] !== $c) {
-                    continue;
-                }
-                $covered = false;
-                foreach ($discounts as $id) {
-                    $rule = self::DISCOUNTS[$id] ?? null;
-                    if ($rule !== null && $rule['factor'] === 0.00 && self::ruleApplies($rule, $seg, $travelClass)) {
-                        $covered = true;
-                        break;
-                    }
-                }
-                $covered ? $freeKm += $seg['km'] : $paidKm += $seg['km'];
-            }
-            if ($paidKm > 0.5) {
+        foreach ($paidKm as $c => $km) {
+            if ($km > 0.5) {
                 $base   = self::BASE_FEE[$c] ?? self::BASE_FEE['default'];
                 $flex  += $base;
                 $saver += $base * self::SAVER_FACTOR;
@@ -268,14 +263,70 @@ final class Fares
         ];
     }
 
-    /** Prueft Land, Gattung, Uhrzeit und Wagenklasse. */
+    /**
+     * Anteil eines Teilstuecks, auf den ein Abo wirkt: 0 = gar nicht,
+     * 1 = vollstaendig. Nur zeitlich begrenzte Abos liegen dazwischen.
+     */
+    private static function ruleShare(array $rule, array $seg, int $travelClass): float
+    {
+        if (!self::ruleApplies($rule, $seg, $travelClass)) {
+            return 0.0;
+        }
+        if (!isset($rule['hours'])) {
+            return 1.0;
+        }
+        [$from, $to] = $rule['hours'];
+
+        return self::windowShare($seg['start'] ?? null, $seg['end'] ?? null, $from, $to);
+    }
+
+    /**
+     * Anteil der Fahrzeit eines Teilstuecks, der im taeglichen Zeitfenster
+     * [$fromH, $toH) liegt. Ohne Zeitangabe gilt das Fenster als nicht erfuellt.
+     *
+     * Hier steckt der Unterschied zwischen "Zug faehrt um 17:00 in Muenchen ab"
+     * und "Zug ist ab 19:00 in der Schweiz": das GA Night deckt den Schweizer
+     * Teil, obwohl die Verbindung deutlich frueher startet. Massgeblich ist
+     * also nie die Abfahrt der Verbindung, sondern die Uhrzeit auf dem
+     * jeweiligen Teilstueck.
+     *
+     * $start und $end sind Ortszeit-Sekunden (siehe localTs).
+     */
+    private static function windowShare(?int $start, ?int $end, int $fromH, int $toH): float
+    {
+        if ($start === null) {
+            return 0.0;
+        }
+        // Ohne brauchbare Ankunftszeit pruefen wir den Zeitpunkt der Abfahrt.
+        $end = ($end !== null && $end > $start) ? $end : $start + 60;
+        $len = $end - $start;
+
+        $from = $fromH * 3600;
+        $to   = $toH * 3600;
+        if ($to <= $from) {
+            $to += 86400; // Fenster laeuft ueber Mitternacht
+        }
+
+        // Das Fenster jedes beruehrten Tages mit der Fahrzeit schneiden.
+        $inside = 0;
+        $day    = intdiv($start, 86400) * 86400 - 86400;
+        for (; $day <= $end; $day += 86400) {
+            $inside += max(0, min($end, $day + $to) - max($start, $day + $from));
+        }
+
+        return min(1.0, $inside / $len);
+    }
+
+    /** Prueft Land, Gattung und Wagenklasse. Die Uhrzeit klaert ruleShare(). */
     private static function ruleApplies(array $rule, array $seg, int $travelClass): bool
     {
         if ($rule['country'] !== $seg['country']) {
             return false;
         }
 
-        if (isset($rule['maxClass']) && $travelClass > $rule['maxClass']) {
+        // Kleinere Zahl heisst hoehere Klasse: maxClass 2 schliesst die
+        // 1. Klasse aus, nicht umgekehrt.
+        if (isset($rule['maxClass']) && $travelClass < $rule['maxClass']) {
             return false;
         }
 
@@ -290,32 +341,22 @@ final class Fares
             }
         }
 
-        if (isset($rule['hours'])) {
-            $hour = $seg['hour'];
-            if ($hour === null) {
-                return false;
-            }
-            [$from, $to] = $rule['hours'];
-            $inWindow = $from <= $to
-                ? ($hour >= $from && $hour < $to)
-                : ($hour >= $from || $hour < $to); // ueber Mitternacht
-            if (!$inWindow) {
-                return false;
-            }
-        }
-
         return true;
     }
 
     /**
-     * Zerlegt die Reise in Segmente mit Land, Distanz, Gattung und Startstunde.
+     * Zerlegt die Reise in Segmente mit Land, Distanz, Gattung und Fahrzeit.
      *
      * Grundlage sind die Zwischenhalte, die jeweils einen Laendercode tragen.
      * Damit wird Wien-Muenchen korrekt als ~317 km AT plus ~145 km DE gerechnet
      * statt pauschal halbiert - fuer GA, KlimaTicket und BahnCard 100 der
      * Unterschied zwischen "frei" und "voller Preis".
      *
-     * @return array<int,array{country:string,km:float,category:string,hour:?int,dTicket:bool}>
+     * Jedes Teilstueck traegt die Uhrzeit, zu der es tatsaechlich befahren
+     * wird. Nur so faellt der Schweizer Teil eines um 17:00 in Muenchen
+     * gestarteten ECE ins Zeitfenster des GA Night.
+     *
+     * @return array<int,array{country:string,km:float,category:string,start:?int,end:?int,dTicket:bool}>
      */
     private static function segments(array $journey): array
     {
@@ -327,10 +368,9 @@ final class Fares
             }
 
             $category = (string) ($leg['category'] ?? '');
-            $hour     = self::hourOf($leg['departure'] ?? null);
             $dTicket  = !empty($leg['dTicket']);
 
-            $points = $leg['stops'] ?? [];
+            $points = array_values($leg['stops'] ?? []);
             if (count($points) < 2) {
                 $from = $leg['from'] ?? null;
                 $to   = $leg['to'] ?? null;
@@ -340,29 +380,124 @@ final class Fares
                 $points = [$from, $to];
             }
 
+            $n   = count($points) - 1;
+            $kms = [];
             $any = false;
-            for ($i = 0, $n = count($points) - 1; $i < $n; $i++) {
-                $a = $points[$i];
-                $b = $points[$i + 1];
-
+            for ($i = 0; $i < $n; $i++) {
+                $a  = $points[$i];
+                $b  = $points[$i + 1];
                 $km = self::haversine($a['lat'] ?? null, $a['lon'] ?? null, $b['lat'] ?? null, $b['lon'] ?? null);
-                if ($km === null) {
-                    continue;
-                }
-                $any = true;
-                self::pushSegment($out, $km * self::DETOUR_FACTOR, $a['country'] ?? '', $b['country'] ?? '', $category, $hour, $dTicket);
+
+                $kms[$i] = $km === null ? null : $km * self::DETOUR_FACTOR;
+                $any     = $any || $km !== null;
             }
 
             // Ohne Koordinaten (z.B. DB-Daten) aus der Fahrzeit schaetzen.
             if (!$any) {
                 $km = max(0, (int) ($leg['durationMin'] ?? 0)) * 1.5;
                 if ($km > 0) {
-                    self::pushSegment($out, $km, $leg['from']['country'] ?? '', $leg['to']['country'] ?? '', $category, $hour, $dTicket);
+                    self::pushSegment(
+                        $out,
+                        $km,
+                        $leg['from']['country'] ?? '',
+                        $leg['to']['country'] ?? '',
+                        $category,
+                        self::localTs($leg['departure'] ?? null),
+                        self::localTs($leg['arrival'] ?? null),
+                        $dTicket
+                    );
                 }
+                continue;
+            }
+
+            $times = self::stopTimes($points, $kms, $leg);
+
+            for ($i = 0; $i < $n; $i++) {
+                if ($kms[$i] === null) {
+                    continue;
+                }
+                self::pushSegment(
+                    $out,
+                    $kms[$i],
+                    $points[$i]['country'] ?? '',
+                    $points[$i + 1]['country'] ?? '',
+                    $category,
+                    $times[$i],
+                    $times[$i + 1],
+                    $dTicket
+                );
             }
         }
 
         return $out;
+    }
+
+    /**
+     * Ein Zeitpunkt je Halt, in Ortszeit-Sekunden.
+     *
+     * Fehlende Zwischenzeiten - nicht jeder Anbieter liefert sie - werden
+     * ueber die Distanz zwischen den bekannten Nachbarn interpoliert. Fuer die
+     * Frage "wo ist der Zug um 19:00" reicht das allemal.
+     *
+     * @param array<int,array<string,mixed>> $points
+     * @param array<int,?float>              $kms
+     * @return array<int,?int>
+     */
+    private static function stopTimes(array $points, array $kms, array $leg): array
+    {
+        $n     = count($points);
+        $times = [];
+
+        foreach ($points as $i => $p) {
+            // Am Startpunkt zaehlt die Abfahrt, sonst die Ankunft: das ist
+            // jeweils der Zeitpunkt, an dem das Teilstueck beginnt bzw. endet.
+            $iso = $i === 0
+                ? ($p['departure'] ?? $p['arrival'] ?? null)
+                : ($p['arrival'] ?? $p['departure'] ?? null);
+            $times[$i] = self::localTs(is_string($iso) ? $iso : null);
+        }
+
+        $times[0]      ??= self::localTs($leg['departure'] ?? null);
+        $times[$n - 1] ??= self::localTs($leg['arrival'] ?? null);
+
+        // Kumulierte Distanz als Stuetzstelle der Interpolation.
+        $cum = [0.0];
+        for ($i = 0; $i < $n - 1; $i++) {
+            $cum[$i + 1] = $cum[$i] + ($kms[$i] ?? 0.0);
+        }
+
+        for ($i = 0; $i < $n; $i++) {
+            if ($times[$i] !== null) {
+                continue;
+            }
+
+            $a = null;
+            for ($j = $i - 1; $j >= 0; $j--) {
+                if ($times[$j] !== null) {
+                    $a = $j;
+                    break;
+                }
+            }
+            $b = null;
+            for ($j = $i + 1; $j < $n; $j++) {
+                if ($times[$j] !== null) {
+                    $b = $j;
+                    break;
+                }
+            }
+            if ($a === null || $b === null) {
+                continue; // ohne Anker keine sinnvolle Schaetzung
+            }
+
+            $span = $cum[$b] - $cum[$a];
+            $frac = $span > 0.01
+                ? ($cum[$i] - $cum[$a]) / $span
+                : ($i - $a) / ($b - $a);
+
+            $times[$i] = (int) round($times[$a] + ($times[$b] - $times[$a]) * $frac);
+        }
+
+        return $times;
     }
 
     private static function pushSegment(
@@ -371,7 +506,8 @@ final class Fares
         string $cFrom,
         string $cTo,
         string $category,
-        ?int $hour,
+        ?int $start,
+        ?int $end,
         bool $dTicket
     ): void {
         if ($cFrom === '' && $cTo === '') {
@@ -382,26 +518,45 @@ final class Fares
             $cTo = $cFrom;
         }
 
+        $make = static fn(string $country, float $segKm, ?int $segStart, ?int $segEnd): array => [
+            'country'  => $country,
+            'km'       => $segKm,
+            'category' => $category,
+            'start'    => $segStart,
+            'end'      => $segEnd,
+            'dTicket'  => $dTicket,
+        ];
+
         if ($cFrom === $cTo) {
-            $out[] = ['country' => $cFrom, 'km' => $km, 'category' => $category, 'hour' => $hour, 'dTicket' => $dTicket];
+            $out[] = $make($cFrom, $km, $start, $end);
             return;
         }
 
-        // Grenzquerung ohne Zwischenhalt: haelftig teilen.
-        $out[] = ['country' => $cFrom, 'km' => $km / 2, 'category' => $category, 'hour' => $hour, 'dTicket' => $dTicket];
-        $out[] = ['country' => $cTo,   'km' => $km / 2, 'category' => $category, 'hour' => $hour, 'dTicket' => $dTicket];
+        // Grenzquerung ohne Zwischenhalt: haelftig teilen, auch zeitlich.
+        $mid = ($start !== null && $end !== null) ? (int) round(($start + $end) / 2) : null;
+
+        $out[] = $make($cFrom, $km / 2, $start, $mid ?? $end);
+        $out[] = $make($cTo,   $km / 2, $mid ?? $start, $end);
     }
 
-    private static function hourOf(?string $iso): ?int
+    /**
+     * ISO-Zeitstempel als Sekunden in Ortszeit: Unixzeit plus Zonenoffset.
+     *
+     * Damit laesst sich die Tageszeit vor Ort ohne Zonenrechnerei aus dem
+     * Rest modulo 86400 lesen - genau das braucht das Zeitfenster.
+     */
+    private static function localTs(?string $iso): ?int
     {
         if ($iso === null || $iso === '') {
             return null;
         }
         try {
-            return (int) (new DateTimeImmutable($iso))->format('G');
+            $d = new DateTimeImmutable($iso);
         } catch (Exception $e) {
             return null;
         }
+
+        return $d->getTimestamp() + $d->getOffset();
     }
 
     private static function haversine(?float $lat1, ?float $lon1, ?float $lat2, ?float $lon2): ?float
