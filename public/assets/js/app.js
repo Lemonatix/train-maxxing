@@ -49,9 +49,12 @@ let map = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
+  // Eine geteilte Suche aus der URL hat Vorrang vor gespeicherten Werten.
+  const shared = applyShareUrl();
   map = new RouteMap($('#map'));
   // Nach Verschieben oder Zoomen die Zuege im neuen Ausschnitt nachladen.
   map.onViewChange = scheduleLiveTrains;
+  map.onTrainClick = showTrainDetails;
   setupMode();
   setupLiveToggle();
   setupStationInputs();
@@ -59,8 +62,12 @@ document.addEventListener('DOMContentLoaded', () => {
   setupNerdControls();
   setupModels();
   setupResize();
+  setupShare();
   loadCatalogue();
   applyStateToForm();
+
+  // Geteilte Suche direkt ausführen, damit der Empfänger nichts tun muss.
+  if (shared) runSearch();
 });
 
 // ======================================================================
@@ -493,7 +500,9 @@ async function runSearch() {
     state.lastPayload = payload;
     status.className = 'status';
     status.textContent = `${payload.journeys.length} Verbindungen · ${state.from.name} → ${state.to.name}`;
+    updateShareUrl();
     rerank();
+    loadBestPrices();
   } catch (err) {
     if (err.name === 'AbortError') return;
     status.className = 'status status--error';
@@ -547,6 +556,206 @@ function scheduleLiveTrains() {
   }
   clearTimeout(liveTimer);
   liveTimer = setTimeout(fetchLiveTrains, 600);
+}
+
+// ======================================================================
+// Bestpreise über den Tag
+// ======================================================================
+
+/**
+ * Zeigt, wann am Reisetag die günstigsten Abfahrten liegen. Läuft nach der
+ * Suche nebenher; schlägt es fehl, bleibt der Bereich einfach leer.
+ */
+async function loadBestPrices() {
+  const box = $('#bestprices');
+  if (!box || !state.from || !state.to) return;
+  box.replaceChildren();
+  box.hidden = true;
+
+  try {
+    const res = await api.bestPrices({
+      from: state.from.id, to: state.to.id, date: state.date,
+      travelClass: state.travelClass, discounts: state.discounts, products: state.products,
+    });
+    const iv = (res.intervals || []).filter((x) => typeof x.amount === 'number');
+    if (iv.length < 2) return;
+
+    const min = Math.min(...iv.map((x) => x.amount));
+    const max = Math.max(...iv.map((x) => x.amount));
+
+    const head = document.createElement('div');
+    head.className = 'bp__head';
+    head.textContent = min < max
+      ? `Günstigste Abfahrtszeit am ${state.date}: ab ${min.toFixed(2).replace('.', ',')} €`
+      : `Preis über den Tag konstant: ${min.toFixed(2).replace('.', ',')} €`;
+    box.append(head);
+
+    const bars = document.createElement('div');
+    bars.className = 'bp__bars';
+    for (const x of iv) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'bp__bar';
+      if (x.amount === min) b.classList.add('is-best');
+      // Balkenhöhe relativ zwischen günstigstem und teuerstem Fenster.
+      const rel = max > min ? (x.amount - min) / (max - min) : 0;
+      b.style.setProperty('--fill', String(0.35 + 0.65 * (1 - rel)));
+      b.title = `${x.from}–${x.to} Uhr ab ${x.amount.toFixed(2).replace('.', ',')} € — anklicken, um diese Zeit zu suchen`;
+
+      const t = document.createElement('span');
+      t.className = 'bp__time';
+      t.textContent = x.from;
+      const p = document.createElement('span');
+      p.className = 'bp__price';
+      p.textContent = x.amount.toFixed(0) + ' €';
+      b.append(p, t);
+
+      // Klick übernimmt die Uhrzeit und sucht neu.
+      b.addEventListener('click', () => {
+        state.time = x.from;
+        $('#time').value = x.from;
+        runSearch();
+      });
+      bars.append(b);
+    }
+    box.append(bars);
+    box.hidden = false;
+  } catch {
+    // Bestpreise sind Beiwerk.
+  }
+}
+
+// ======================================================================
+// Details eines Live-Zuges
+// ======================================================================
+
+let trainAbort = null;
+
+/** Laedt den Lauf eines angetippten Zuges und zeigt ihn unter der Karte. */
+async function showTrainDetails(train) {
+  const panel = $('#train-panel');
+  panel.hidden = false;
+  panel.replaceChildren();
+
+  const head = document.createElement('div');
+  head.className = 'train-panel__head';
+  const title = document.createElement('strong');
+  title.textContent = `${train.category || ''} ${train.trainNumber || ''}`.trim() || 'Zug';
+  head.append(title);
+  if (train.direction) {
+    const dir = document.createElement('span');
+    dir.className = 'train-panel__dir';
+    dir.textContent = '→ ' + train.direction;
+    head.append(dir);
+  }
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'train-panel__close';
+  close.textContent = '×';
+  close.setAttribute('aria-label', 'Schließen');
+  close.addEventListener('click', () => { panel.hidden = true; });
+  head.append(close);
+  panel.append(head);
+
+  const status = document.createElement('p');
+  status.className = 'train-panel__status';
+  status.textContent = 'Lade Zuglauf …';
+  panel.append(status);
+
+  if (trainAbort) trainAbort.abort();
+  trainAbort = new AbortController();
+
+  try {
+    const res = await api.trainDetails(train.jid, { signal: trainAbort.signal });
+    renderTrainPanel(panel, head, res.train);
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    status.textContent = 'Zuglauf nicht verfügbar: ' + err.message;
+  }
+}
+
+function renderTrainPanel(panel, head, t) {
+  panel.replaceChildren(head);
+
+  // Verspätung prominent, weil das die eigentliche Frage ist.
+  const badge = document.createElement('span');
+  badge.className = 'train-panel__delay';
+  if (t.cancelled) {
+    badge.textContent = 'Fällt aus';
+    badge.dataset.state = 'bad';
+  } else if (!t.hasRealtime) {
+    badge.textContent = 'keine Echtzeitdaten';
+    badge.dataset.state = 'unknown';
+  } else if (t.delay > 0) {
+    badge.textContent = `+${t.delay} min`;
+    badge.dataset.state = t.delay >= 5 ? 'bad' : 'warn';
+  } else {
+    badge.textContent = 'pünktlich';
+    badge.dataset.state = 'good';
+  }
+  head.append(badge);
+
+  for (const m of t.messages || []) {
+    const p = document.createElement('p');
+    p.className = 'train-panel__msg';
+    p.textContent = m;
+    panel.append(p);
+  }
+
+  const list = document.createElement('ol');
+  list.className = 'train-panel__stops';
+
+  const fmt = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null
+      : d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  for (const s of t.stops || []) {
+    const li = document.createElement('li');
+    li.className = 'train-panel__stop';
+    if (s.cancelled) li.classList.add('is-cancelled');
+
+    const time = document.createElement('span');
+    time.className = 'train-panel__time';
+    const plan = fmt(s.departure || s.arrival);
+    const real = fmt(s.departureReal || s.arrivalReal);
+    time.textContent = plan || '--:--';
+
+    // Weicht die Ist-Zeit ab, beide zeigen: Plan durchgestrichen, Ist daneben.
+    if (real && real !== plan) {
+      time.classList.add('is-shifted');
+      const rt = document.createElement('span');
+      rt.className = 'train-panel__real';
+      rt.textContent = real;
+      time.after?.(rt);
+      li.append(time, rt);
+    } else {
+      li.append(time);
+    }
+
+    const name = document.createElement('span');
+    name.className = 'train-panel__name';
+    name.textContent = s.name;
+    li.append(name);
+
+    if (s.platform) {
+      const pl = document.createElement('span');
+      pl.className = 'train-panel__platform';
+      pl.textContent = 'Gl. ' + s.platform;
+      li.append(pl);
+    }
+    if (typeof s.delay === 'number' && s.delay > 0) {
+      const d = document.createElement('span');
+      d.className = 'train-panel__stop-delay';
+      d.textContent = `+${s.delay}`;
+      li.append(d);
+    }
+    list.append(li);
+  }
+
+  panel.append(list);
 }
 
 async function fetchLiveTrains() {
@@ -716,6 +925,80 @@ function setupModels() {
 function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ======================================================================
+// Teilen: Suche in der Adresszeile ablegen und wieder einlesen
+// ======================================================================
+
+/**
+ * Schreibt die aktuelle Suche in die URL. Damit lässt sich eine Verbindung
+ * verschicken oder als Lesezeichen ablegen — ohne Server und ohne Konto.
+ */
+function updateShareUrl() {
+  if (!state.from || !state.to) return;
+
+  const p = new URLSearchParams();
+  p.set('von', state.from.id);
+  p.set('vonName', state.from.name);
+  p.set('nach', state.to.id);
+  p.set('nachName', state.to.name);
+  p.set('datum', state.date);
+  p.set('zeit', state.time);
+  if (state.arrival) p.set('an', '1');
+  if (state.travelClass === 1) p.set('klasse', '1');
+  if (state.discounts.length) p.set('abos', state.discounts.join(','));
+  if (state.products.length) p.set('vm', state.products.join(','));
+  if (state.mode === 'nerd') p.set('modus', 'nerd');
+  if (state.via) { p.set('via', state.via.id); p.set('viaName', state.via.name); }
+
+  history.replaceState(null, '', '?' + p.toString());
+}
+
+/**
+ * Liest eine geteilte Suche aus der URL. Gibt true zurück, wenn Start und
+ * Ziel gesetzt wurden — dann kann direkt gesucht werden.
+ */
+function applyShareUrl() {
+  const p = new URLSearchParams(location.search);
+  if (!p.get('von') || !p.get('nach')) return false;
+
+  state.from = { id: p.get('von'), name: p.get('vonName') || p.get('von') };
+  state.to   = { id: p.get('nach'), name: p.get('nachName') || p.get('nach') };
+  if (p.get('via')) state.via = { id: p.get('via'), name: p.get('viaName') || p.get('via') };
+
+  if (p.get('datum')) state.date = p.get('datum');
+  if (p.get('zeit')) state.time = p.get('zeit');
+  state.arrival = p.get('an') === '1';
+  state.travelClass = p.get('klasse') === '1' ? 1 : 2;
+  if (p.get('abos')) state.discounts = p.get('abos').split(',').filter(Boolean);
+  if (p.get('vm')) state.products = p.get('vm').split(',').filter(Boolean);
+  if (p.get('modus') === 'nerd') state.mode = 'nerd';
+
+  return true;
+}
+
+function setupShare() {
+  const btn = $('#share');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    updateShareUrl();
+    const url = location.href;
+    const label = btn.textContent;
+    try {
+      // Auf dem Telefon das native Teilen-Menü, sonst Zwischenablage.
+      if (navigator.share) {
+        await navigator.share({ title: 'Zugverbindung', url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      btn.textContent = 'Link kopiert';
+    } catch {
+      // Zwischenablage kann gesperrt sein — dann bleibt die URL sichtbar.
+      btn.textContent = 'Link steht in der Adresszeile';
+    }
+    setTimeout(() => { btn.textContent = label; }, 2500);
+  });
 }
 
 /** Aktuelle Uhrzeit als HH:MM. */

@@ -239,10 +239,115 @@ final class OebbHafas
                 'trainNumber' => trim((string) ($ctx['num'] ?? '')),
                 'name'        => trim((string) ($prod['nameS'] ?? $prod['name'] ?? '')),
                 'direction'   => trim((string) ($jny['dirTxt'] ?? '')),
+                // Mit dieser Kennung laesst sich der Lauf im Detail nachladen.
+                'jid'         => (string) ($jny['jid'] ?? ''),
             ];
         }
 
         return ['ok' => true, 'error' => null, 'data' => $out];
+    }
+
+    /**
+     * Der komplette Lauf eines Zuges: alle Halte mit Soll- und Ist-Zeiten,
+     * Gleisen und Verspaetung.
+     *
+     * @param string $jid Kennung aus liveTrains()
+     * @return array{ok:bool,error:?string,data:array}
+     */
+    public function journeyDetails(string $jid): array
+    {
+        $res = $this->call('JourneyDetails', [
+            'jid'         => $jid,
+            'getPolyline' => false,
+            'getPasslist' => true,
+        ]);
+        if (!$res['ok']) {
+            return $res;
+        }
+
+        $body   = $res['data']['res'] ?? [];
+        $common = $body['common'] ?? [];
+        $jny    = $body['journey'] ?? [];
+        if ($jny === []) {
+            return ['ok' => false, 'error' => 'Kein Zuglauf gefunden.', 'data' => []];
+        }
+
+        $prod = ($common['prodL'] ?? [])[$jny['prodX'] ?? -1] ?? [];
+        $ctx  = $prod['prodCtx'] ?? [];
+        $date = (string) ($jny['date'] ?? '');
+        $locL = $common['locL'] ?? [];
+
+        $stops       = [];
+        $maxDelay    = 0;
+        $hasRealtime = false;
+
+        foreach (($jny['stopL'] ?? []) as $st) {
+            $loc = $locL[$st['locX'] ?? -1] ?? null;
+            if ($loc === null) {
+                continue;
+            }
+
+            $arrPlan = $this->hafasTime($date, $st['aTimeS'] ?? null, $st['aTZOffset'] ?? null);
+            $arrReal = $this->hafasTime($date, $st['aTimeR'] ?? null, $st['aTZOffset'] ?? null);
+            $depPlan = $this->hafasTime($date, $st['dTimeS'] ?? null, $st['dTZOffset'] ?? null);
+            $depReal = $this->hafasTime($date, $st['dTimeR'] ?? null, $st['dTZOffset'] ?? null);
+
+            // Verspaetung an der Abfahrt, ersatzweise an der Ankunft.
+            $delay = null;
+            if ($depPlan !== null && $depReal !== null) {
+                $delay = $this->diffMinutes($depPlan, $depReal);
+            } elseif ($arrPlan !== null && $arrReal !== null) {
+                $delay = $this->diffMinutes($arrPlan, $arrReal);
+            }
+            if ($delay !== null) {
+                $hasRealtime = true;
+                $maxDelay = max($maxDelay, $delay);
+            }
+
+            $stops[] = [
+                'name'          => (string) ($loc['name'] ?? ''),
+                'id'            => (string) ($loc['extId'] ?? ''),
+                'country'       => strtolower((string) ($loc['countryCodeL'][0] ?? '')),
+                'lat'           => isset($loc['crd']['y']) ? $loc['crd']['y'] / 1000000 : null,
+                'lon'           => isset($loc['crd']['x']) ? $loc['crd']['x'] / 1000000 : null,
+                'arrival'       => $arrPlan,
+                'arrivalReal'   => $arrReal,
+                'departure'     => $depPlan,
+                'departureReal' => $depReal,
+                'delay'         => $delay,
+                'platform'      => $st['dPltfR']['txt'] ?? $st['dPltfS']['txt'] ?? $st['aPltfS']['txt'] ?? null,
+                'cancelled'     => (bool) ($st['dCncl'] ?? $st['aCncl'] ?? false),
+            ];
+        }
+
+        // Meldungen (Bauarbeiten, Störungen) sind fuer die Anzeige nuetzlich.
+        $messages = [];
+        foreach (($jny['msgL'] ?? []) as $m) {
+            $rem = ($common['remL'] ?? [])[$m['remX'] ?? -1] ?? null;
+            $him = ($common['himL'] ?? [])[$m['himX'] ?? -1] ?? null;
+            $txt = trim((string) ($him['head'] ?? $rem['txtN'] ?? ''));
+            if ($txt !== '' && !in_array($txt, $messages, true)) {
+                $messages[] = $txt;
+            }
+        }
+
+        return [
+            'ok'    => true,
+            'error' => null,
+            'data'  => [
+                'category'    => trim((string) ($ctx['catOut'] ?? '')),
+                'categoryName' => trim((string) ($ctx['catOutL'] ?? '')),
+                'trainNumber' => trim((string) ($ctx['num'] ?? '')),
+                'name'        => trim((string) ($prod['nameS'] ?? $prod['name'] ?? '')),
+                'direction'   => trim((string) ($jny['dirTxt'] ?? '')),
+                'operator'    => trim((string) ($ctx['admin'] ?? '')),
+                'delay'       => $hasRealtime ? $maxDelay : null,
+                'hasRealtime' => $hasRealtime,
+                'cancelled'   => (bool) ($jny['isCncl'] ?? false),
+                'stops'       => $stops,
+                'messages'    => array_slice($messages, 0, 4),
+            ],
+        ];
     }
 
     // ------------------------------------------------------------------

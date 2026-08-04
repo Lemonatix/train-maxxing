@@ -157,6 +157,72 @@ final class DbVendo
         ];
     }
 
+    /**
+     * Bestpreise ueber den Tag, in Zeitfenstern.
+     *
+     * Beantwortet die Frage "lohnt es sich, zwei Stunden spaeter zu fahren?".
+     * Die DB liefert dazu sechs Intervalle mit dem jeweils guenstigsten
+     * Angebot. Die Antwort ist mit ueber 1 MB gross, weil sie zu jedem
+     * Intervall die kompletten Verbindungen mitschickt - wir behalten nur die
+     * Preise.
+     *
+     * @return array{ok:bool,error:?string,data:array}
+     */
+    public function bestPrices(
+        string $fromId,
+        string $toId,
+        string $date,
+        int $travelClass = 2,
+        array $discounts = [],
+        array $products = []
+    ): array {
+        $payload = [
+            'abfahrtsHalt'     => $this->toDbLocationId($fromId),
+            'ankunftsHalt'     => $this->toDbLocationId($toId),
+            'anfrageZeitpunkt' => $date . 'T00:00:00',
+            'ankunftSuche'     => 'ABFAHRT',
+            'klasse'           => $travelClass === 1 ? 'KLASSE_1' : 'KLASSE_2',
+            'produktgattungen' => Products::dbProducts($products),
+            'reisende'         => [[
+                'typ'            => 'ERWACHSENER',
+                'ermaessigungen' => $this->mapDiscounts($discounts, $travelClass)['payload'],
+                'alter'          => [],
+                'anzahl'         => 1,
+            ]],
+            'schnelleVerbindungen'              => true,
+            'sitzplatzOnly'                     => false,
+            'bikeCarriage'                      => false,
+            'reservierungsKontingenteVorhanden' => false,
+        ];
+
+        // Der Bestpreis liegt neben der Verbindungssuche, nicht darunter.
+        // (rtrim waere hier falsch: es entfernt Zeichen, keine Zeichenkette.)
+        $url = preg_replace('#/fahrplan$#', '/tagesbestpreis', $this->cfg['bahnde']['journeys'])
+            ?? $this->cfg['bahnde']['journeys'];
+
+        $res = $this->http->postJson($url, $payload, $this->browserHeaders());
+
+        if ($this->detectBlock($res) !== null) {
+            return ['ok' => false, 'error' => $this->detectBlock($res), 'data' => []];
+        }
+        if (($res['status'] !== 200 && $res['status'] !== 201) || $res['json'] === null) {
+            return ['ok' => false, 'error' => 'DB: HTTP ' . $res['status'], 'data' => []];
+        }
+
+        $out = [];
+        foreach (($res['json']['intervalle'] ?? []) as $iv) {
+            $betrag = $iv['preis']['betrag'] ?? null;
+            $out[] = [
+                'from'     => substr((string) ($iv['ab'] ?? ''), 11, 5),
+                'to'       => substr((string) ($iv['bis'] ?? ''), 11, 5),
+                'amount'   => $betrag !== null ? (float) $betrag : null,
+                'currency' => (string) ($iv['preis']['waehrung'] ?? 'EUR'),
+            ];
+        }
+
+        return ['ok' => true, 'error' => null, 'data' => $out];
+    }
+
     // ------------------------------------------------------------------
 
     /**
@@ -249,6 +315,7 @@ final class DbVendo
 
             $legs[] = [
                 'mode'         => 'train',
+                'occupancy'    => $this->occupancyOf($a),
                 'category'     => trim((string) ($vm['kategorie'] ?? '')),
                 'categoryName' => trim((string) ($vm['produktGattung'] ?? '')),
                 'line'         => trim((string) ($vm['linienNummer'] ?? '')),
@@ -295,6 +362,36 @@ final class DbVendo
             'dTicket'     => $dTicketSegments,
             'source'      => 'db',
         ];
+    }
+
+    /**
+     * Auslastung je Klasse, wie sie die DB meldet.
+     *
+     * Die Stufen sind: 0 unbekannt, 1 gering, 2 mittel, 3 hoch,
+     * 4 Zug ausgebucht. Wir geben beide Klassen zurueck, damit man in der
+     * Anzeige die passende waehlen kann.
+     *
+     * @return array{first:?int,second:?int}|null
+     */
+    private function occupancyOf(array $abschnitt): ?array
+    {
+        $out = ['first' => null, 'second' => null];
+        $any = false;
+
+        foreach (($abschnitt['auslastungsmeldungen'] ?? []) as $m) {
+            $stufe = $m['stufe'] ?? null;
+            if (!is_int($stufe) || $stufe <= 0) {
+                continue;
+            }
+            $any = true;
+            if (($m['klasse'] ?? '') === 'KLASSE_1') {
+                $out['first'] = $stufe;
+            } elseif (($m['klasse'] ?? '') === 'KLASSE_2') {
+                $out['second'] = $stufe;
+            }
+        }
+
+        return $any ? $out : null;
     }
 
     private function operatorOf(array $vm): string

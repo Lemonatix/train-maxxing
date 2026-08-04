@@ -55,6 +55,16 @@ export const api = {
       products: (products || []).join(','),
     }, opts),
 
+  trainDetails: (jid, opts) => call('traindetails', { jid }, opts),
+
+  bestPrices: (params, opts) =>
+    call('bestprices', {
+      from: params.from, to: params.to, date: params.date,
+      class: params.travelClass || 2,
+      discounts: (params.discounts || []).join(','),
+      products: (params.products || []).join(','),
+    }, opts),
+
   journeys(params, opts) {
     return call(
       'journeys',

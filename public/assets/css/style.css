@@ -703,8 +703,11 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .map__hit {
   fill: none;
   stroke: transparent;
-  stroke-width: 16;
+  stroke-width: 18;
   cursor: pointer;
+  /* Ohne "stroke" greift der Standardwert visiblePainted - der ignoriert
+     durchsichtige Striche, und die unsichtbare Klickflaeche faengt nichts. */
+  pointer-events: stroke;
 }
 
 .map__line {
@@ -717,6 +720,11 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   transition: var(--transition);
   pointer-events: none;
 }
+
+/* Die aktive Route wird zuletzt gezeichnet und liegt damit obenauf. Wuerde
+   sie auch Klicks fangen, liesse sich auf gemeinsamen Abschnitten keine
+   andere Route mehr auswaehlen - sie ist bereits gewaehlt, also durchlassen. */
+.map__route.is-active .map__hit { pointer-events: none; }
 
 .map__route:hover .map__line { stroke: var(--text); opacity: 0.8; }
 
@@ -754,6 +762,17 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .map__label.is-major { fill: #ffffff; font-weight: 500; }
 
 /* --- Live-Züge ------------------------------------------------------ */
+
+.map__train { pointer-events: auto; cursor: pointer; }
+
+.map__train-hit { fill: transparent; pointer-events: fill; }
+
+.map__train:hover .map__train-dot,
+.map__train:focus-visible .map__train-dot {
+  fill: #ffffff;
+  stroke: var(--green);
+  stroke-width: 2;
+}
 
 .map__train-halo {
   fill: var(--green);
@@ -826,6 +845,132 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   font-size: 0.7rem;
   color: var(--text-muted);
   text-align: center;
+}
+
+/* --- Zugdetails ------------------------------------------------------ */
+
+.train-panel {
+  margin-top: 0.6rem;
+  padding: 0.8rem 0.9rem;
+  background: var(--surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.train-panel[hidden] { display: none; }
+
+.train-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.train-panel__head strong {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--db-red);
+}
+
+.train-panel__dir { font-size: 0.86rem; color: var(--text-dim); }
+
+.train-panel__delay {
+  margin-left: auto;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.train-panel__delay[data-state="good"]    { background: var(--green-soft); color: var(--green); }
+.train-panel__delay[data-state="warn"]    { background: var(--amber-soft); color: var(--amber); }
+.train-panel__delay[data-state="bad"]     { background: var(--rose-soft); color: var(--rose); }
+.train-panel__delay[data-state="unknown"] { background: var(--surface-inset); color: var(--text-muted); }
+
+.train-panel__close {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.train-panel__close:hover { color: var(--rose); border-color: var(--rose); }
+
+.train-panel__status, .train-panel__msg {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.train-panel__msg {
+  padding: 0.4rem 0.55rem;
+  border-left: 2px solid var(--amber);
+  background: var(--amber-soft);
+  border-radius: var(--radius-xs);
+  color: #fde68a;
+}
+
+.train-panel__stops {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.train-panel__stop {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  font-size: 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.train-panel__stop.is-cancelled { opacity: 0.5; text-decoration: line-through; }
+
+.train-panel__time {
+  flex: 0 0 auto;
+  min-width: 44px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* Weicht die Ist-Zeit ab, wird die Planzeit durchgestrichen daneben gezeigt. */
+.train-panel__time.is-shifted { color: var(--text-muted); text-decoration: line-through; }
+
+.train-panel__real {
+  flex: 0 0 auto;
+  min-width: 44px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--amber);
+}
+
+.train-panel__name { flex: 1 1 auto; color: var(--text-dim); }
+
+.train-panel__platform {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.train-panel__stop-delay {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--amber);
 }
 
 /* --- Ergebnisse ---------------------------------------------------- */
@@ -942,6 +1087,87 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .badge--score { background: var(--purple-soft); color: var(--purple); }
 .badge--effective { background: var(--surface-inset); color: var(--text-dim); }
 .badge--dticket { background: var(--db-red-soft); color: var(--db-red); }
+.badge--risky { background: var(--rose-soft); color: var(--rose); }
+.badge--tight { background: var(--amber-soft); color: var(--amber); }
+.badge--occ1 { background: var(--green-soft); color: var(--green); }
+.badge--occ2 { background: var(--amber-soft); color: var(--amber); }
+.badge--occ3 { background: var(--rose-soft); color: var(--rose); }
+.badge--occ4 { background: var(--rose-soft); color: var(--rose); font-weight: 700; }
+
+/* --- Bestpreise über den Tag ---------------------------------------- */
+
+.bp {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.bp[hidden] { display: none; }
+
+.bp__head {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin-bottom: 0.6rem;
+}
+
+.bp__bars {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0.35rem;
+  align-items: end;
+}
+
+.bp__bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.45rem 0.2rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  /* Je günstiger das Fenster, desto kräftiger die Füllung. */
+  background: linear-gradient(to top,
+    rgba(56, 189, 248, calc(0.28 * var(--fill, 0.5))) 0%,
+    transparent 100%);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.bp__bar:hover { border-color: var(--accent); color: var(--text); }
+
+.bp__bar.is-best {
+  border-color: rgba(16, 185, 129, 0.5);
+  color: var(--green);
+}
+
+.bp__price { font-size: 0.85rem; font-weight: 600; }
+.bp__time { font-size: 0.66rem; opacity: 0.75; }
+
+/* --- Umstiegswarnung und Auslastung im Detail ------------------------ */
+
+.leg__transfer {
+  margin: 0 0 0.25rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+
+.leg__transfer--risky { background: var(--rose-soft); color: var(--rose); }
+.leg__transfer--tight { background: var(--amber-soft); color: var(--amber); }
+
+.leg__occ { font-family: var(--font-mono); font-size: 0.74rem; }
+.leg__occ--1 { color: var(--green); }
+.leg__occ--2 { color: var(--amber); }
+.leg__occ--3, .leg__occ--4 { color: var(--rose); }
 
 /* --- Zugkette (DB-Navigator-Anleihe) -------------------------------- */
 
@@ -1230,6 +1456,13 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   .map__label { font-size: 9px; }
   .map__btn { width: 40px; height: 40px; }
   .map-bar { gap: 0.5rem; }
+
+  /* Bestpreis-Balken bleiben nebeneinander, werden aber schmaler */
+  .bp { padding: 0.7rem; }
+  .bp__bars { gap: 0.2rem; }
+  .bp__price { font-size: 0.72rem; }
+  .bp__time { font-size: 0.6rem; }
+  .bp__bar { padding: 0.4rem 0.1rem 0.3rem; }
 }
 
 @media (max-width: 380px) {

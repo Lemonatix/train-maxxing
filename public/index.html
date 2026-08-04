@@ -183,12 +183,16 @@
 
     <div class="actions">
       <button type="submit" class="btn btn--primary">Verbindungen suchen</button>
+      <button type="button" id="share" class="btn btn--ghost">Suche teilen</button>
       <span id="status" class="status"></span>
     </div>
 
   </form>
 
   <div id="notices" class="notices"></div>
+
+  <!-- Bestpreise über den Reisetag -->
+  <section id="bestprices" class="bp" hidden aria-label="Günstigste Abfahrtszeiten"></section>
 
   <div class="map-wrap">
     <div class="map-bar">
@@ -201,6 +205,9 @@
     <!-- Routenkarte: Kacheln von OpenStreetMap/CARTO, darüber die Routen
          als SVG. Die Kachelquelle steht in assets/js/map.js. -->
     <section id="map" class="map is-empty" aria-label="Routenkarte"></section>
+
+    <!-- Details eines angetippten Live-Zuges -->
+    <aside id="train-panel" class="train-panel" hidden aria-live="polite"></aside>
   </div>
 
   <main id="results-list" class="results" aria-live="polite"></main>

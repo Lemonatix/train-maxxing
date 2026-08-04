@@ -102,6 +102,21 @@ sind davon nicht betroffen.
 
 5. Fertig: `https://deine-domain.tld/train/`
 
+### Nach einem Update: Browser-Cache beachten
+
+Die JavaScript-Dateien haben keine Versionsnummer im Namen. Lädst du eine neue
+Fassung hoch, halten Browser die alte oft noch fest — dann fehlen neue
+Funktionen scheinbar. Beim Testen ist mir genau das passiert.
+
+Zwei Wege: einmal hart neu laden (`Strg`+`Shift`+`R`), oder in `index.html` an
+die Skript- und Stylesheet-Pfade eine Version hängen und sie bei jedem Update
+hochzählen:
+
+```html
+<link rel="stylesheet" href="assets/css/style.css?v=2">
+<script type="module" src="assets/js/app.js?v=2"></script>
+```
+
 ### Voraussetzungen
 
 - PHP 8.0 oder neuer
@@ -210,30 +225,53 @@ das Modell erkannt wurde und woher.
 Die frühere Variante mit Zugnummernbereichen ist entfallen: Nummernkreise sind
 nicht stabil genug, um daraus verlässlich auf eine Baureihe zu schließen.
 
-### Wagenreihung aktivieren
+### Baureihe: gelöst über bahn.expert
 
-Die DB hat eine Schnittstelle, die die Wagenreihung und damit die Baureihe kennt.
-Sie ist standardmäßig **aus**, weil sie einen Request je Zug kostet und weil die
-Parameterkombination hier nicht abschließend verifiziert werden konnte: Der
-Endpunkt antwortet auf unsere Anfragen mit `HTTP 422` — also erreichbar, aber
-Parameter nicht akzeptiert.
+Die Baureihe kommt jetzt aus der Wagenreihung — `ICE 4 (BR412)`, inklusive
+Wagenzahl je Klasse. Bezogen über **bahn.expert**, das dieselben Daten
+(Quelle `DB-risTransports`) über eine erreichbare Schnittstelle anbietet.
 
-Einschalten in `api/config.php`:
+Zwei Fallstricke, falls du daran arbeitest:
 
-```php
-'wagenreihung' => ['enabled' => true, /* ... */],
-```
+- Der Parameter `input` muss **doppelt JSON-kodiert** sein: ein JSON-String,
+  der das Array enthält. Sonst antwortet der Dienst mit
+  `"[object Object]" is not valid JSON`.
+- Die Antwort ist superjson: Element 0 ist die Wurzel, jeder Wert darin ein
+  Index in dasselbe Array. `CoachSequence.php` navigiert gezielt statt das
+  Format allgemein aufzulösen.
 
-Falls dann keine Baureihen erscheinen, hol dir die echten Parameter aus dem
-Browser: auf `bahn.de` eine Verbindung für **heute** öffnen, die Wagenreihung
-eines ICE aufklappen, in den Entwicklertools den Netzwerk-Tab filtern nach
-`vehicle-sequence` und die Query-Parameter mit denen in
-`lib/Providers/DbWagenreihung.php` vergleichen. Der Parser sucht die Baureihe
-unter mehreren bekannten Feldnamen (`constructionType`, `baureihe`,
-`vehicleSeries`, `series`) und liefert lieber nichts als etwas Falsches.
+Es gilt weiterhin: nur deutscher Fernverkehr, nur am Reisetag.
 
-Grundsätzlich gilt: nur deutsche Fernzüge, nur am Reisetag. Für eine Fahrt in
-drei Wochen gibt es keine Wagenreihung — dafür sind die eigenen Regeln da.
+**bahn.expert ist ein privat betriebenes Projekt, kein offizieller Dienst.**
+Deshalb ist das Tool zurückhaltend: Ergebnisse werden 30 Minuten gecacht,
+`max_lookups` begrenzt die Abfragen je Verbindung auf drei, und jeder Fehler
+führt stillschweigend dazu, dass die Baureihe eben fehlt.
+
+Wer das Tool dauerhaft betreibt, sollte auf den **DB API Marketplace**
+wechseln: Das Modul `RIS::Transports` liefert dieselben Daten offiziell, unter
+Vertrag und mit API-Key. Dann tauscht du in `CoachSequence.php` nur die
+`fetch()`-Methode aus.
+
+### Der direkte DB-Weg: weiterhin verschlossen
+
+Die Baureihe aus der Wagenreihung zu holen, ist bisher **nicht gelungen**. Was
+geprüft wurde:
+
+| Weg | Ergebnis |
+|---|---|
+| `bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence` | **HTTP 422** bei acht Parametervarianten — mit und ohne Zeitzone, Sekunden, Session-Cookies, `administrationId` 80/1080, `date` vs. `departure`. Getestet mit einem real fahrenden ICE. |
+| JS-Bundles von bahn.de nach dem echten Aufruf durchsucht | `vehicle-sequence` kommt in den geladenen Bundles nicht vor; der Code liegt in einem Chunk, der sich nicht auffinden ließ |
+| `ist-wr.noncd.db.de` (der alte Endpunkt) | kein DNS-Eintrag mehr, abgeschaltet |
+| HAFAS `JourneyDetails` mit `getTrainComposition`, Methoden `TrainComposition`/`TrainFormation` | keine Wagenfelder bzw. Methode existiert nicht |
+
+Der Endpunkt **existiert** (422 statt 404), aber die Parameterkombination ließ
+sich nicht ermitteln. Da bahn.expert dieselben Daten liefert, ist das kein
+Problem mehr — der Abschnitt steht hier nur, damit niemand denselben Weg noch
+einmal geht.
+
+Für Fahrten in der Zukunft gibt es ohnehin keine Wagenreihung. Dafür sind die
+„immer erkennbaren" Modelle (railjet, Nightjet, WESTbahn, TGV) und die
+Gattungsbewertung da.
 
 ### Karte
 
@@ -263,13 +301,55 @@ weg — ein fehlender Name ist besser als zwei übereinandergedruckte. Ab Zoomst
 
 Über der Karte lässt sich **„Züge live anzeigen"** einschalten. Dann erscheinen
 alle Züge, die im sichtbaren Ausschnitt gerade unterwegs sind, als pulsierende
-Punkte — mit Gattung, Nummer und Ziel im Tooltip.
+Punkte.
+
+**Ein Klick auf einen Zug öffnet seinen kompletten Lauf** unter der Karte: alle
+Halte mit Plan- und Ist-Zeit, Gleisen und der Verspätung je Halt. Oben steht die
+größte Verspätung als Kennzeichen — grün „pünktlich", gelb ab einer Minute, rot
+ab fünf oder bei Ausfall. Weicht die Ist-Zeit ab, wird die Planzeit
+durchgestrichen und die tatsächliche daneben gezeigt. Störungsmeldungen des
+Betreibers stehen darüber.
 
 Die Positionen kommen von HAFAS (`JourneyGeoPos`) und werden aus Fahrplan und
-Echtzeitlage **berechnet**, nicht per GPS geortet. Sie sind also eine gute
-Näherung, keine Ortung auf den Meter. Beim Verschieben und Zoomen wird
-nachgeladen (gedrosselt, 30 Sekunden Cache); ein zu großer Ausschnitt liefert
-bewusst nichts, weil das nur Rauschen wäre und die Quelle belastet.
+Echtzeitlage **berechnet**, nicht per GPS geortet. Sie sind eine gute Näherung,
+keine Ortung auf den Meter. Die Verspätungen dagegen sind echte Echtzeitdaten.
+Beim Verschieben und Zoomen wird nachgeladen (gedrosselt, 30 Sekunden Cache);
+ein zu großer Ausschnitt liefert bewusst nichts.
+
+### Auslastung, knappe Umstiege, Bestpreis, Historie
+
+**Auslastung** meldet die DB je Abschnitt und Klasse (Stufe 1 gering bis
+4 ausgebucht). Sie steht als Kennzeichen an der Verbindung und je Abschnitt im
+Detail — die Klasse richtet sich nach deiner Auswahl.
+
+**Knappe Umstiege** rechnet das Tool selbst aus der Lücke zwischen Ankunft und
+Weiterfahrt, Fußwege eingerechnet. Unter 5 Minuten gilt als riskant (rot), unter
+10 als knapp (gelb). Bei drei bis fünf Umstiegen ist das meist der Punkt, an dem
+eine Verbindung in der Praxis platzt.
+
+**Bestpreis über den Tag:** Unter den Hinweisen stehen sechs Zeitfenster mit dem
+jeweils günstigsten Angebot. Ein Klick übernimmt die Uhrzeit und sucht neu.
+Gemessen für Zürich–München: 33,99 € abends gegen 41,99 € nachts.
+
+**Pünktlichkeitshistorie** — mit einer Einschränkung, die du kennen solltest:
+Es gibt keine offene Quelle für historische Verspätungen. Das Tool sammelt
+deshalb **selbst**: Jedes Mal, wenn du einen Zuglauf mit Echtzeitdaten
+aufrufst, wird die beobachtete Verspätung festgehalten (höchstens ein Wert je
+Zug und Tag, gleitendes Fenster über 60 Beobachtungen bzw. 120 Tage). Die
+Statistik ist also am Anfang leer und füllt sich mit der Nutzung — auf deinen
+Strecken nach ein paar Wochen. Angezeigt wird sie als „ICE 515: 75 % pünktlich,
+Ø +4,2 min (12 Beobachtungen)". Als pünktlich gilt unter 6 Minuten, wie im
+Bahnverkehr üblich.
+
+Gespeichert wird als JSON je Zug unter `api/cache/punctuality/` — kein
+Datenbankserver nötig.
+
+### Teilen
+
+Der Knopf **„Suche teilen"** legt die komplette Suche in der Adresszeile ab —
+Orte, Datum, Zeit, Abos, Verkehrsmittel, Modus. Auf dem Telefon öffnet sich das
+native Teilen-Menü, sonst landet der Link in der Zwischenablage. Wer ihn öffnet,
+bekommt die Suche automatisch ausgeführt.
 
 ### Verkehrsmittel filtern
 
@@ -406,11 +486,12 @@ public/
         ├── Fares.php             Abo- und Preislogik
         ├── Products.php          Verkehrsmittel-Gruppen und Bitmasken
         ├── Locations.php         Ortssuche aus beiden Quellen
+        ├── Punctuality.php       Selbst gesammelte Pünktlichkeitsstatistik
         ├── Shops.php             Buchungs-Deeplinks je Land
         └── Providers/
             ├── OebbHafas.php     Fahrplan, Zuggattungen, Ländercodes, Geometrie
-            ├── DbVendo.php       Echtpreise
-            └── DbWagenreihung.php Baureihe (optional, experimentell)
+            ├── DbVendo.php       Echtpreise, Auslastung, Bestpreis
+            └── CoachSequence.php Baureihe über bahn.expert
 ```
 
 ### API-Endpunkte
@@ -424,6 +505,8 @@ Alles per GET auf `api/`:
 | `?action=locations&q=Bern` | Stationssuche |
 | `?action=journeys&from=…&to=…&date=…&time=…` | Verbindungen inklusive Preis |
 | `?action=livetrains&bbox=süd,west,nord,ost` | Züge, die dort gerade fahren |
+| `?action=traindetails&jid=…` | Zuglauf mit Halten und Verspätung |
+| `?action=bestprices&from=…&to=…&date=…` | Günstigste Zeitfenster am Tag |
 
 `journeys` versteht zusätzlich `discounts` (kommagetrennt), `products`
 (kommagetrennt, leer = alle), `class` (1/2), `results`, `arrival=1` und `via`

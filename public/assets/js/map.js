@@ -176,6 +176,10 @@ export class RouteMap {
     let pinchDist = 0;
 
     vp.addEventListener('pointerdown', (e) => {
+      // Bedienelemente nicht abfangen: sonst schnappt sich der Viewport per
+      // setPointerCapture den Pointer und der Klick erreicht den Knopf nie.
+      if (e.target.closest?.('.map__controls, .map__attr')) return;
+
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 1) {
         dragging = true;
@@ -233,9 +237,20 @@ export class RouteMap {
       this.zoomBy(e.deltaY < 0 ? 0.6 : -0.6, e.clientX - r.left, e.clientY - r.top);
     }, { passive: false });
 
-    // Ein Klick, der kein Ziehen war, wählt die Route darunter.
+    // Ein Klick, der kein Ziehen war, trifft Zug oder Route.
     vp.addEventListener('click', (e) => {
       if (moved > 6) return;
+
+      // Züge zuerst: sie liegen über den Linien.
+      const train = e.target.closest?.('.map__train');
+      if (train?.dataset.jid) {
+        const t = this.liveTrains.find((x) => x.jid === train.dataset.jid);
+        if (t && this.onTrainClick) {
+          this.onTrainClick(t);
+          return;
+        }
+      }
+
       const g = e.target.closest?.('.map__route');
       if (g && this.onSelect) this.onSelect(Number(g.dataset.index));
     });
@@ -519,6 +534,22 @@ export class RouteMap {
 
       const g = document.createElementNS(NS, 'g');
       g.setAttribute('class', 'map__train' + (t.onRoute ? ' is-onroute' : ''));
+      if (t.jid) {
+        g.dataset.jid = t.jid;
+        g.setAttribute('tabindex', '0');
+        g.setAttribute('role', 'button');
+        g.setAttribute('aria-label',
+          `${t.category} ${t.trainNumber} nach ${t.direction} — Details anzeigen`);
+      }
+
+      // Grosszuegige, unsichtbare Trefferflaeche: der Punkt allein ist auf
+      // dem Telefon kaum zu treffen.
+      const hit = document.createElementNS(NS, 'circle');
+      hit.setAttribute('cx', x.toFixed(1));
+      hit.setAttribute('cy', y.toFixed(1));
+      hit.setAttribute('r', '13');
+      hit.setAttribute('class', 'map__train-hit');
+      g.append(hit);
 
       const halo = document.createElementNS(NS, 'circle');
       halo.setAttribute('cx', x.toFixed(1));
@@ -535,8 +566,18 @@ export class RouteMap {
       g.append(dot);
 
       const title = document.createElementNS(NS, 'title');
-      title.textContent = `${t.name || t.category || 'Zug'}${t.direction ? ' → ' + t.direction : ''}`;
+      title.textContent = `${t.name || t.category || 'Zug'}${t.direction ? ' → ' + t.direction : ''}`
+        + (t.jid ? ' (antippen für Details)' : '');
       g.append(title);
+
+      if (t.jid) {
+        g.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            this.onTrainClick && this.onTrainClick(t);
+          }
+        });
+      }
 
       svg.append(g);
     }

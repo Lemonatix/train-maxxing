@@ -22,9 +22,10 @@ require __DIR__ . '/lib/Fares.php';
 require __DIR__ . '/lib/Products.php';
 require __DIR__ . '/lib/Shops.php';
 require __DIR__ . '/lib/Locations.php';
+require __DIR__ . '/lib/Punctuality.php';
 require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
-require __DIR__ . '/lib/Providers/DbWagenreihung.php';
+require __DIR__ . '/lib/Providers/CoachSequence.php';
 
 $config = require __DIR__ . '/config.php';
 
@@ -85,6 +86,12 @@ try {
             break;
         case 'livetrains':
             handleLiveTrains($http, $config, $cache);
+            break;
+        case 'traindetails':
+            handleTrainDetails($http, $config, $cache);
+            break;
+        case 'bestprices':
+            handleBestPrices($http, $config, $cache);
             break;
         default:
             fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys', 400);
@@ -206,6 +213,93 @@ function handleLiveTrains(Http $http, array $config, Cache $cache): void
     ok(['trains' => $res['data'], 'cached' => false]);
 }
 
+/**
+ * Der komplette Lauf eines Zuges mit Halten und Verspaetung.
+ * Kurz gecacht - Echtzeitdaten aendern sich, aber nicht im Sekundentakt.
+ */
+function handleTrainDetails(Http $http, array $config, Cache $cache): void
+{
+    $jid = trim((string) ($_GET['jid'] ?? ''));
+    if ($jid === '') {
+        fail('Parameter "jid" fehlt.', 400);
+    }
+
+    $key    = 'jd:' . md5($jid);
+    $cached = $cache->get($key, 60);
+    if ($cached !== null) {
+        ok(['train' => $cached, 'cached' => true]);
+    }
+
+    $oebb = new OebbHafas($http, $config['providers']['oebb']);
+    $res  = $oebb->journeyDetails($jid);
+
+    if (!$res['ok']) {
+        fail('Zugdetails nicht verfuegbar: ' . $res['error'], 502);
+    }
+
+    // Beobachtete Verspaetung in die eigene Statistik aufnehmen. So fuellt
+    // sich die Historie mit der Nutzung, ohne dass jemand Daten einkaufen muss.
+    $t = $res['data'];
+    if (($t['hasRealtime'] ?? false) && ($t['trainNumber'] ?? '') !== '') {
+        $p = new Punctuality((string) $config['cache_dir']);
+        $p->record(
+            (string) $t['category'],
+            (string) $t['trainNumber'],
+            (int) ($t['delay'] ?? 0),
+            (string) (($t['stops'][0]['departure'] ?? null) ?? date('Y-m-d'))
+        );
+        $t['history'] = $p->stats((string) $t['category'], (string) $t['trainNumber']);
+    }
+
+    $cache->set($key, $res['data']);
+    ok(['train' => $t, 'cached' => false]);
+}
+
+/**
+ * Bestpreise ueber den Tag - beantwortet, ob sich eine andere Abfahrtszeit lohnt.
+ */
+function handleBestPrices(Http $http, array $config, Cache $cache): void
+{
+    $from = trim((string) ($_GET['from'] ?? ''));
+    $to   = trim((string) ($_GET['to'] ?? ''));
+    $date = trim((string) ($_GET['date'] ?? ''));
+
+    if ($from === '' || $to === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        fail('Parameter "from", "to" und "date" (YYYY-MM-DD) sind erforderlich.', 400);
+    }
+
+    $travelClass = ((string) ($_GET['class'] ?? '2')) === '1' ? 1 : 2;
+    $discounts = array_values(array_filter(
+        array_map('trim', explode(',', (string) ($_GET['discounts'] ?? ''))),
+        static fn($d) => $d !== ''
+    ));
+    $products = array_values(array_filter(
+        array_map('trim', explode(',', (string) ($_GET['products'] ?? ''))),
+        static fn($p) => $p !== '' && in_array($p, Products::allIds(), true)
+    ));
+
+    $key = 'bp:' . implode('|', [$from, $to, $date, $travelClass, implode('+', $discounts), implode('+', $products)]);
+    $cached = $cache->get($key, 1800);
+    if ($cached !== null) {
+        ok(['intervals' => $cached, 'cached' => true]);
+    }
+
+    if (($config['providers']['db']['enabled'] ?? false) !== true) {
+        ok(['intervals' => [], 'note' => 'DB-Provider ist abgeschaltet.']);
+    }
+
+    $db  = new DbVendo($http, $config['providers']['db']);
+    $res = $db->bestPrices($from, $to, $date, $travelClass, $discounts, $products);
+
+    if (!$res['ok']) {
+        // Beiwerk - kein Grund, die Seite mit einem Fehler zu behelligen.
+        ok(['intervals' => [], 'error' => $res['error']]);
+    }
+
+    $cache->set($key, $res['data']);
+    ok(['intervals' => $res['data'], 'cached' => false]);
+}
+
 function handleJourneys(Http $http, array $config, Cache $cache): void
 {
     $from = trim((string) ($_GET['from'] ?? ''));
@@ -303,17 +397,29 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 
     // --- 3. Baureihe ergaenzen (nur am Reisetag, nur deutscher Fernverkehr) ---
     if (($config['providers']['wagenreihung']['enabled'] ?? false) === true) {
-        $wr = new DbWagenreihung($http, $config['providers']['wagenreihung'], $cache);
+        $cs = new CoachSequence($http, $config['providers']['wagenreihung'], $cache);
         foreach ($journeys as $i => $j) {
-            $journeys[$i] = $wr->enrich($j, $date);
+            $journeys[$i] = $cs->enrich($j, $date);
         }
     }
 
     // --- 4. Abos anwenden bzw. schaetzen ------------------------------
     foreach ($journeys as $i => $j) {
-        $journeys[$i] = Fares::apply($j, $discounts, $travelClass);
+        $journeys[$i] = annotateTransfers($j);
+        $journeys[$i] = Fares::apply($journeys[$i], $discounts, $travelClass);
         // Ticketshops der beruehrten Laender, Startland zuerst.
         $journeys[$i]['shops'] = Shops::forJourney($journeys[$i], $date, $time, $travelClass);
+    }
+
+    // Pünktlichkeitshistorie, soweit wir schon welche gesammelt haben.
+    $punct = new Punctuality((string) $config['cache_dir']);
+    if ($punct->isAvailable()) {
+        foreach ($journeys as $i => $j) {
+            $h = $punct->forJourney($j);
+            if ($h !== []) {
+                $journeys[$i]['history'] = $h;
+            }
+        }
     }
 
     $payload = [
@@ -417,10 +523,69 @@ function mergeLegFlags(array &$legs, array $dbLegs): void
         if (!empty($match['dTicket'])) {
             $legs[$i]['dTicket'] = $match['dTicket'];
         }
+        if (!empty($match['occupancy'])) {
+            $legs[$i]['occupancy'] = $match['occupancy'];
+        }
         if (($leg['operator'] ?? '') === '' && ($match['operator'] ?? '') !== '') {
             $legs[$i]['operator'] = $match['operator'];
         }
     }
+}
+
+/**
+ * Markiert knappe Umstiege.
+ *
+ * Die Umsteigezeit ist die Luecke zwischen Ankunft des einen und Abfahrt des
+ * naechsten Zuges. Was knapp ist, haengt vom Bahnhof ab - als Faustregel
+ * gelten unter 5 Minuten als riskant und unter 10 als knapp. Fusswege
+ * zwischen den Zuegen werden mitgerechnet, denn die zaehlen ja auch.
+ *
+ * Zusaetzlich wird die knappste Umsteigezeit der ganzen Verbindung vermerkt,
+ * damit die Liste danach warnen kann.
+ */
+function annotateTransfers(array $journey): array
+{
+    $legs = $journey['legs'] ?? [];
+    $minGap = null;
+
+    for ($i = 0; $i < count($legs); $i++) {
+        if (($legs[$i]['mode'] ?? '') !== 'train') {
+            continue;
+        }
+        // Naechsten Zug suchen; Fusswege dazwischen ueberspringen.
+        $next = null;
+        for ($k = $i + 1; $k < count($legs); $k++) {
+            if (($legs[$k]['mode'] ?? '') === 'train') {
+                $next = $k;
+                break;
+            }
+        }
+        if ($next === null) {
+            break;
+        }
+
+        $arr = toTimestamp($legs[$i]['arrival'] ?? null);
+        $dep = toTimestamp($legs[$next]['departure'] ?? null);
+        if ($arr === null || $dep === null) {
+            continue;
+        }
+
+        $gap = (int) round(($dep - $arr) / 60);
+        $legs[$next]['transferMin'] = $gap;
+        $legs[$next]['transferRisk'] = $gap < 5 ? 'risky' : ($gap < 10 ? 'tight' : 'ok');
+
+        if ($minGap === null || $gap < $minGap) {
+            $minGap = $gap;
+        }
+    }
+
+    $journey['legs'] = $legs;
+    $journey['minTransferMin'] = $minGap;
+    $journey['transferRisk'] = $minGap === null
+        ? null
+        : ($minGap < 5 ? 'risky' : ($minGap < 10 ? 'tight' : 'ok'));
+
+    return $journey;
 }
 
 function toTimestamp(?string $iso): ?int

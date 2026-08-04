@@ -9,6 +9,28 @@
 import { typeOf } from './data/trains.js';
 import { formatDuration, formatTime, formatPrice, priceOrigin } from './scoring.js';
 
+/**
+ * Höchste gemeldete Auslastung einer Verbindung, für die gewählte Klasse.
+ * Stufen der DB: 1 gering, 2 mittel, 3 hoch, 4 ausgebucht.
+ */
+const OCCUPANCY_LABELS = {
+  1: 'gering ausgelastet',
+  2: 'mittel ausgelastet',
+  3: 'stark ausgelastet',
+  4: 'ausgebucht',
+};
+
+function occupancyOf(journey, travelClass) {
+  let level = 0;
+  for (const leg of journey.legs || []) {
+    const o = leg.occupancy;
+    if (!o) continue;
+    const v = travelClass === 1 ? o.first : o.second;
+    if (typeof v === 'number' && v > level) level = v;
+  }
+  return level > 0 ? { level, label: OCCUPANCY_LABELS[level] || `Stufe ${level}` } : null;
+}
+
 const el = (tag, className, text) => {
   const n = document.createElement(tag);
   if (className) n.className = className;
@@ -103,6 +125,17 @@ function renderCard(entry, index, marks, state, onSelect) {
   }
   for (const hit of entry.comfortHits) add(hit, 'badge--rule');
 
+  // Knappe Umstiege sind der häufigste Grund, warum eine Verbindung platzt.
+  if (j.transferRisk === 'risky') {
+    add(`nur ${j.minTransferMin} min Umstieg`, 'badge--risky');
+  } else if (j.transferRisk === 'tight') {
+    add(`${j.minTransferMin} min Umstieg`, 'badge--tight');
+  }
+
+  // Auslastung: die höchste gemeldete Stufe über alle Abschnitte.
+  const occ = occupancyOf(j, state.travelClass);
+  if (occ) add(occ.label, `badge--occ${occ.level}`);
+
   // Die DB markiert selbst, wo das Deutschlandticket gilt.
   const dTicketLegs = (j.legs || []).filter((l) => l.dTicket).length;
   if (dTicketLegs > 0) {
@@ -191,6 +224,15 @@ function renderLegs(journey, entry, state) {
     const type = typeOf(leg);
     const row = el('div', 'leg');
 
+    // Umsteigezeit vor diesem Zug, wenn sie knapp ist.
+    if (leg.transferRisk && leg.transferRisk !== 'ok') {
+      const t = el('div', `leg__transfer leg__transfer--${leg.transferRisk}`,
+        leg.transferRisk === 'risky'
+          ? `Nur ${leg.transferMin} min zum Umsteigen — bei Verspätung weg`
+          : `${leg.transferMin} min zum Umsteigen — knapp`);
+      row.append(t);
+    }
+
     const line1 = el('div', 'leg__line');
     line1.append(el('span', 'leg__time', formatTime(leg.departure)));
     line1.append(el('span', 'leg__station', leg.from?.name || '?'));
@@ -209,12 +251,21 @@ function renderLegs(journey, entry, state) {
     if (comfortEntry?.model) {
       const m = el('span', 'leg__model', comfortEntry.model.label);
       m.title = comfortEntry.certainty === 'series'
-        ? `Aus der Wagenreihung ermittelt (Baureihe ${leg.series}).`
+        ? `Aus der Wagenreihung ermittelt (${leg.seriesName || 'BR ' + leg.series}).`
         : 'Diese Gattung verkehrt nur mit diesem Fahrzeug.';
       if (comfortEntry.certainty === 'sole') m.classList.add('leg__model--inferred');
       info.append(m);
-    } else if (leg.series) {
-      info.append(el('span', 'leg__series', `Baureihe ${leg.series}`));
+    } else if (leg.seriesName || leg.series) {
+      info.append(el('span', 'leg__series', leg.seriesName || `Baureihe ${leg.series}`));
+    }
+
+    // Auslastung dieses Abschnitts.
+    if (leg.occupancy) {
+      const v = state.travelClass === 1 ? leg.occupancy.first : leg.occupancy.second;
+      if (typeof v === 'number' && v > 0) {
+        const o = el('span', `leg__occ leg__occ--${v}`, OCCUPANCY_LABELS[v] || `Stufe ${v}`);
+        info.append(o);
+      }
     }
 
     if (state.mode === 'nerd' && comfortEntry) {
@@ -273,6 +324,15 @@ function renderLegs(journey, entry, state) {
         `Kein Echtpreis verfügbar — verbindlich ist der Ticketshop.`;
 
     wrap.append(el('p', 'estimate-note', text));
+  }
+
+  // Selbst gesammelte Pünktlichkeitshistorie, falls vorhanden.
+  const hist = journey.history;
+  if (hist && Object.keys(hist).length > 0) {
+    const parts = Object.entries(hist).map(([train, h]) =>
+      `${train}: ${Math.round(h.rate * 100)} % pünktlich, Ø +${h.avg} min (${h.samples} Beobachtungen)`);
+    wrap.append(el('p', 'estimate-note',
+      'Aus eigenen Beobachtungen — ' + parts.join(' · ')));
   }
 
   if (state.mode === 'nerd' && entry.explain && typeof entry.effective === 'number') {

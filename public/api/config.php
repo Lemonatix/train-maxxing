@@ -74,11 +74,19 @@ return [
         ],
 
         // --- Wagenreihung: liefert die Baureihe (ICE 4 = BR 412 usw.). ---
-        // Geht nur fuer deutsche Fernzuege AM REISETAG. Kostet einen Request
-        // je Zug, deshalb standardmaessig aus. Details im README.
+        //
+        // Laeuft ueber bahn.expert, weil der DB-eigene Endpunkt von aussen
+        // nicht ansprechbar ist (HTTP 422, siehe README). Gilt nur fuer
+        // deutschen Fernverkehr am Reisetag.
+        //
+        // bahn.expert ist ein privat betriebenes Projekt. Sei fair: Ergebnisse
+        // werden 30 Minuten gecacht, und 'max_lookups' begrenzt die Abfragen
+        // je Verbindung. Wer das Tool dauerhaft betreibt, sollte auf die
+        // offizielle RIS-API des DB API Marketplace wechseln.
         'wagenreihung' => [
-            'enabled'  => false,
-            'endpoint' => 'https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence',
+            'enabled'     => true,
+            'endpoint'    => 'https://bahn.expert/rpc',
+            'max_lookups' => 3,
         ],
     ],
 ];
