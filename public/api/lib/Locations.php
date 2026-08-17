@@ -1,19 +1,24 @@
 <?php
 /**
- * Ortssuche aus zwei Quellen.
+ * Ortssuche aus mehreren Quellen.
  *
- * WARUM ZWEI:
+ * WARUM MEHRERE:
  * Die OeBB-Suche ist auf Oesterreich geeicht. Die Anfrage "Marienplatz" liefert
  * dort Graz, Viehofen und Hafnerbach - aber nicht Muenchen. Umgekehrt kennt die
  * DB-Suche den deutschen Nahverkehr bis hinunter zur einzelnen U-Bahn-Station,
- * ist aber bei kleinen oesterreichischen und Schweizer Halten duenner.
+ * ist aber bei kleinen oesterreichischen und Schweizer Halten duenner. Beide
+ * verpassen regelmaessig die reinen Muenchner U-Bahn-/Tram-Halte (Odeonsplatz,
+ * Sendlinger Tor); dafuer ergaenzt die MVG die Trefferliste.
  *
- * Deshalb werden beide abgefragt, ueber die EVA-Nummer zusammengefuehrt und
- * nach Bedeutung sortiert: Fernverkehrsknoten zuerst, dann Regional-, dann
- * Stadtverkehr. Das entspricht in der Praxis der Groesse des Ortes.
+ * Die Quellen werden abgefragt, ueber die ID und ersatzweise ueber den
+ * normalisierten Namen zusammengefuehrt und nach Bedeutung sortiert:
+ * Fernverkehrsknoten zuerst, dann Regional-, dann Stadtverkehr. Das
+ * entspricht in der Praxis der Groesse des Ortes.
  *
- * Die Fahrplansuche laeuft weiterhin ueber die OeBB - die kennt deutsche
- * EVA-Nummern problemlos (geprueft mit 8004135 Muenchen Marienplatz).
+ * Die Fahrplansuche laeuft weiterhin ueber HAFAS. Halte, die nur die MVG
+ * kennt, werden mit noJourneys=true markiert - die Endpoints der MVG-API
+ * kennen keine Verbindungsauskunft, und HAFAS wuerde die MVG-globalIds
+ * nicht verstehen.
  */
 final class Locations
 {
@@ -141,6 +146,26 @@ final class Locations
             $errors[] = $res['error'];
         }
 
+        // --- MVG: schliesst die Muenchner Nahverkehrsluecke (Odeonsplatz &Co) ---
+        if (($this->cfg['mvg']['enabled'] ?? false) === true) {
+            $mvg = new Mvg($this->http, $this->cfg['mvg']);
+            $res = $mvg->locations($query, $limit);
+            $sources['mvg'] = $res['ok'];
+            if ($res['ok']) {
+                foreach ($res['data'] as $i => $loc) {
+                    $this->merge($byId, $this->fromMvg($loc, $i));
+                }
+            } else {
+                $errors[] = $res['error'];
+            }
+        }
+
+        // Zweiter Pass: MVG-only-Treffer (mvg:...-IDs) mit HAFAS-Treffern
+        // gleichen Namens zusammenfuehren, damit "Marienplatz" nicht zweimal
+        // in der Liste steht. Der HAFAS-Eintrag gewinnt die Anzeige, die MVG
+        // steuert nur zusaetzliche Verkehrsmittel bei.
+        $this->foldMvgIntoHafas($byId);
+
         if ($byId === []) {
             return [
                 'ok'      => $errors === [],
@@ -174,10 +199,16 @@ final class Locations
         }
 
         usort($out, static function ($a, $b) {
-            // 1. Passt der Name?  2. Wie bedeutend ist der Ort?
-            // 3. Wie weit vorn sah ihn die Quelle selbst?
-            if ($a['relevance'] !== $b['relevance']) {
-                return $b['relevance'] <=> $a['relevance'];
+            // Effektive Namens-Passung: reine MVG-Halte (kein Fahrplan) werden
+            // um 2 abgewertet. So laesst ein exakter Bushaltestellen-Treffer
+            // ("Marienplatz" in Kleinstaedten, relevance 5, noJourneys) den
+            // "Muenchen Marienplatz" (relevance 4, routbar) vorbei. Ohne diese
+            // Abwertung gewinnen die MVG-Bus-Halte ausschliesslich per Namen,
+            // obwohl von ihnen keine Fahrplansuche moeglich ist.
+            $aRel = $a['relevance'] - (($a['noJourneys'] ?? false) ? 2 : 0);
+            $bRel = $b['relevance'] - (($b['noJourneys'] ?? false) ? 2 : 0);
+            if ($aRel !== $bRel) {
+                return $bRel <=> $aRel;
             }
             if ($a['score'] !== $b['score']) {
                 return $b['score'] <=> $a['score'];
@@ -188,6 +219,8 @@ final class Locations
         $out = array_slice($out, 0, $limit);
         foreach ($out as &$row) {
             unset($row['score'], $row['rank'], $row['relevance']);
+            // Interne Merge-Felder gehoeren nicht ins JSON.
+            unset($row['place']);
         }
         unset($row);
 
@@ -211,6 +244,7 @@ final class Locations
         $byId[$key] = [
             'id'           => $old['id'] !== '' ? $old['id'] : $loc['id'],
             'name'         => $old['name'] !== '' ? $old['name'] : $loc['name'],
+            'place'        => $old['place'] !== '' ? $old['place'] : ($loc['place'] ?? ''),
             'country'      => $old['country'] !== '' ? $old['country'] : $loc['country'],
             'lat'          => $old['lat'] ?? $loc['lat'],
             'lon'          => $old['lon'] ?? $loc['lon'],
@@ -218,7 +252,65 @@ final class Locations
             'longDistance' => $old['longDistance'] || $loc['longDistance'],
             'score'        => max($old['score'], $loc['score']),
             'rank'         => min($old['rank'], $loc['rank']),
+            'noJourneys'   => ($old['noJourneys'] ?? false) && ($loc['noJourneys'] ?? false),
         ];
+    }
+
+    /**
+     * MVG-only-Eintraege (id-Prefix "mvg:") mit HAFAS-Eintraegen gleichen
+     * Namens verschmelzen. HAFAS liefert oft kombinierte Namen ("München,
+     * Marienplatz"), MVG splittet in `place` + `name`. Deshalb werden beide
+     * Seiten in einen sortierten Wort-Kanon gebracht: Reihenfolge egal,
+     * "München Marienplatz" == "Marienplatz, München" == "Marienplatz München".
+     */
+    private function foldMvgIntoHafas(array &$byId): void
+    {
+        // Index: sortierter Wortkanon -> Key eines Nicht-MVG-Eintrags.
+        $anchor = [];
+        foreach ($byId as $key => $row) {
+            if (str_starts_with((string) $key, 'mvg:')) {
+                continue;
+            }
+            $canon = self::nameCanon(($row['place'] ?? '') . ' ' . $row['name']);
+            if ($canon !== '') {
+                $anchor[$canon] = $key;
+            }
+        }
+
+        foreach ($byId as $key => $row) {
+            if (!str_starts_with((string) $key, 'mvg:')) {
+                continue;
+            }
+            $canon = self::nameCanon(($row['place'] ?? '') . ' ' . $row['name']);
+            if ($canon === '' || !isset($anchor[$canon])) {
+                continue;
+            }
+            $target = $byId[$anchor[$canon]];
+            $target['products'] = array_values(array_unique(array_merge(
+                $target['products'],
+                $row['products']
+            )));
+            $target['lat'] = $target['lat'] ?? $row['lat'];
+            $target['lon'] = $target['lon'] ?? $row['lon'];
+            // MVG-Portfolio kann die Bedeutung erhoehen (U-Bahn-Anschluss zaehlt).
+            $target['score'] = $this->scoreOf($target['products']);
+            $byId[$anchor[$canon]] = $target;
+            unset($byId[$key]);
+        }
+    }
+
+    /**
+     * Sortierter Wort-Kanon fuer den Merge-Vergleich. Kleinschreibung,
+     * Umlaute aufgeloest, Kommas & Bindestriche entfernt, dann Woerter
+     * alphabetisch sortiert. "München, Marienplatz" -> "marienplatz muenchen".
+     */
+    private static function nameCanon(string $s): string
+    {
+        $n = self::normalize($s);
+        $n = str_replace([',', '-', '/', '(', ')'], ' ', $n);
+        $words = array_values(array_filter(explode(' ', $n), static fn($w) => $w !== ''));
+        sort($words);
+        return implode(' ', $words);
     }
 
     private function fromDb(array $loc, int $rank): array
@@ -227,6 +319,9 @@ final class Locations
         return [
             'id'           => (string) ($loc['evaId'] ?? ''),
             'name'         => (string) ($loc['name'] ?? ''),
+            // Ort/Stadt-Teil fuer den Namen-Merge mit MVG. Die DB liefert ihn
+            // nicht separat, deshalb faellt der Vergleich auf den Namen zurueck.
+            'place'        => '',
             'country'      => (string) ($loc['country'] ?? ''),
             'lat'          => $loc['lat'] ?? null,
             'lon'          => $loc['lon'] ?? null,
@@ -236,6 +331,7 @@ final class Locations
             // Verschachtelte Raenge: bei Gleichstand gewinnt die DB, weil sie
             // den Nahverkehr feiner aufloest.
             'rank'         => $rank * 2,
+            'noJourneys'   => false,
         ];
     }
 
@@ -248,6 +344,7 @@ final class Locations
         return [
             'id'           => (string) ($loc['id'] ?? ''),
             'name'         => (string) ($loc['name'] ?? ''),
+            'place'        => '',
             'country'      => (string) ($loc['country'] ?? ''),
             'lat'          => $loc['lat'] ?? null,
             'lon'          => $loc['lon'] ?? null,
@@ -255,6 +352,34 @@ final class Locations
             'longDistance' => (bool) ($loc['longDistance'] ?? false),
             'score'        => $this->scoreOf($products),
             'rank'         => $rank * 2 + 1,
+            'noJourneys'   => false,
+        ];
+    }
+
+    /**
+     * MVG-Treffer. Fuer HAFAS unbekannte Halte lassen sich mit diesen IDs
+     * nicht anrouten - das Flag noJourneys sagt dem Frontend, dass die
+     * Verbindungssuche fuer diesen Halt nicht funktioniert. In der Praxis
+     * wird das aber selten sichtbar, weil `foldMvgIntoHafas` die meisten
+     * MVG-Eintraege in die zugehoerigen HAFAS-Treffer verschmilzt.
+     */
+    private function fromMvg(array $loc, int $rank): array
+    {
+        $products = $loc['products'] ?? [];
+        return [
+            'id'           => (string) ($loc['id'] ?? ''),
+            'name'         => (string) ($loc['name'] ?? ''),
+            'place'        => (string) ($loc['place'] ?? ''),
+            'country'      => (string) ($loc['country'] ?? 'de'),
+            'lat'          => $loc['lat'] ?? null,
+            'lon'          => $loc['lon'] ?? null,
+            'products'     => $products,
+            'longDistance' => (bool) ($loc['longDistance'] ?? false),
+            'score'        => $this->scoreOf($products),
+            // MVG darf im Zweifel nach DB/OeBB gereiht werden - HAFAS-Halte
+            // sind fuer die App wertvoller, weil sie anroutbar sind.
+            'rank'         => $rank * 2 + 5,
+            'noJourneys'   => true,
         ];
     }
 

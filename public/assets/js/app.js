@@ -9,11 +9,13 @@
 import { api } from './api.js';
 import { rank, highlights } from './scoring.js';
 import { renderResults, renderNotices } from './render.js';
-import { RouteMap } from './map.js';
+import { RouteMap, setMapTheme } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
+import { initMvgTicker } from './mvgTicker.js';
 
 // v2: Zugnummern-Regeln wurden durch Modellbewertungen ersetzt.
 const STORAGE_KEY = 'train-maxxing:v2';
+const THEME_KEY = 'train-maxxing:theme';
 
 const state = {
   mode: 'normal',
@@ -38,6 +40,7 @@ const state = {
   lastPayload: null,
   ranked: [],
   selectedIndex: 0,
+  productCatalogue: [], // vom Backend geladen: [{id, label, hint}]
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -50,6 +53,9 @@ let map = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
+  // Theme so früh wie möglich anwenden, damit die Karte gleich die
+  // passende Kachel-Quelle wählt und kein Flash entsteht.
+  setupTheme();
   // Eine geteilte Suche aus der URL hat Vorrang vor gespeicherten Werten.
   const shared = applyShareUrl();
   map = new RouteMap($('#map'));
@@ -68,6 +74,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setupShare();
   loadCatalogue();
   applyStateToForm();
+  // MVG-Stoerungsticker Muenchen einblenden, wenn der Endpoint Meldungen hat.
+  initMvgTicker(document.getElementById('mvg-ticker'));
 
   // Geteilte Suche direkt ausführen, damit der Empfänger nichts tun muss.
   if (shared) runSearch();
@@ -166,6 +174,64 @@ function applyMode() {
     btn.setAttribute('aria-pressed', String(active));
   }
   document.body.dataset.mode = state.mode;
+}
+
+// ======================================================================
+// Theme (hell / dunkel)
+// ======================================================================
+
+/**
+ * Bindet den Umschalter und wendet die gespeicherte oder System-Präferenz an.
+ * Ohne gespeicherte Wahl folgt das Design dem Betriebssystem und wechselt
+ * live mit, wenn der Benutzer dort umstellt.
+ */
+function setupTheme() {
+  const stored = localStorage.getItem(THEME_KEY);  // 'light' | 'dark' | null
+  const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)');
+  const initial = stored || (systemDark?.matches ? 'dark' : 'light');
+  applyTheme(initial, { persist: false });
+
+  const btn = $('#theme-toggle');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      applyTheme(next, { persist: true });
+    });
+  }
+
+  // Solange keine explizite Wahl gespeichert ist, dem System folgen.
+  systemDark?.addEventListener?.('change', (e) => {
+    if (localStorage.getItem(THEME_KEY)) return;
+    applyTheme(e.matches ? 'dark' : 'light', { persist: false });
+  });
+}
+
+/**
+ * Setzt das Theme überall dort, wo es sich auswirken muss:
+ * - data-theme auf <html> (CSS-Variablen)
+ * - Karten-Kachel-Quelle (Voyager ↔ dark_all) plus Neurender
+ * - meta[name=theme-color] für die mobile Statusleiste
+ * - aria-Attribute + Titel des Toggle-Buttons
+ */
+function applyTheme(theme, { persist }) {
+  const t = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = t;
+
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = t === 'dark' ? '#0a0e17' : '#f5f7fb';
+
+  const btn = $('#theme-toggle');
+  if (btn) {
+    const nextLabel = t === 'dark' ? 'Zu hellem Design wechseln' : 'Zu dunklem Design wechseln';
+    btn.setAttribute('aria-label', nextLabel);
+    btn.title = nextLabel;
+    btn.setAttribute('aria-pressed', String(t === 'dark'));
+  }
+
+  setMapTheme(t);
+  if (map) map.applyTheme();
+
+  if (persist) localStorage.setItem(THEME_KEY, t);
 }
 
 // ======================================================================
@@ -385,6 +451,7 @@ async function loadCatalogue() {
 function renderProducts(products) {
   const box = $('#products');
   box.replaceChildren();
+  state.productCatalogue = products;
   if (products.length === 0) return;
 
   // Leerer Zustand bedeutet "alles erlaubt" - beim ersten Rendern also alles an.
@@ -506,8 +573,32 @@ async function runSearch() {
     );
 
     state.lastPayload = payload;
-    status.className = 'status';
-    status.textContent = `${payload.journeys.length} Verbindungen · ${state.from.name} → ${state.to.name}`;
+    const n = payload.journeys.length;
+    if (n === 0) {
+      // Konkreter Hinweis statt kommentarlosem "0 Verbindungen": in der Praxis
+      // ist meistens Datum/Uhrzeit oder ein zu enger Verkehrsmittel-Filter
+      // schuld — beide sind ein Klick weit weg.
+      status.className = 'status status--error';
+      const reasons = [];
+      if (state.from.noJourneys) reasons.push('Start ist ein Halt ohne Fahrplan');
+      if (state.to.noJourneys) reasons.push('Ziel ist ein Halt ohne Fahrplan');
+      // Aktive Verkehrsmittel-Auswahl mitanzeigen, damit sichtbar wird,
+      // dass ein Filter greift (Auswahl "nur Fernverkehr" verhindert z. B.
+      // eine reine U-Bahn-Verbindung wie Odeonsplatz → Garching).
+      const total = state.productCatalogue.length;
+      if (state.products.length > 0 && (total === 0 || state.products.length < total)) {
+        const labels = state.products.map((id) => {
+          const p = state.productCatalogue.find((x) => x.id === id);
+          return p ? p.label : id;
+        });
+        reasons.push(`Verkehrsmittel-Filter aktiv: ${labels.join(', ')}`);
+      }
+      const suffix = reasons.length ? ` (${reasons.join(' · ')})` : ' — Datum/Zeit oder Verkehrsmittel prüfen';
+      status.textContent = `Keine Verbindungen für ${state.from.name} → ${state.to.name}${suffix}.`;
+    } else {
+      status.className = 'status';
+      status.textContent = `${n} Verbindungen · ${state.from.name} → ${state.to.name}`;
+    }
     updateShareUrl();
     rerank();
     loadBestPrices();

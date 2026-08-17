@@ -18,6 +18,7 @@ require __DIR__ . '/api/lib/Http.php';
 require __DIR__ . '/api/lib/Cache.php';
 require __DIR__ . '/api/lib/Providers/OebbHafas.php';
 require __DIR__ . '/api/lib/Providers/DbVendo.php';
+require __DIR__ . '/api/lib/Providers/Mvg.php';
 
 $config = require __DIR__ . '/api/config.php';
 
@@ -98,6 +99,25 @@ if ($curlOk) {
             ? 'Sehr gut - du bekommst echte Preise inklusive Abo-Rabatt.'
             : 'DB blockt Server-IPs haeufig. Das Tool funktioniert weiter, zeigt Preise aber nur als Schaetzung mit Spanne. Alles andere - Fahrplan, Zuege, Umstiege - ist davon nicht betroffen.',
     ];
+
+    // MVG nur pruefen, wenn der Provider aktiv ist - sonst ist ein "fail"
+    // hier verwirrend fuer alle, die den Muenchner Nahverkehr nicht nutzen.
+    if (($config['providers']['mvg']['enabled'] ?? false) === true) {
+        $t0  = microtime(true);
+        $mvg = new Mvg($http, $config['providers']['mvg']);
+        $r   = $mvg->locations('Marienplatz', 1);
+        $ms  = (int) round((microtime(true) - $t0) * 1000);
+        $checks[] = [
+            'name'   => 'MVG (Muenchner Nahverkehr, Stoerungsticker)',
+            'state'  => $r['ok'] ? 'ok' : 'warn',
+            'detail' => $r['ok']
+                ? 'erreichbar in ' . $ms . ' ms, Testtreffer: ' . ($r['data'][0]['name'] ?? '-')
+                : ($r['error'] ?? 'unbekannter Fehler'),
+            'hint'   => $r['ok']
+                ? 'Muenchner U-Bahn-Halte werden in der Ortssuche gefunden, der Stoerungsticker ist aktiv.'
+                : 'Ohne MVG bleibt die Ortssuche fuer den Muenchner Nahverkehr auf DB/OeBB angewiesen und der Stoerungsticker fehlt. Nicht kritisch.',
+        ];
+    }
 }
 
 $hasFail = false;

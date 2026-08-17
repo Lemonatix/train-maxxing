@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f5f7fb">
   <title>Zugverbindungen vergleichen — CH · DE · AT</title>
   <meta name="description" content="Vergleicht Zugverbindungen durch die Schweiz, Deutschland und Österreich nach Preis, Zeit und Zugkomfort — mit Berücksichtigung von Abos.">
 
@@ -28,15 +30,22 @@
       <h1>Zugverbindungen vergleichen</h1>
       <p class="sub">Schweiz · Deutschland · Österreich — nach Preis, Zeit und Zug.</p>
     </div>
-    <div class="modes" role="group" aria-label="Modus">
-      <button type="button" data-mode="normal" class="mode-btn is-active" aria-pressed="true">
-        Normal
-        <small>Preis &amp; Zeit</small>
+    <div class="page-head__ctl">
+      <button type="button" id="theme-toggle" class="theme-toggle"
+              aria-label="Zwischen hellem und dunklem Design wechseln"
+              title="Design umschalten">
+        <span class="theme-toggle__icon" aria-hidden="true"></span>
       </button>
-      <button type="button" data-mode="nerd" class="mode-btn" aria-pressed="false">
-        Nerd
-        <small>Zug, Strecke, Komfort</small>
-      </button>
+      <div class="modes" role="group" aria-label="Modus">
+        <button type="button" data-mode="normal" class="mode-btn is-active" aria-pressed="true">
+          Normal
+          <small>Preis &amp; Zeit</small>
+        </button>
+        <button type="button" data-mode="nerd" class="mode-btn" aria-pressed="false">
+          Nerd
+          <small>Zug, Strecke, Komfort</small>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -224,6 +233,9 @@
   </div>
 
   <main id="results-list" class="results" aria-live="polite"></main>
+
+  <!-- MVG-Stoerungsticker Muenchen, per JS eingeblendet wenn aktive Meldungen vorliegen. -->
+  <aside id="mvg-ticker" class="mvg-ticker-mount" hidden></aside>
 
   <footer class="page-foot">
     <p>

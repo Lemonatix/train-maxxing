@@ -349,13 +349,31 @@ function renderLegs(journey, entry, state) {
     wrap.append(el('p', 'estimate-note', text));
   }
 
-  // Selbst gesammelte Pünktlichkeitshistorie, falls vorhanden.
+  // Pünktlichkeitshistorie: eigene Messungen und/oder Betreiber-Baseline.
+  // Die Quelle wird immer klar mit angegeben, damit ein Baseline-Wert
+  // nicht mit eigenen Messungen verwechselt wird.
   const hist = journey.history;
   if (hist && Object.keys(hist).length > 0) {
-    const parts = Object.entries(hist).map(([train, h]) =>
-      `${train}: ${Math.round(h.rate * 100)} % pünktlich, Ø +${h.avg} min (${h.samples} Beobachtungen)`);
-    wrap.append(el('p', 'estimate-note',
-      'Aus eigenen Beobachtungen — ' + parts.join(' · ')));
+    const num = (v) => (typeof v === 'number' ? v.toFixed(1).replace('.', ',') : '?');
+    const parts = Object.entries(hist).map(([train, h]) => {
+      const percent = Math.round((h.rate ?? 0) * 100);
+      const recent = h.samples7d > 0
+        ? ` · letzte 7 Tage Ø +${num(h.avg7d)} min (${h.samples7d})`
+        : '';
+      const own = h.samples > 0 ? ` · ${h.samples} eigene` : '';
+      return `${train}: ${percent} % pünktlich, Ø +${num(h.avg)} min${own}${recent}`;
+    });
+
+    const sources = new Set(Object.values(hist).map((h) => h.source));
+    let label;
+    if (sources.size === 1 && sources.has('own')) {
+      label = 'Pünktlichkeit aus eigenen Messungen';
+    } else if (sources.size === 1 && sources.has('baseline')) {
+      label = 'Pünktlichkeit — Näherung aus Betreiber-Jahresstatistik (noch keine eigenen Messungen)';
+    } else {
+      label = 'Pünktlichkeit — eigene Messungen ergänzt um Betreiber-Statistik';
+    }
+    wrap.append(el('p', 'estimate-note', label + ' — ' + parts.join(' · ')));
   }
 
   if (state.mode === 'nerd' && entry.explain && typeof entry.effective === 'number') {

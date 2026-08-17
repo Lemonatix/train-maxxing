@@ -18,9 +18,10 @@ return [
     // Wie lange Antworten zwischengespeichert werden (Sekunden).
     // Fahrplaene aendern sich selten, Preise oefter.
     'cache_ttl' => [
-        'locations' => 86400,  // Ortssuche: 1 Tag
-        'journeys'  => 300,    // Verbindungen: 5 Minuten
-        'prices'    => 600,    // Preise: 10 Minuten
+        'locations'   => 86400,  // Ortssuche: 1 Tag
+        'journeys'    => 300,    // Verbindungen: 5 Minuten
+        'prices'      => 600,    // Preise: 10 Minuten
+        'disruptions' => 120,    // MVG-Stoerungsticker: 2 Minuten
     ],
 
     // Timeout pro Upstream-Request in Sekunden.
@@ -71,6 +72,25 @@ return [
             'dbrest'   => [
                 'base' => 'https://v6.db.transport.rest',
             ],
+        ],
+
+        // --- MVG: Muenchner Nahverkehr (U-Bahn, Tram, Bus, S-Bahn). ---
+        //
+        // Ergaenzt die Ortssuche um alle Halte des MVV/MVG-Netzes - HAFAS
+        // kennt reine U-Bahn-Halte wie "Odeonsplatz" oder "Sendlinger Tor"
+        // oft nicht. Zusaetzlich liefert die API einen Stoerungsticker
+        // (?action=disruptions), den die App als Live-Widget einblenden kann.
+        //
+        // Die API laeuft ohne Auth und ist ausdruecklich fuer die MVG-Web-App
+        // gedacht. Fuer den fairen Umgang: cache_ttl['disruptions'] deckelt
+        // die Aufruffrequenz.
+        //
+        // Halte, die HAFAS nicht kennt, sind mit dieser API NICHT anroutbar
+        // (kein /trips-Endpoint). Das Frontend markiert sie als solche.
+        'mvg' => [
+            'enabled'    => true,
+            'endpoint'   => 'https://www.mvg.de/api/bgw-pt/v3',
+            'user_agent' => 'train-maxxing (+https://github.com/)',
         ],
 
         // --- Wagenreihung: liefert die Baureihe (ICE 4 = BR 412 usw.). ---

@@ -5,8 +5,12 @@
  * Gibt bewusst NIE eine Exception zurueck, sondern immer ein Array mit
  * status/body/error. So kann jeder Provider selbst entscheiden, ob ein
  * Fehlschlag fatal ist oder ob degradiert weitergearbeitet wird.
+ *
+ * Nicht final: fuer Tests darf eine Ableitung getJson/postJson ueberschreiben
+ * und ohne echtes Netzwerk arbeiten. Zur Laufzeit gibt es dennoch nur diese
+ * eine Ausprägung.
  */
-final class Http
+class Http
 {
     /**
      * TLS-1.2-Cipher-Reihenfolge eines Chrome-Browsers.

@@ -57,6 +57,8 @@ export const api = {
 
   trainDetails: (jid, opts) => call('traindetails', { jid }, opts),
 
+  disruptions: (opts) => call('disruptions', {}, opts),
+
   bestPrices: (params, opts) =>
     call('bestprices', {
       from: params.from, to: params.to, date: params.date,
