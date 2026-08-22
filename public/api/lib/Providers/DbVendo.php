@@ -251,8 +251,17 @@ final class DbVendo
         $dTicketSegments  = [];
 
         foreach ($abs as $a) {
-            $dep = $a['abfahrt']['sollzeit'] ?? $a['abfahrt']['ezZeit'] ?? null;
-            $arr = $a['ankunft']['sollzeit'] ?? $a['ankunft']['ezZeit'] ?? null;
+            // Soll- UND Ist-Zeit. Die DB liefert die Echtzeit direkt in der
+            // Suchantwort mit - anders als HAFAS, das dafuer je Abschnitt eine
+            // eigene Abfrage braucht. Das Feld heisst 'echtzeit'.
+            $dep     = self::iso($a['abfahrt']['sollzeit'] ?? null);
+            $arr     = self::iso($a['ankunft']['sollzeit'] ?? null);
+            $depReal = self::iso($a['abfahrt']['echtzeit'] ?? null);
+            $arrReal = self::iso($a['ankunft']['echtzeit'] ?? null);
+
+            // Ohne Sollzeit ist die Ist-Zeit die einzige, die wir haben.
+            $dep = $dep ?? $depReal;
+            $arr = $arr ?? $arrReal;
 
             $fromEva = (string) ($a['abfahrtsOrtExtId'] ?? '');
             $toEva   = (string) ($a['ankunftsOrtExtId'] ?? '');
@@ -307,10 +316,32 @@ final class DbVendo
                     'country'   => $this->countryFromEva($eva),
                     'lat'       => $crd['lat'],
                     'lon'       => $crd['lon'],
-                    'arrival'   => $h['ankunft']['sollzeit'] ?? null,
-                    'departure' => $h['abfahrt']['sollzeit'] ?? null,
-                    'platform'  => $h['gleis'] ?? null,
+                    'arrival'       => self::iso($h['ankunft']['sollzeit'] ?? null),
+                    'arrivalReal'   => self::iso($h['ankunft']['echtzeit'] ?? null),
+                    'departure'     => self::iso($h['abfahrt']['sollzeit'] ?? null),
+                    'departureReal' => self::iso($h['abfahrt']['echtzeit'] ?? null),
+                    'platform'      => $h['ezGleis'] ?? $h['gleis'] ?? null,
+                    'cancelled'     => (bool) ($h['ausfall'] ?? false),
                 ];
+            }
+
+            // Gruende fuer die Verspaetung, soweit die DB sie nennt
+            // ("Verspaetung eines vorausfahrenden Zuges", "Polizeieinsatz").
+            //
+            // Nur risNotizen: das sind die Betriebsgruende zum Zuglauf.
+            // himMeldungen enthalten daneben Bahnhofsinfos ("Aufzug in Celle
+            // ausser Betrieb"), die an einer Fahrt Frankfurt-Mannheim nichts
+            // zu suchen haben. Die relevanten Stoerungsmeldungen zeigt ohnehin
+            // die Live-Verfolgung.
+            $remarks = [];
+            foreach (($a['risNotizen'] ?? []) as $n) {
+                $txt = trim((string) ($n['value'] ?? ''));
+                if ($txt !== '' && !in_array($txt, $remarks, true)) {
+                    $remarks[] = $txt;
+                }
+                if (count($remarks) >= 2) {
+                    break;
+                }
             }
 
             // Die DB markiert selbst, auf welchen Teilstrecken das
@@ -334,14 +365,22 @@ final class DbVendo
                 'name'         => trim((string) ($vm['name'] ?? '')),
                 'direction'    => trim((string) ($vm['richtung'] ?? '')),
                 'operator'     => $this->operatorOf($vm),
-                'from'         => $from,
-                'to'           => $to,
-                'stops'        => $stops,
-                'departure'    => $dep,
-                'arrival'      => $arr,
-                'durationMin'  => (int) round(((int) ($a['abschnittsDauer'] ?? 0)) / 60),
-                'cancelled'    => (bool) ($a['originCancelled'] ?? false),
-                'dTicket'      => $dTicket,
+                'from'          => $from,
+                'to'            => $to,
+                'stops'         => $stops,
+                'departure'     => $dep,
+                'departureReal' => $depReal,
+                'arrival'       => $arr,
+                'arrivalReal'   => $arrReal,
+                // Die groessere der beiden Abweichungen: an der Abfahrt sieht
+                // man, ob der Zug schon spaet dran ist, an der Ankunft, ob er
+                // die Verspaetung unterwegs noch aufholt.
+                'delay'         => self::maxDelay([[$dep, $depReal], [$arr, $arrReal]]),
+                'hasRealtime'   => $depReal !== null || $arrReal !== null,
+                'remarks'       => $remarks,
+                'durationMin'   => (int) round(((int) ($a['abschnittsDauer'] ?? 0)) / 60),
+                'cancelled'     => (bool) ($a['originCancelled'] ?? false),
+                'dTicket'       => $dTicket,
             ];
         }
 
@@ -360,10 +399,22 @@ final class DbVendo
         $first = $legs[0] ?? null;
         $last  = $legs[count($legs) - 1] ?? null;
 
+        // Groesste Verspaetung ueber alle Abschnitte - das ist die Zahl, die
+        // an der Verbindung interessiert.
+        $delay = null;
+        foreach ($legs as $l) {
+            if (isset($l['delay']) && $l['delay'] !== null) {
+                $delay = $delay === null ? $l['delay'] : max($delay, $l['delay']);
+            }
+        }
+
         return [
-            'id'          => (string) ($v['tripId'] ?? md5((string) json_encode($legs))),
-            'departure'   => $first['departure'] ?? null,
-            'arrival'     => $last['arrival'] ?? null,
+            'id'            => (string) ($v['tripId'] ?? md5((string) json_encode($legs))),
+            'departure'     => $first['departure'] ?? null,
+            'departureReal' => $first['departureReal'] ?? null,
+            'arrival'       => $last['arrival'] ?? null,
+            'arrivalReal'   => $last['arrivalReal'] ?? null,
+            'delay'         => $delay,
             'durationMin' => (int) round(((int) ($v['verbindungsDauerInSeconds'] ?? 0)) / 60),
             'changes'     => (int) ($v['umstiegsAnzahl'] ?? max(0, count($legs) - 1)),
             'legs'        => $legs,
@@ -373,6 +424,60 @@ final class DbVendo
             'dTicket'     => $dTicketSegments,
             'source'      => 'db',
         ];
+    }
+
+    /**
+     * DB-Zeitstempel in vollstaendiges ISO-8601 mit Zonenangabe umwandeln.
+     *
+     * WARUM DAS NOETIG IST: Die DB liefert "2026-08-22T00:47:00" - deutsche
+     * Ortszeit OHNE Offset. Die OeBB liefert "2026-08-22T00:47:00+02:00".
+     * Ohne Normalisierung interpretiert PHP den DB-Wert in der Zeitzone des
+     * Servers. Auf einem deutschen Webspace faellt das nicht auf, auf einem
+     * UTC-Server liegen beide Quellen zwei Stunden auseinander - der Abgleich
+     * ueber Ab- und Ankunftszeit findet dann gar nichts mehr oder, schlimmer,
+     * das Falsche. Auch Fares.php und das Frontend rechnen mit dem Offset.
+     *
+     * Werte, die bereits eine Zone tragen, bleiben unangetastet.
+     */
+    private static function iso(?string $local): ?string
+    {
+        if ($local === null || $local === '') {
+            return null;
+        }
+        if (preg_match('/(Z|[+-]\d{2}:?\d{2})$/', $local)) {
+            return $local;
+        }
+        try {
+            return (new DateTimeImmutable($local, new DateTimeZone('Europe/Berlin')))
+                ->format(DateTimeInterface::ATOM);
+        } catch (Exception $e) {
+            return $local;
+        }
+    }
+
+    /**
+     * Groesste Verspaetung in Minuten aus Paaren von Soll- und Ist-Zeit.
+     *
+     * @param array<int,array{0:?string,1:?string}> $pairs
+     */
+    private static function maxDelay(array $pairs): ?int
+    {
+        $out = null;
+        foreach ($pairs as [$plan, $real]) {
+            if ($plan === null || $real === null) {
+                continue;
+            }
+            try {
+                $d = (int) round(
+                    ((new DateTimeImmutable($real))->getTimestamp()
+                        - (new DateTimeImmutable($plan))->getTimestamp()) / 60
+                );
+            } catch (Exception $e) {
+                continue;
+            }
+            $out = $out === null ? $d : max($out, $d);
+        }
+        return $out;
     }
 
     /**

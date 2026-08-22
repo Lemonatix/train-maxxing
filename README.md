@@ -6,12 +6,14 @@ nach Preis und Dauer, sondern auch danach, in welchem Zug du sitzt. Mit Abo-Ausw
 
 - **Normal** — Preis und Zeit, eine sortierte Liste, fertig.
 - **Nerd** — Zuggattung, Zugnummer, Streckenverlauf, Fahrzeugmodell,
-  Routenzwang über eine bestimmte Stadt und ein Zeitwert-Modell, das
-  ausrechnet, ob sich die halbe Stunde mehr Fahrt für den bequemeren Zug lohnt.
+  Routenzwang über eine bestimmte Stadt und eine Sortierung nach
+  **Routenvarianten**: der Weg über den Gotthard und der über den Arlberg
+  sind keine Abstufung derselben Sache, sondern eine Entscheidung.
 
 Dazu eine Routenkarte, ein Verkehrsmittel-Filter (Bus und
-Schienenersatzverkehr lassen sich vorab ausschließen) und Buchungslinks zu SBB,
-DB oder ÖBB, je nachdem welche Länder die Reise berührt.
+Schienenersatzverkehr lassen sich vorab ausschließen), eine **Live-Verfolgung**
+der gewählten Verbindung samt GPS-Mitfahrt und Buchungslinks zu SBB, DB oder
+ÖBB, je nachdem welche Länder die Reise berührt.
 
 Gebaut als statisches Frontend plus schlankes PHP-Backend, damit du den Ordner
 einfach auf deinen Webspace ziehen kannst. Die Oberfläche ist für Telefone
@@ -30,6 +32,58 @@ Karte wechselt auf schmalen Bildschirmen ins Hochformat.
 
 *MVG liefert Ortssuche und Störungsmeldungen für den Münchner Nahverkehr, aber
 keine Verbindungssuche. Details unter [Münchner Nahverkehr](#münchner-nahverkehr-über-die-mvg-api).
+
+### Warum ÖBB HAFAS den Fahrplan liefert und die DB nur die Preise
+
+Nachgemessen für fünf Relationen, jeweils dieselbe Abfrage an beide Quellen:
+
+| | ÖBB HAFAS | DB bahn.de |
+|---|---|---|
+| Treffer CH/AT-Relationen | 6–10 | 5–6 |
+| Streckengeometrie (Karte) | **alle Abschnitte** | keine |
+| Zuglauf-ID für Echtzeit | **alle Abschnitte** | `journeyId` je Abschnitt |
+| Preise | keine | **4–6 je Suche** |
+| Auslastung | keine | **ja**, sogar je Halt |
+| Zwischenhalte mit Koordinaten | 100 % | 100 % |
+| Gattung, Zugnummer, Gleis, Ländercode | ja | ja |
+| Antwortzeit | 0,8–7,0 s | 0,7–4,4 s |
+
+Die Aufteilung ist also kein Zufall, sondern folgt den Lücken: **ohne HAFAS gäbe
+es keine Karte** (die DB liefert keine Polylines) und **ohne die DB keine Preise**.
+Auf österreichischen und Schweizer Relationen findet HAFAS zudem mehr — Wien→München
+10 statt 5 Treffer, Zürich→Wien 8 statt 6.
+
+Was die DB besser kann und was das Tool bereits nutzt: **Auslastungsangaben**
+werden beim Preis-Merge auf die HAFAS-Abschnitte übertragen, ebenso die Angabe,
+wo das Deutschlandticket gilt. Beides gibt es bei HAFAS nicht.
+
+**Echtzeit kommt von der DB, nicht von HAFAS.** Die DB schickt neben
+`sollzeit` ein Feld `echtzeit` direkt in der Suchantwort mit, dazu unter
+`risNotizen` den Grund („Verspätung eines vorausfahrenden Zuges",
+„Polizeieinsatz"). HAFAS bräuchte dafür je Abschnitt eine eigene Abfrage.
+Deshalb übernimmt `mergeLegFlags()` die Ist-Zeiten auf die ÖBB-Abschnitte —
+so stehen Verspätungen schon in der Trefferliste, ohne Zusatzabfrage.
+
+Drei Fallstricke, die dabei aufgefallen sind:
+
+- **Die DB liefert Zeiten ohne Zeitzone** (`2026-08-22T00:47:00`), die ÖBB mit
+  Offset (`…+02:00`). Ohne Normalisierung interpretiert PHP den DB-Wert in der
+  Serverzone. Auf einem deutschen Webspace fällt das nie auf, auf einem
+  UTC-Server liegen beide Quellen zwei Stunden auseinander und der Abgleich
+  über Ab-/Ankunftszeit findet gar nichts mehr — oder das Falsche.
+  `DbVendo::iso()` hängt deshalb `Europe/Berlin` an.
+- **Der Merge darf nicht am Preis hängen.** Die DB liefert Echtzeit auch für
+  Relationen, die sie nicht verkauft — nachts und im Ausland der Normalfall.
+  Früher übersprang `mergePrices()` preislose Treffer und verlor damit genau
+  dort die Verspätung, wo sie am meisten hilft.
+- **Bei S-Bahnen nennt die DB die Linie („S8"), die ÖBB die Zugnummer
+  („35884").** Über die Nummer findet sich da nichts, deshalb fällt
+  `mergeLegFlags()` auf die Position zurück, wenn beide Quellen gleich viele
+  Zugabschnitte haben.
+
+Und: die DB-Abschnitte tragen eine eigene `journeyId`. Damit wäre die
+Live-Verfolgung auch für DB-Fahrpläne möglich — es fehlt nur ein
+Zuglauf-Endpunkt auf DB-Seite.
 
 ### Die DB blockt nach TLS-Fingerprint, nicht nach IP
 
@@ -143,8 +197,8 @@ location ~ ^/train/api/(cache|lib)/ { deny all; }
 Das Frontend hat keine JavaScript-Abhängigkeiten. Alle API-Pfade sind relativ
 (`api/…`), es funktioniert also in jedem Unterordner ohne Konfiguration.
 
-**Gestaltung:** dunkles Glasmorphismus-Grundgerüst wie auf mika-riesterer.de
-(Panels mit `backdrop-filter`, dünne helle Ränder, Sky/Purple/Emerald als
+**Gestaltung:** Glasmorphismus-Grundgerüst wie auf mika-riesterer.de
+(Panels mit `backdrop-filter`, dünne Ränder, Sky/Purple/Emerald als
 Akzente, Outfit + JetBrains Mono), kombiniert mit der Informationsarchitektur des
 DB-Navigators — große Zeitangaben in Tabellenziffern, farbcodierte
 Zuggattungs-Chips, Zeitachse im Detailbereich, Verkehrsrot als Signalfarbe für
@@ -164,9 +218,21 @@ deine Website eingebettet, sind sie ohnehin da — dann kannst du die beiden
 }
 ```
 
-Die Seite ist bewusst **dark-only**, passend zu deiner Website. Für einen
-hellen Modus reicht es, in `:root` die Flächen- und Textvariablen zu tauschen —
-alle Komponenten leiten ihre Farben davon ab.
+Die Seite kennt **hell und dunkel**. Ohne gespeicherte Wahl folgt sie dem
+Betriebssystem, der Umschalter oben rechts überschreibt das und legt die
+Entscheidung unter `train-maxxing:theme` ab. Die hellen Werte stehen in
+`:root`, die dunklen in `[data-theme="dark"]` — alle Komponenten leiten ihre
+Farben davon ab.
+
+**Eine Regel dabei ist wichtig: alles Anklickbare bekommt einen deckenden
+Grund.** Karten, Knöpfe, Panels und Eingabefelder benutzen `--surface-card`
+bzw. `--field-bg`, nicht das halbtransparente `--surface`. Der Grund ist
+handfest: über dem Glas-Panel und der Kartenkachel-Ebene ergibt dieselbe
+transparente Fläche je nach Untergrund einen anderen Kontrast. Beim `<select>`
+kam dazu, dass das aufgeklappte Menü vom System gezeichnet wird — es erbt die
+Textfarbe, malt den Hintergrund aber selbst, was im dunklen Theme fast weissen
+Text auf hellem Menü ergab. Transparenz bleibt deshalb den rein dekorativen
+Containern vorbehalten: `.panel`, `.map`, `.notice`.
 
 **Zurück-Link anpassen:** Oben links führt ein Knopf zurück zur Hauptseite. Das
 Ziel steht in `index.html` und zeigt standardmäßig auf `/`:
@@ -193,18 +259,109 @@ Preis, Dauer und Umstiege werden je auf 0–1 normiert und gewichtet
 
 ### Nerd-Modus
 
-Ein Zeitwert-Modell rechnet alles in „effektive Kosten" um:
+Kein Preismodell, sondern eine Frage des Weges. Die Treffer werden zu
+**Routenvarianten** gruppiert, und innerhalb einer Variante gilt:
 
+1. wenigste Umstiege
+2. bei Gleichstand die kürzere Fahrt
+3. bei Gleichstand der angenehmere Zug
+
+Die **Reisezeit wird bewusst nicht verrechnet**. Sie entscheidet erst, wenn alles
+andere gleich ist — es gibt keinen Wechselkurs zwischen einer Stunde Fahrzeit und
+einem Umstieg. Der Preis steht an der Karte, geht hier aber nicht in die Wertung
+ein. In welcher Reihenfolge die Varianten stehen, bestimmt deine Bewertung unter
+**Lieblingsstrecken** und **Lieblingszüge**.
+
+### Strecken erkennen
+
+`assets/js/data/routes.js` beschreibt gut dreißig Korridore — Gotthard-Basistunnel,
+Gotthard-Bergstrecke, SFS Köln–Rhein/Main, NBS Wendlingen–Ulm, Allgäubahn, Gäubahn,
+Westbahn, Arlberg, Semmering und so weiter, je mit Streckenhöchstgeschwindigkeit.
+Erkannt werden sie an den **Namen der Zwischenhalte**: die Wegpunkte einer Strecke
+müssen in konsistenter Reihenfolge im Zuglauf vorkommen.
+
+Zwei Schwellen verhindern Fehlzuordnungen, weil sich Korridore Endpunkte teilen:
+
+- **Deckung ≥ 60 %** der Wegpunkte. Sonst würde jeder Zug München–Augsburg auch
+  als „München–Augsburg–Nürnberg" gelten.
+- **höchstens ein ausgelassener Wegpunkt am Stück**. Wer Kempten und Immenstadt
+  überspringt, fährt nicht über das Allgäu, sondern über Memmingen.
+
+Beanspruchen mehrere Korridore denselben Abschnitt, gewinnt der mit den meisten
+wiedergefundenen Wegpunkten. Eine feste Deckungsschwelle taugt dafür **nicht**:
+schnelle Züge halten an den Zwischenpunkten gerade nicht — ein ICE über die SFS
+Nürnberg–Ingolstadt lässt Allersberg und Kinding aus und wäre ausgerechnet als
+der Zug durchgefallen, für den die Strecke gebaut wurde. Ein einzelner
+gemeinsamer Halt gilt dagegen als Übergang, nicht als Widerspruch: Bern–Olten
+und Bern–Brig treffen sich in Bern und gelten beide als befahren.
+
+Die Fälle, an denen frühere Fassungen gescheitert sind, stehen als Test in
+`bin/test_routes.mjs`:
+
+```bash
+node bin/test_routes.mjs
 ```
-effektiv = Preis + Stunden × Zeitwert + Umstiege × Umstiegsaufwand − Komfortbonus
-```
 
-Der Komfortbonus wächst mit der Fahrzeit — ein angenehmer Zug ist auf fünf Stunden
-mehr wert als auf einer. Genau damit lässt sich die Frage beantworten, ob der
-durchgehende Railjet die halbe Stunde Mehrfahrzeit wert ist.
+Der Knopf **„Schnelle Strecken bevorzugen"** setzt alle Regler auf einmal aus der
+Streckenhöchstgeschwindigkeit — 300 km/h gibt +3, eine Bergstrecke mit 90 km/h −2.
 
-Angezeigt wird nicht der Absolutwert (der bei hoher Komfortgewichtung negativ
-werden kann), sondern der **Abstand zur besten Option**: „+43 gegenüber Platz 1".
+**Was die Liste nicht abdeckt**, wird geschätzt: aus Luftlinie und Fahrzeit
+ergibt sich ein Durchschnittstempo, und der Regler *„Unbenannte Strecken nach
+Tempo"* bestimmt, wie stark das zählt. Diese Einträge sind gestrichelt und mit
+`ø` gekennzeichnet, weil die Zahl etwas anderes bedeutet als bei den gepflegten
+Strecken — eine Reisegeschwindigkeit inklusive Halten, keine
+Streckenhöchstgeschwindigkeit.
+
+### Live-Verfolgung
+
+Jede Verbindung hat einen Knopf **„Live verfolgen"**. Das Panel unter der Karte
+frischt alle 30 Sekunden die Echtzeitlage aller Abschnitte auf: Verspätung,
+Ist-Zeiten je Halt, Gleiswechsel, Meldungen. Für München kommen die
+Störungsmeldungen der MVG dazu, gefiltert auf die tatsächlich benutzten Linien.
+
+Grundlage ist die HAFAS-Journey-ID (`leg.jid`), die jeder Zugabschnitt mitbringt.
+Verbindungen, deren Fahrplan von der DB statt der ÖBB stammt, haben keine — das
+Panel sagt das dann auch.
+
+Die Verfolgung **überlebt Neuladen und neue Suchen**: die Verbindung liegt unter
+`train-maxxing:tracked` im localStorage und wird beim Start wieder aufgenommen,
+solange die Fahrt noch läuft. Taucht sie in der aktuellen Trefferliste nicht auf
+— nach einer anderen Suche oder nach dem Umdisponieren — steht oben eine Zeile
+„Du verfolgst …", damit sie nicht unsichtbar weiterläuft.
+
+**Anschlusswache.** Aus den Ist-Zeiten wird je Umstieg gerechnet, ob er noch zu
+schaffen ist: der Zubringer kommt um X an, der Anschluss fährt um Y ab. Liegt Y
+vor X, ist der Anschluss weg — auch wenn im Fahrplan zwanzig Minuten standen.
+Unter zwei Minuten Rest gilt als gefährdet.
+
+Dann lädt die App die nächsten Verbindungen ab dem Umsteigebahnhof und bietet sie
+zur Auswahl an. Ein Klick auf **„übernehmen"** ersetzt die Verbindung ab dem
+geplatzten Umstieg — die bereits gefahrenen Abschnitte bleiben stehen, man sitzt
+ja im Zug — und die Verfolgung läuft mit der neuen Route weiter.
+
+Alarm gibt es nur bei echten Echtzeitdaten. Ein knapper *Fahrplan*-Umstieg steht
+schon an der Verbindungskarte und würde hier nur doppelt warnen.
+
+**Mitfahren (GPS)** schaltet `watchPosition` dazu: die Position landet auf der
+Karte, und die Route wird zugeordnet — „Zwischen Augsburg Hbf und Günzburg —
+25,1 km hinter Augsburg Hbf. Noch 20 Halte." Gesucht wird dabei der *Abschnitt*
+mit der kleinsten Entfernungssumme zu beiden Enden, nicht der nächstgelegene
+Halt allein: zwischen zwei Halten kann der vor einem liegende näher sein als der
+hinter einem. Die Position verlässt den Browser nicht.
+
+### Ergebnisliste und Umstiege
+
+Angezeigt werden **sechs Verbindungen**; der Knopf darunter klappt erst die
+restlichen geladenen auf und holt danach die nächste Seite. Das ist nötig, weil
+HAFAS je Anfrage bei rund sechs Treffern deckelt — spätere Abfahrten gibt es nur
+über den Blätter-Kontext (`outCtxScrF`) der vorigen Antwort.
+
+Die Umsteigezeit steht standardmäßig auf **kürzestmöglich**. Damit tauchen auch
+Verbindungen mit vier Minuten Umstieg auf — und für genau die (1 bis 4 Minuten)
+lädt die App den **nächstspäteren Anschluss** nach und schreibt ihn unter die
+Warnung: „Verpasst? 13:36 → 14:53 · SBB 19732 · S 18955 · +30 min später am Ziel."
+Die Frage bei einem Vier-Minuten-Umstieg ist nicht, ob man ihn schafft, sondern
+was passiert, wenn nicht.
 
 ### Zugkomfort und die Sache mit dem ICE 4
 
@@ -676,10 +833,11 @@ Alles per GET auf `api/`:
 | `?action=health` | Welche Quellen sind erreichbar? |
 | `?action=catalogue` | Abo-Liste fürs Frontend |
 | `?action=locations&q=Bern` | Stationssuche |
-| `?action=journeys&from=…&to=…&date=…&time=…` | Verbindungen inklusive Preis |
+| `?action=journeys&from=…&to=…&date=…&time=…` | Verbindungen inklusive Preis (`&scroll=…` blättert weiter) |
 | `?action=livetrains&bbox=süd,west,nord,ost` | Züge, die dort gerade fahren |
 | `?action=traindetails&jid=…` | Zuglauf mit Halten und Verspätung |
 | `?action=bestprices&from=…&to=…&date=…` | Günstigste Zeitfenster am Tag |
+| `?action=nextconnection&from=…&to=…&date=…&time=…` | Nächster Anschluss nach einem knappen Umstieg |
 | `?action=disruptions` | Aktive Störungsmeldungen der MVG München |
 
 `journeys` versteht zusätzlich `discounts` (kommagetrennt), `products`

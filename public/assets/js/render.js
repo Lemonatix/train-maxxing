@@ -38,20 +38,112 @@ const el = (tag, className, text) => {
   return n;
 };
 
-export function renderResults(container, ranked, marks, state, onSelect) {
+export function renderResults(container, ranked, marks, state, onSelect, onMore, liveCtl) {
   container.replaceChildren();
+
+  // Eine laufende Verfolgung, die in dieser Liste nicht vorkommt, bekommt
+  // eine eigene Zeile oben. Sonst verschwindet sie nach einer neuen Suche
+  // oder nach dem Umdisponieren aus dem Blickfeld, obwohl sie weiterläuft.
+  const tracked = liveCtl?.tracked?.();
+  if (tracked && !ranked.some((e) => liveCtl.isTracking(e.journey))) {
+    container.append(renderTrackedBar(tracked, liveCtl));
+  }
 
   if (ranked.length === 0) {
     container.append(el('p', 'empty', 'Keine Verbindungen gefunden.'));
     return;
   }
 
-  ranked.forEach((entry, index) => {
-    container.append(renderCard(entry, index, marks, state, onSelect));
-  });
+  const visible = Math.min(state.visible ?? ranked.length, ranked.length);
+  for (let index = 0; index < visible; index++) {
+    const entry = ranked[index];
+    // Im Nerd-Mode stehen die Verbindungen nach Routenvarianten sortiert.
+    // Der Kopf trennt sie sichtbar - sonst wirkt die Liste wie eine
+    // Rangfolge, obwohl sie eine Auswahl zwischen Wegen ist.
+    if (state.mode === 'nerd' && entry.group?.first) {
+      container.append(renderGroupHead(entry.group));
+    }
+    container.append(renderCard(entry, index, marks, state, onSelect, liveCtl));
+  }
+
+  const rest = ranked.length - visible;
+  if (rest > 0 || state.scrollCtx || state.loadingMore) {
+    container.append(renderMore(ranked, marks, visible, rest, state, onMore));
+  }
 }
 
-function renderCard(entry, index, marks, state, onSelect) {
+/**
+ * Der Knopf am Fuss der Liste.
+ *
+ * Er tut zwei verschiedene Dinge, und das steht auch dran: solange noch
+ * geladene Verbindungen verborgen sind, klappt er nur auf. Danach holt er
+ * die naechste Seite bei der OeBB.
+ *
+ * Beim Aufklappen nennt er zusaetzlich, ob unter den verborgenen Treffern
+ * eine ausgezeichnete steckt - sonst muesste man blind klicken, um zu
+ * wissen, ob es sich lohnt.
+ */
+function renderMore(ranked, marks, visible, rest, state, onMore) {
+  const btn = el('button', 'more');
+  btn.type = 'button';
+
+  if (state.loadingMore) {
+    btn.disabled = true;
+    btn.append(el('span', 'more__label', 'Lade spätere Verbindungen …'));
+    return btn;
+  }
+
+  if (rest > 0) {
+    btn.append(el('span', 'more__label',
+      rest === 1 ? 'Eine weitere Verbindung anzeigen' : `${rest} weitere Verbindungen anzeigen`));
+
+    const hidden = ranked.slice(visible);
+    const teasers = [];
+    if (marks.cheapest && hidden.includes(marks.cheapest)) teasers.push('die günstigste');
+    if (marks.fastest && hidden.includes(marks.fastest)) teasers.push('die schnellste');
+    if (marks.comfiest && hidden.includes(marks.comfiest)) teasers.push('die bequemste');
+    if (teasers.length > 0) {
+      btn.append(el('span', 'more__hint', `darunter ${teasers.join(' und ')}`));
+    }
+  } else {
+    btn.append(el('span', 'more__label', 'Spätere Verbindungen laden'));
+    btn.append(el('span', 'more__hint', 'sucht ab der letzten Abfahrt weiter'));
+  }
+
+  btn.addEventListener('click', () => onMore && onMore());
+  return btn;
+}
+
+/** Hinweiszeile auf eine verfolgte Verbindung, die nicht in der Liste steht. */
+function renderTrackedBar(journey, liveCtl) {
+  const bar = el('div', 'tracked-bar');
+  bar.append(el('span', 'tracked-bar__label', 'Du verfolgst'));
+
+  const trains = (journey.legs || []).filter((l) => l.mode === 'train');
+  const to = trains[trains.length - 1]?.to?.name;
+  bar.append(el('span', 'tracked-bar__text',
+    `${formatTime(journey.departure)} → ${formatTime(journey.arrival)}`
+    + (to ? ` · ${to}` : '')));
+
+  if (journey.rerouted) bar.append(el('span', 'tracked-bar__tag', 'umdisponiert'));
+
+  const stop = el('button', 'tracked-bar__stop', 'beenden');
+  stop.type = 'button';
+  stop.addEventListener('click', () => liveCtl.toggle(journey));
+  bar.append(stop);
+  return bar;
+}
+
+/** Trennzeile vor der ersten Verbindung einer Routenvariante. */
+function renderGroupHead(group) {
+  const head = el('div', 'group-head');
+  head.append(el('span', 'group-head__label', group.label));
+  head.append(el('span', 'group-head__count',
+    group.size === 1 ? '1 Verbindung' : `${group.size} Verbindungen`));
+  return head;
+}
+
+function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   const j = entry.journey;
   const card = el('article', 'journey');
   if (index === 0) card.classList.add('journey--best');
@@ -67,10 +159,22 @@ function renderCard(entry, index, marks, state, onSelect) {
   // --- Kopf: Zeiten, Dauer, Preis ---
   const head = el('header', 'journey__head');
 
+  // Zeiten. Liegt eine Ist-Zeit vor und weicht sie ab, steht der Fahrplanwert
+  // durchgestrichen daneben - sonst muesste man raten, was gilt.
   const times = el('div', 'journey__times');
-  times.append(el('span', 'journey__time', formatTime(j.departure)));
+  const timePair = (plan, real) => {
+    const p = formatTime(plan);
+    const r = real ? formatTime(real) : null;
+    if (!r || r === p) {
+      times.append(el('span', 'journey__time', p));
+      return;
+    }
+    times.append(el('span', 'journey__time journey__time--planned', p));
+    times.append(el('span', 'journey__time journey__time--real', r));
+  };
+  timePair(j.departure, j.departureReal);
   times.append(el('span', 'journey__arrow', '→'));
-  times.append(el('span', 'journey__time', formatTime(j.arrival)));
+  timePair(j.arrival, j.arrivalReal);
 
   const meta = el('div', 'journey__meta');
   meta.append(el('span', 'journey__duration', formatDuration(j.durationMin)));
@@ -113,14 +217,12 @@ function renderCard(entry, index, marks, state, onSelect) {
 
   if (state.mode === 'nerd') {
     add(`Komfort ${entry.comfort.toFixed(1)}`, 'badge--score');
-    // Absolute Effektivkosten koennen bei hoher Komfortgewichtung negativ werden.
-    // Der Abstand zur besten Option ist immer positiv und beantwortet die
-    // eigentliche Frage: was kostet mich diese Wahl gegenueber der besten?
-    if (typeof entry.penalty === 'number') {
-      add(
-        entry.penalty < 0.5 ? 'beste Wahl' : `+${entry.penalty.toFixed(0)} gegenüber Platz 1`,
-        'badge--effective'
-      );
+    // Innerhalb einer Routenvariante ist die interessante Frage nicht der
+    // Rang, sondern der Abstand zur schnellsten Option desselben Weges.
+    const g = entry.group;
+    if (g) {
+      if (g.first) add('beste dieser Route', 'badge--variant');
+      else if (g.slowerThanBest > 0) add(`+${formatDuration(g.slowerThanBest)}`, 'badge--variant');
     }
   }
   for (const hit of entry.comfortHits) add(hit, 'badge--rule');
@@ -132,8 +234,22 @@ function renderCard(entry, index, marks, state, onSelect) {
     add(walks.length === 1 ? 'mit Fussweg' : `${walks.length} Fusswege`, 'badge--walk');
   }
 
+  // Verspätung, sofern die DB Echtzeitdaten geliefert hat.
+  if (typeof j.delay === 'number' && j.delay > 0) {
+    add(`+${j.delay} min`, j.delay >= 5 ? 'badge--risky' : 'badge--tight');
+  } else if (j.delay === 0) {
+    add('pünktlich', 'badge--ontime');
+  }
+
   // Knappe Umstiege sind der häufigste Grund, warum eine Verbindung platzt.
-  if (j.transferRisk === 'risky') {
+  // Mit Echtzeit zählt die tatsächliche Lücke, nicht die im Fahrplan.
+  const live = j.minTransferLive;
+  if (typeof live === 'number' && live !== j.minTransferMin) {
+    add(
+      live < 0 ? `Anschluss weg (${live} min)` : `nur noch ${live} min Umstieg`,
+      live < 5 ? 'badge--risky' : 'badge--tight'
+    );
+  } else if (j.transferRisk === 'risky') {
     add(`nur ${j.minTransferMin} min Umstieg`, 'badge--risky');
   } else if (j.transferRisk === 'tight') {
     add(`${j.minTransferMin} min Umstieg`, 'badge--tight');
@@ -184,6 +300,22 @@ function renderCard(entry, index, marks, state, onSelect) {
   }
   card.append(chain);
 
+  // --- Live verfolgen ---
+  // Steht vor den Details, weil es unterwegs die haeufigste Handlung ist.
+  if (liveCtl?.trackable(j)) {
+    const tracking = liveCtl.isTracking(j);
+    const btn = el('button', 'live-btn', tracking ? 'Verfolgung beenden' : 'Live verfolgen');
+    btn.type = 'button';
+    btn.setAttribute('aria-pressed', String(tracking));
+    if (tracking) btn.classList.add('is-on');
+    btn.title = 'Verspätungen, Gleise und Meldungen dieser Verbindung — mit GPS-Mitfahrt.';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // nicht zugleich die Karte umschalten
+      liveCtl.toggle(j);
+    });
+    card.append(btn);
+  }
+
   // --- Detailbereich ---
   const details = el('details', 'journey__details');
   details.append(el('summary', null, 'Streckenverlauf und Details'));
@@ -218,10 +350,69 @@ function renderCard(entry, index, marks, state, onSelect) {
   return card;
 }
 
+/**
+ * "Wenn du den Anschluss nicht kriegst": naechste Verbindung ab dem
+ * Umsteigebahnhof. Wird von app.js nachgeladen, deshalb hier drei Zustaende.
+ */
+function renderFallback(leg) {
+  if (!leg.fallbackState) return null;
+
+  if (leg.fallbackState === 'loading') {
+    return el('div', 'leg__fallback leg__fallback--pending', 'Suche den nächsten Anschluss …');
+  }
+  if (!leg.fallback) {
+    return el('div', 'leg__fallback leg__fallback--none',
+      'Kein späterer Anschluss gefunden — diese Verbindung hängt am Umstieg.');
+  }
+
+  const f = leg.fallback;
+  const box = el('div', 'leg__fallback');
+  box.append(el('span', 'leg__fallback-label', 'Verpasst?'));
+
+  const line = el('span', 'leg__fallback-text');
+  const parts = [`${formatTime(f.departure)} → ${formatTime(f.arrival)}`];
+  if (f.trains?.length) parts.push(f.trains.join(' · '));
+  if (typeof f.durationMin === 'number') parts.push(formatDuration(f.durationMin));
+  if (typeof f.changes === 'number') {
+    parts.push(f.changes === 0 ? 'direkt' : `${f.changes} Umstieg${f.changes > 1 ? 'e' : ''}`);
+  }
+  line.textContent = parts.join(' · ');
+  box.append(line);
+
+  // Wie viel später man ankommt, ist die eigentlich interessante Zahl.
+  const lost = lateBy(leg.journeyArrival, f.arrival);
+  if (lost != null && lost > 0) {
+    box.append(el('span', 'leg__fallback-lost', `+${formatDuration(lost)} später am Ziel`));
+  }
+  return box;
+}
+
+/** Differenz zweier ISO-Zeitpunkte in Minuten, null wenn unbekannt. */
+function lateBy(plannedIso, actualIso) {
+  const a = Date.parse(plannedIso || '');
+  const b = Date.parse(actualIso || '');
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return Math.round((b - a) / 60000);
+}
+
+/** Uhrzeit eines Abschnitts, bei Abweichung Plan durchgestrichen plus Ist. */
+function appendLegTime(line, plan, real) {
+  const p = formatTime(plan);
+  const r = real ? formatTime(real) : null;
+  if (!r || r === p) {
+    line.append(el('span', 'leg__time', p));
+    return;
+  }
+  line.append(el('span', 'leg__time leg__time--planned', p));
+  line.append(el('span', 'leg__time leg__time--real', r));
+}
+
 function renderLegs(journey, entry, state) {
   const wrap = el('div', 'legs');
 
   for (const leg of journey.legs) {
+    // Fuer den Vergleich "wie viel spaeter komme ich an" in renderFallback.
+    leg.journeyArrival = journey.arrival;
     if (leg.mode === 'walk') {
       // Wechselt der Halt, läuft man wirklich ein Stück — das gehört
       // sichtbar gemacht, samt Start und Ziel des Fußwegs.
@@ -249,10 +440,15 @@ function renderLegs(journey, entry, state) {
           ? `Nur ${leg.transferMin} min zum Umsteigen — bei Verspätung weg`
           : `${leg.transferMin} min zum Umsteigen — knapp`);
       row.append(t);
+
+      // Bei sehr knappen Umstiegen die Rueckfallebene gleich mitliefern:
+      // die Frage ist nicht, ob man es schafft, sondern was sonst passiert.
+      const fb = renderFallback(leg);
+      if (fb) row.append(fb);
     }
 
     const line1 = el('div', 'leg__line');
-    line1.append(el('span', 'leg__time', formatTime(leg.departure)));
+    appendLegTime(line1, leg.departure, leg.departureReal);
     line1.append(el('span', 'leg__station', leg.from?.name || '?'));
     if (leg.from?.platform) line1.append(el('span', 'leg__platform', `Gl. ${leg.from.platform}`));
     row.append(line1);
@@ -295,6 +491,11 @@ function renderLegs(journey, entry, state) {
       row.append(el('div', 'leg__stops-count', leg.dTicket));
     }
 
+    // Warum der Zug spät ist, sagt die DB oft dazu.
+    for (const note of leg.remarks || []) {
+      row.append(el('div', 'leg__remark', note));
+    }
+
     // Zwischenhalte: im Nerd-Mode alle mit Uhrzeit, sonst nur die Anzahl.
     // Die Zeiten stehen hier nicht zur Zierde: zeitlich begrenzte Abos wie das
     // GA Night gelten je Teilstueck, ein ECE ab Muenchen 17:03 ist in der
@@ -320,7 +521,7 @@ function renderLegs(journey, entry, state) {
     }
 
     const line2 = el('div', 'leg__line');
-    line2.append(el('span', 'leg__time', formatTime(leg.arrival)));
+    appendLegTime(line2, leg.arrival, leg.arrivalReal);
     line2.append(el('span', 'leg__station', leg.to?.name || '?'));
     if (leg.to?.platform) line2.append(el('span', 'leg__platform', `Gl. ${leg.to.platform}`));
     row.append(line2);
@@ -376,17 +577,26 @@ function renderLegs(journey, entry, state) {
     wrap.append(el('p', 'estimate-note', label + ' — ' + parts.join(' · ')));
   }
 
-  if (state.mode === 'nerd' && entry.explain && typeof entry.effective === 'number') {
-    const e = entry.explain;
-    wrap.append(
-      el(
-        'p',
-        'estimate-note',
-        `Effektivkosten: ${e.base.toFixed(2)} Preis + ${e.time.toFixed(2)} Zeit + ` +
-          `${e.changes.toFixed(2)} Umstiege − ${e.comfortBonus.toFixed(2)} Komfort = ` +
-          `${entry.effective.toFixed(2)}`
-      )
-    );
+  // Welche Strecken diese Verbindung befährt — die Grundlage der
+  // Gruppierung, deshalb gehört sie sichtbar an die Verbindung.
+  if (state.mode === 'nerd' && entry.routes?.length > 0) {
+    const box = el('div', 'route-hits');
+    box.append(el('span', 'route-hits__label', 'Strecken'));
+    for (const hit of entry.routes) {
+      const tag = el('span', 'route-hits__item', hit.route.label);
+      // Geschätzte Strecken sind als solche gekennzeichnet: "ø" steht für
+      // Reisegeschwindigkeit inklusive Halten, nicht für die zulässige
+      // Höchstgeschwindigkeit der gepflegten Einträge.
+      if (hit.route.auto) tag.classList.add('route-hits__item--auto');
+      tag.append(el('span', 'route-hits__speed',
+        hit.route.auto ? `ø ${hit.route.speed} km/h` : `${hit.route.speed} km/h`));
+      tag.title = [
+        hit.route.note,
+        `Rund ${Math.round(hit.share * 100)} % der Fahrzeit.`,
+      ].filter(Boolean).join(' ');
+      box.append(tag);
+    }
+    wrap.append(box);
   }
 
   return wrap;

@@ -112,7 +112,8 @@ final class OebbHafas
      * @param string $date    YYYY-MM-DD
      * @param string $time    HH:MM
      * @param bool   $arrival true = $time ist Ankunftszeit
-     * @return array{ok:bool,error:?string,data:array}
+     * @param ?string $scroll  Blaetter-Kontext aus einer frueheren Antwort
+     * @return array{ok:bool,error:?string,data:array,scrollF:?string}
      */
     public function journeys(
         string $fromId,
@@ -124,7 +125,8 @@ final class OebbHafas
         int $travelClass = 2,
         array $viaIds = [],
         int $productMask = 0,
-        ?int $minChangeMin = null
+        ?int $minChangeMin = null,
+        ?string $scroll = null
     ): array {
         $req = [
             'depLocL'     => [['type' => 'S', 'lid' => 'A=1@L=' . $fromId . '@']],
@@ -147,6 +149,14 @@ final class OebbHafas
 
         if ($arrival) {
             $req['outFrwd'] = false;
+        }
+
+        // Weiterblaettern. HAFAS deckelt numF je Anfrage bei rund sechs
+        // Treffern - mehr gibt es nur ueber den Kontext aus der vorigen
+        // Antwort, der an die Stelle von Datum und Uhrzeit tritt.
+        if ($scroll !== null && $scroll !== '') {
+            unset($req['outDate'], $req['outTime']);
+            $req['ctxScr'] = $scroll;
         }
 
         // Mindestumsteigezeit. HAFAS wirft dann nicht nur zu knappe
@@ -174,7 +184,7 @@ final class OebbHafas
 
         $res = $this->call('TripSearch', $req);
         if (!$res['ok']) {
-            return $res;
+            return $res + ['scrollF' => null];
         }
 
         $body   = $res['data']['res'] ?? [];
@@ -189,7 +199,13 @@ final class OebbHafas
             }
         }
 
-        return ['ok' => true, 'error' => null, 'data' => $journeys];
+        return [
+            'ok'      => true,
+            'error'   => null,
+            'data'    => $journeys,
+            // Kontext fuer die naechste Seite - spaetere Abfahrten.
+            'scrollF' => isset($body['outCtxScrF']) ? (string) $body['outCtxScrF'] : null,
+        ];
     }
 
     /**
@@ -406,6 +422,10 @@ final class OebbHafas
 
                 $legs[] = [
                     'mode'         => 'train',
+                    // Kennung des konkreten Zuglaufs. Damit laesst sich zu
+                    // diesem Abschnitt spaeter die Echtzeitlage nachladen
+                    // (action=traindetails) - Grundlage der Live-Verfolgung.
+                    'jid'          => (string) ($jny['jid'] ?? ''),
                     'geometry'     => $this->geometryOf($jny, $common),
                     'category'     => trim((string) ($ctx['catOut'] ?? '')),
                     'categoryName' => trim((string) ($ctx['catOutL'] ?? '')),
@@ -455,8 +475,17 @@ final class OebbHafas
         // Buchungs-Deeplink: HAFAS liefert bei OeBB einen fertigen Shop-Link.
         $bookingUrl = $con['trfRes']['clickout'] ?? null;
 
+        // Identitaet der Verbindung. NICHT cid nehmen: das ist nur der Index
+        // innerhalb einer Antwort ("C-0") und wiederholt sich beim
+        // Weiterblaettern auf jeder Seite. ctxRecon bezeichnet dagegen genau
+        // diese eine Verbindung; fehlt es, tun es Ab- und Ankunftszeit.
+        $recon = trim((string) ($con['ctxRecon'] ?? ''));
+        $ident = $recon !== ''
+            ? $recon
+            : ($depAll ?? '') . '|' . ($arrAll ?? '') . '|' . (json_encode($legs) ?: '');
+
         return [
-            'id'          => (string) ($con['cid'] ?? ($con['ctxRecon'] ?? md5(json_encode($legs) ?: ''))),
+            'id'          => substr(sha1($ident), 0, 16),
             'departure'   => $depAll,
             'arrival'     => $arrAll,
             'durationMin' => $this->hafasDuration((string) ($con['dur'] ?? '')) ?: $this->diffMinutes($depAll, $arrAll),

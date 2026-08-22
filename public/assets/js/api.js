@@ -57,6 +57,22 @@ export const api = {
 
   trainDetails: (jid, opts) => call('traindetails', { jid }, opts),
 
+  /**
+   * Naechste Verbindungen ab einem Umsteigebahnhof.
+   *
+   * Zwei Verwendungen: ein Treffer als Rueckfallebene an der Karte, drei als
+   * Auswahl waehrend der Fahrt, wenn der Anschluss zu platzen droht.
+   */
+  nextConnection: (params, opts) =>
+    call('nextconnection', {
+      from: params.from, to: params.to, date: params.date, time: params.time,
+      class: params.travelClass || 2,
+      exclude: params.exclude || '',
+      limit: params.limit || 1,
+      discounts: (params.discounts || []).join(','),
+      products: (params.products || []).join(','),
+    }, opts),
+
   disruptions: (opts) => call('disruptions', {}, opts),
 
   bestPrices: (params, opts) =>
@@ -82,6 +98,8 @@ export const api = {
         products: (params.products || []).join(','),
         via: (params.via || []).join(','),
         minchange: params.minChange || '',
+        // Blaetter-Kontext der vorigen Antwort; leer = erste Seite.
+        scroll: params.scroll || '',
       },
       opts
     );

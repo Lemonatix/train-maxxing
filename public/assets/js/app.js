@@ -11,11 +11,30 @@ import { rank, highlights } from './scoring.js';
 import { renderResults, renderNotices } from './render.js';
 import { RouteMap, setMapTheme } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
+import { ROUTES, ratingsBySpeed } from './data/routes.js';
 import { initMvgTicker } from './mvgTicker.js';
+import { LiveTracker } from './live.js';
 
 // v2: Zugnummern-Regeln wurden durch Modellbewertungen ersetzt.
 const STORAGE_KEY = 'train-maxxing:v2';
 const THEME_KEY = 'train-maxxing:theme';
+/**
+ * Die verfolgte Verbindung liegt getrennt von den Einstellungen.
+ *
+ * Sie ist kurzlebig und gross - sie gehoert nicht in denselben Eintrag wie
+ * Abos und Reglerstellungen, die bei jeder Aenderung neu geschrieben werden.
+ */
+const TRACK_KEY = 'train-maxxing:tracked';
+
+/**
+ * Seitengroesse der Ergebnisliste.
+ *
+ * HAFAS deckelt eine Suchanfrage bei rund sechs Treffern - "einfach mehr
+ * anfragen" gibt es nicht. Spaetere Abfahrten kommen ueber den Blaetter-
+ * Kontext der vorigen Antwort. Deshalb: sechs zeigen, und wer mehr will,
+ * loest damit die naechste Seite aus.
+ */
+const PAGE_SIZE = 6;
 
 const state = {
   mode: 'normal',
@@ -26,19 +45,22 @@ const state = {
   time: nowHHMM(),
   arrival: false,
   travelClass: 2,
-  results: 8,
-  minChange: 5,        // Mindestumsteigezeit in Minuten, null = egal
+  // Kuerzestmoeglicher Umstieg als Standard. Unter einer Minute gibt es keinen
+  // Umstieg, deshalb ist 1 die Untergrenze.
+  minChange: 1,
   discounts: [],
   products: [],        // leer = alle erlaubt
   // Nerd-Parameter
-  timeValue: 12,
-  comfortValue: 2.5,
-  changeCost: 4,
-  modelPrefs: {},      // Modell-ID -> Bonus (-5 … +5)
+  modelPrefs: {},      // Modell-ID  -> Bonus (-5 … +5)
+  routePrefs: {},      // Strecken-ID -> Bonus (-5 … +5)
+  speedWeight: 0,      // Gewicht fuer unbenannte Strecken (0 … 5)
   liveTrains: true,    // Zugpositionen auf der Karte
   // Laufzeit
   lastPayload: null,
   ranked: [],
+  visible: PAGE_SIZE,  // wie viele Karten die Liste gerade zeigt
+  scrollCtx: null,     // Blaetter-Kontext fuer spaetere Abfahrten
+  loadingMore: false,
   selectedIndex: 0,
   productCatalogue: [], // vom Backend geladen: [{id, label, hint}]
 };
@@ -46,6 +68,7 @@ const state = {
 const $ = (sel) => document.querySelector(sel);
 let searchAbort = null;
 let map = null;
+let live = null;
 
 // ======================================================================
 // Start
@@ -64,11 +87,23 @@ document.addEventListener('DOMContentLoaded', () => {
   map.onTrainClick = showTrainDetails;
   // Karte sofort aufbauen, damit sie nicht erst nach der ersten Suche erscheint.
   map.setData([], 0, select);
+
+  live = new LiveTracker($('#live-panel'), map);
+  // Der Knopf auf der Karte muss mitbekommen, ob gerade verfolgt wird.
+  live.onChange = () => draw();
+  // Klasse, Abos und Verkehrsmittel gelten auch fuer Ersatzverbindungen.
+  live.context = () => ({
+    travelClass: state.travelClass,
+    discounts: state.discounts,
+    products: state.products,
+  });
+  live.onJourneyChange = saveTracked;
+
   setupMode();
   setupLiveToggle();
   setupStationInputs();
   setupForm();
-  setupNerdControls();
+  setupRoutes();
   setupModels();
   setupResize();
   setupShare();
@@ -76,6 +111,9 @@ document.addEventListener('DOMContentLoaded', () => {
   applyStateToForm();
   // MVG-Stoerungsticker Muenchen einblenden, wenn der Endpoint Meldungen hat.
   initMvgTicker(document.getElementById('mvg-ticker'));
+
+  // Eine laufende Verfolgung ueberlebt Neuladen und neue Suchen.
+  restoreTracked();
 
   // Geteilte Suche direkt ausführen, damit der Empfänger nichts tun muss.
   if (shared) runSearch();
@@ -94,10 +132,17 @@ function loadSettings() {
     // der aktuelle Zeitpunkt stehen, nicht der von letzter Woche.
     for (const key of [
       'mode', 'from', 'to', 'via', 'arrival', 'travelClass',
-      'results', 'minChange', 'discounts', 'products', 'timeValue',
-      'comfortValue', 'changeCost', 'modelPrefs', 'liveTrains',
+      'minChange', 'discounts', 'products',
+      'modelPrefs', 'routePrefs', 'speedWeight', 'liveTrains',
     ]) {
       if (saved[key] !== undefined) state[key] = saved[key];
+    }
+
+    // Frueher war die Voreinstellung 5 Minuten bzw. "egal" (null). Beides
+    // einmalig auf den kuerzestmoeglichen Umstieg ziehen - wer bewusst
+    // umgestellt hat, behaelt seinen Wert.
+    if (!saved.minChangeMigrated) {
+      if (state.minChange == null || state.minChange === 5) state.minChange = 1;
     }
   } catch {
     // Defekter oder gesperrter Storage darf das Tool nicht blockieren.
@@ -111,16 +156,50 @@ function saveSettings() {
       JSON.stringify({
         mode: state.mode, from: state.from, to: state.to, via: state.via,
         time: state.time, arrival: state.arrival, travelClass: state.travelClass,
-        results: state.results, minChange: state.minChange,
+        minChange: state.minChange, minChangeMigrated: true,
         discounts: state.discounts, products: state.products,
-        timeValue: state.timeValue, comfortValue: state.comfortValue,
-        changeCost: state.changeCost, modelPrefs: state.modelPrefs,
-        liveTrains: state.liveTrains,
+        modelPrefs: state.modelPrefs, routePrefs: state.routePrefs,
+        speedWeight: state.speedWeight, liveTrains: state.liveTrains,
       })
     );
   } catch {
     // Privater Modus o.ae. - kein Grund abzubrechen.
   }
+}
+
+/** Sichert die verfolgte Verbindung, damit sie ein Neuladen uebersteht. */
+function saveTracked(journey) {
+  try {
+    if (!journey) localStorage.removeItem(TRACK_KEY);
+    else localStorage.setItem(TRACK_KEY, JSON.stringify(journey));
+  } catch {
+    // Voller oder gesperrter Storage darf die Verfolgung nicht abbrechen.
+  }
+}
+
+/**
+ * Stellt eine laufende Verfolgung wieder her.
+ *
+ * Nur, solange die Fahrt noch laeuft - eine gestern verfolgte Verbindung
+ * wieder aufzumachen waere Unsinn. Die Echtzeitlage wird ohnehin sofort
+ * neu geladen, gespeichert ist nur das Geruest der Verbindung.
+ */
+function restoreTracked() {
+  let journey = null;
+  try {
+    const raw = localStorage.getItem(TRACK_KEY);
+    if (raw) journey = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!journey?.legs?.length) return;
+
+  const arrived = Date.parse(journey.arrival || '');
+  if (Number.isFinite(arrived) && Date.now() > arrived + 15 * 60_000) {
+    saveTracked(null);
+    return;
+  }
+  live.start(journey);
 }
 
 // ======================================================================
@@ -508,9 +587,8 @@ function setupForm() {
   $('#time').addEventListener('change', (e) => { state.time = e.target.value; saveSettings(); });
   $('#arrival').addEventListener('change', (e) => { state.arrival = e.target.checked; saveSettings(); });
   $('#class').addEventListener('change', (e) => { state.travelClass = Number(e.target.value); saveSettings(); });
-  $('#results').addEventListener('change', (e) => { state.results = Number(e.target.value); saveSettings(); });
   $('#min-change').addEventListener('change', (e) => {
-    state.minChange = e.target.value === '' ? null : Number(e.target.value);
+    state.minChange = Math.max(1, Number(e.target.value) || 1);
     saveSettings();
   });
 }
@@ -523,14 +601,9 @@ function applyStateToForm() {
   $('#time').value = state.time;
   $('#arrival').checked = state.arrival;
   $('#class').value = String(state.travelClass);
-  $('#results').value = String(state.results);
-  $('#min-change').value = state.minChange == null ? '' : String(state.minChange);
+  $('#min-change').value = String(state.minChange ?? 1);
 
   $('#via').value = state.via?.name || '';
-  $('#time-value').value = state.timeValue;
-  $('#comfort-value').value = state.comfortValue;
-  $('#change-cost').value = state.changeCost;
-  updateNerdLabels();
   renderVia();
 }
 
@@ -552,6 +625,11 @@ async function runSearch() {
   results.replaceChildren();
   $('#notices').replaceChildren();
   state.selectedIndex = 0;
+  state.visible = PAGE_SIZE;
+  state.scrollCtx = null;
+  state.loadingMore = false;
+  // Die Verfolgung laeuft weiter: wer im Zug sitzt und nebenbei die
+  // Rueckfahrt sucht, will sie nicht jedes Mal neu starten.
 
   try {
     const payload = await api.journeys(
@@ -562,7 +640,7 @@ async function runSearch() {
         time: state.time,
         arrival: state.arrival,
         travelClass: state.travelClass,
-        results: state.results,
+        results: PAGE_SIZE,
         minChange: state.minChange,
         discounts: state.discounts,
         products: state.products,
@@ -573,6 +651,7 @@ async function runSearch() {
     );
 
     state.lastPayload = payload;
+    state.scrollCtx = payload.scroll || null;
     const n = payload.journeys.length;
     if (n === 0) {
       // Konkreter Hinweis statt kommentarlosem "0 Verbindungen": in der Praxis
@@ -614,16 +693,29 @@ function rerank() {
   const payload = state.lastPayload;
   if (!payload) return;
 
+  // Die Auswahl haengt an der Verbindung, nicht an ihrer Position: nach
+  // einem Moduswechsel oder einer nachgeladenen Seite steht sie woanders.
+  const selected = state.ranked[state.selectedIndex]?.journey ?? null;
+
   const ranked = rank(payload.journeys, {
     mode: state.mode,
     modelPrefs: state.modelPrefs,
-    timeValue: state.timeValue,
-    comfortValue: state.comfortValue,
-    changeCost: state.changeCost,
+    routePrefs: state.routePrefs,
+    speedWeight: state.speedWeight,
   });
 
   state.ranked = ranked;
-  if (state.selectedIndex >= ranked.length) state.selectedIndex = 0;
+  const again = selected ? ranked.findIndex((e) => e.journey === selected) : -1;
+  state.selectedIndex = again >= 0 ? again : 0;
+  state.visible = Math.min(Math.max(state.visible, PAGE_SIZE), ranked.length);
+  // Ist die Auswahl durch die Neusortierung nach hinten gerutscht, muss sie
+  // sichtbar bleiben - sonst zeigt die Karte eine Route ohne zugehoerige Karte.
+  if (state.selectedIndex >= state.visible) {
+    state.visible = Math.min(
+      Math.ceil((state.selectedIndex + 1) / PAGE_SIZE) * PAGE_SIZE,
+      ranked.length
+    );
+  }
 
   renderNotices($('#notices'), payload.notices, payload.priceSource);
   draw();
@@ -632,9 +724,153 @@ function rerank() {
 /** Liste und Karte zeichnen. Beide teilen sich die Auswahl. */
 function draw() {
   const ranked = state.ranked;
-  renderResults($('#results-list'), ranked, highlights(ranked), state, select);
-  map.setData(ranked, state.selectedIndex, select);
+  // Bestenzeichen ueber ALLE Treffer bestimmen, nicht nur die sichtbaren:
+  // sonst wandert das Label "guenstigste" beim Ausklappen weiter.
+  renderResults($('#results-list'), ranked, highlights(ranked), state, select, showMore, {
+    toggle: (journey) => live.start(journey),
+    isTracking: (journey) => live.isTracking(journey),
+    trackable: (journey) => LiveTracker.trackableLegs(journey).length > 0,
+    tracked: () => live.journey,
+  });
+  // Die Karte zeigt genau die Routen, die auch in der Liste stehen. Die
+  // Indizes bleiben dabei gueltig, weil von vorne geschnitten wird.
+  map.setData(ranked.slice(0, state.visible), state.selectedIndex, select);
   scheduleLiveTrains();
+  ensureFallbacks();
+}
+
+/**
+ * Zeigt die naechsten Verbindungen.
+ *
+ * Zwei Stufen: was schon geladen ist, wird nur aufgeklappt. Ist alles
+ * sichtbar, holt der naechste Klick die Folgeseite bei der OeBB - spaetere
+ * Abfahrten gibt es nur ueber deren Blaetter-Kontext.
+ */
+async function showMore() {
+  if (state.visible < state.ranked.length) {
+    state.visible = Math.min(state.visible + PAGE_SIZE, state.ranked.length);
+    draw();
+    return;
+  }
+  if (!state.scrollCtx || state.loadingMore || !state.from || !state.to) return;
+
+  state.loadingMore = true;
+  draw();
+
+  try {
+    const payload = await api.journeys({
+      from: state.from.id,
+      to: state.to.id,
+      date: state.date,
+      time: state.time,
+      arrival: state.arrival,
+      travelClass: state.travelClass,
+      results: PAGE_SIZE,
+      minChange: state.minChange,
+      discounts: state.discounts,
+      products: state.products,
+      via: state.mode === 'nerd' && state.via ? [state.via.id] : [],
+      scroll: state.scrollCtx,
+    });
+
+    // HAFAS liefert an der Seitengrenze gelegentlich Ueberschneidungen.
+    const known = new Set(state.lastPayload.journeys.map((j) => j.id));
+    const fresh = (payload.journeys || []).filter((j) => !known.has(j.id));
+
+    state.lastPayload.journeys.push(...fresh);
+    // Ohne neuen Kontext ist das Ende erreicht; der Button verschwindet dann.
+    state.scrollCtx = fresh.length > 0 ? (payload.scroll || null) : null;
+    state.visible += PAGE_SIZE;
+    rerank();
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      const status = $('#status');
+      status.className = 'status status--error';
+      status.textContent = 'Weitere Verbindungen konnten nicht geladen werden: ' + err.message;
+    }
+  } finally {
+    state.loadingMore = false;
+    draw();
+  }
+}
+
+// ======================================================================
+// Rueckfallebene bei knappen Umstiegen
+// ======================================================================
+
+/**
+ * Zu jedem knappen Umstieg (1-4 Minuten) den naechstspaeteren Anschluss holen.
+ *
+ * Passiert nachtraeglich und nur fuer die sichtbaren Karten - jede Abfrage
+ * kostet eine HAFAS-Anfrage, und fuer eingeklappte Verbindungen waere sie
+ * verschenkt. Das Ergebnis haengt am Abschnitt selbst, damit Neuzeichnen
+ * (Auswahl, Moduswechsel, Ausklappen) nichts erneut anfragt.
+ */
+async function ensureFallbacks() {
+  const jobs = [];
+
+  for (const entry of state.ranked.slice(0, state.visible)) {
+    const journey = entry.journey;
+    const trains = (journey.legs || []).filter((l) => l.mode === 'train');
+    const dest = trains[trains.length - 1]?.to?.id;
+    if (!dest) continue;
+
+    for (const leg of trains) {
+      if (leg.fallbackState) continue;                       // laeuft oder erledigt
+      const gap = leg.transferMin;
+      if (typeof gap !== 'number' || gap < 1 || gap > 4) continue;
+      if (!leg.from?.id) continue;
+
+      // Eine Minute nach der geplanten Abfahrt suchen: gefragt ist der Zug
+      // danach, nicht der, den man gerade verpasst hat.
+      const at = shiftIso(leg.departure, 1);
+      if (!at) continue;
+
+      leg.fallbackState = 'loading';
+      jobs.push(
+        api.nextConnection({
+          from: leg.from.id,
+          to: dest,
+          date: at.date,
+          time: at.time,
+          travelClass: state.travelClass,
+          exclude: leg.trainNumber || '',
+          products: state.products,
+        })
+          .then((res) => {
+            leg.fallback = (res.connections || [])[0] || null;
+            leg.fallbackState = 'done';
+          })
+          .catch(() => {
+            leg.fallback = null;
+            leg.fallbackState = 'error';
+          })
+      );
+    }
+  }
+
+  if (jobs.length === 0) return;
+  await Promise.all(jobs);
+  // Zweiter Durchlauf findet nur noch 'done'/'error' und startet nichts Neues.
+  draw();
+}
+
+/**
+ * Datum und Uhrzeit eines ISO-Stempels, um Minuten verschoben.
+ *
+ * Gerechnet wird auf der Wanduhr des Stempels selbst (deshalb UTC-Arithmetik
+ * auf den abgelesenen Feldern): der Zonenoffset der Quelle bleibt so aussen
+ * vor, und der Tageswechsel um Mitternacht stimmt trotzdem.
+ */
+function shiftIso(iso, minutes = 0) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso || '');
+  if (!m) return null;
+  const t = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) + minutes * 60000);
+  const p = (n) => String(n).padStart(2, '0');
+  return {
+    date: `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())}`,
+    time: `${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`,
+  };
 }
 
 // ======================================================================
@@ -881,6 +1117,14 @@ async function fetchLiveTrains() {
 function select(index) {
   if (index === state.selectedIndex) return;
   state.selectedIndex = index;
+  // Auswahl per Karte oder geteiltem Link kann hinter dem Ausklapppunkt
+  // liegen - dann klappen wir so weit auf, dass die Karte sichtbar wird.
+  if (index >= state.visible) {
+    state.visible = Math.min(
+      Math.ceil((index + 1) / PAGE_SIZE) * PAGE_SIZE,
+      state.ranked.length
+    );
+  }
   draw();
 
   const card = $('#results-list').children[index];
@@ -888,27 +1132,130 @@ function select(index) {
 }
 
 // ======================================================================
-// Nerd-Regler
+// Lieblingsstrecken
 // ======================================================================
 
-function setupNerdControls() {
-  const bind = (id, key) => {
-    $(id).addEventListener('input', (e) => {
-      state[key] = Number(e.target.value);
-      updateNerdLabels();
-      if (state.lastPayload) rerank();
-      saveSettings();
-    });
-  };
-  bind('#time-value', 'timeValue');
-  bind('#comfort-value', 'comfortValue');
-  bind('#change-cost', 'changeCost');
-}
+/**
+ * Ein Regler je Korridor, nach Land gruppiert.
+ *
+ * Bewusst dieselbe Bedienung wie bei den Lieblingszuegen: -5 meiden bis +5
+ * bevorzugen. Die Bewertung entscheidet, in welcher Reihenfolge die
+ * Routenvarianten in der Ergebnisliste stehen.
+ */
+function setupRoutes() {
+  const box = $('#routes');
+  if (!box) return;
 
-function updateNerdLabels() {
-  $('#time-value-out').textContent = `${Number(state.timeValue).toFixed(0)} € / Stunde`;
-  $('#comfort-value-out').textContent = `${Number(state.comfortValue).toFixed(1)} € je Komfortstufe und Stunde`;
-  $('#change-cost-out').textContent = `${Number(state.changeCost).toFixed(0)} € je Umstieg`;
+  const names = { de: 'Deutschland', ch: 'Schweiz', at: 'Österreich' };
+  const byCountry = new Map();
+  for (const r of ROUTES) {
+    if (!byCountry.has(r.country)) byCountry.set(r.country, []);
+    byCountry.get(r.country).push(r);
+  }
+
+  const sliders = new Map();
+  box.replaceChildren();
+
+  for (const [country, routes] of byCountry) {
+    const group = document.createElement('fieldset');
+    group.className = 'model-group';
+    const legend = document.createElement('legend');
+    legend.textContent = names[country] || country.toUpperCase();
+    group.append(legend);
+
+    for (const r of routes) {
+      const row = document.createElement('div');
+      row.className = 'model';
+
+      const head = document.createElement('div');
+      head.className = 'model__head';
+
+      const name = document.createElement('span');
+      name.className = 'model__name';
+      name.textContent = r.label;
+      head.append(name);
+
+      const speed = document.createElement('span');
+      speed.className = 'model__series';
+      speed.textContent = `${r.speed} km/h`;
+      head.append(speed);
+      row.append(head);
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '-5';
+      slider.max = '5';
+      slider.step = '1';
+      slider.value = String(state.routePrefs[r.id] ?? 0);
+      slider.id = 'route-' + r.id;
+      slider.setAttribute('aria-label', `Bewertung ${r.label}`);
+
+      const out = document.createElement('output');
+      out.className = 'model__value';
+      const show = (v) => {
+        const n = Number(v);
+        out.textContent = n === 0 ? 'neutral' : (n > 0 ? `+${n} bevorzugen` : `${n} meiden`);
+        out.dataset.sign = n === 0 ? 'zero' : (n > 0 ? 'plus' : 'minus');
+      };
+      show(slider.value);
+
+      slider.addEventListener('input', (e) => {
+        const v = Number(e.target.value);
+        show(v);
+        if (v === 0) delete state.routePrefs[r.id];
+        else state.routePrefs[r.id] = v;
+        saveSettings();
+        if (state.lastPayload) rerank();
+      });
+
+      sliders.set(r.id, { slider, show });
+
+      const ctl = document.createElement('div');
+      ctl.className = 'model__ctl';
+      ctl.append(slider, out);
+      row.append(ctl);
+
+      if (r.note) {
+        const note = document.createElement('p');
+        note.className = 'model__note';
+        note.textContent = r.note;
+        row.append(note);
+      }
+      group.append(row);
+    }
+    box.append(group);
+  }
+
+  // Alle Regler auf einmal setzen, ohne fuer jeden ein rerank auszuloesen.
+  const applyAll = (prefs) => {
+    state.routePrefs = { ...prefs };
+    for (const [id, { slider, show }] of sliders) {
+      const v = prefs[id] ?? 0;
+      slider.value = String(v);
+      show(v);
+    }
+    saveSettings();
+    if (state.lastPayload) rerank();
+  };
+
+  $('#routes-speed')?.addEventListener('click', () => applyAll(ratingsBySpeed()));
+  $('#routes-reset')?.addEventListener('click', () => applyAll({}));
+
+  const weight = $('#speed-weight');
+  const weightOut = $('#speed-weight-out');
+  const showWeight = (v) => {
+    weightOut.textContent = Number(v) === 0 ? 'aus' : `Gewicht ${v} von 5`;
+  };
+  if (weight) {
+    weight.value = String(state.speedWeight ?? 0);
+    showWeight(weight.value);
+    weight.addEventListener('input', (e) => {
+      state.speedWeight = Number(e.target.value);
+      showWeight(state.speedWeight);
+      saveSettings();
+      if (state.lastPayload) rerank();
+    });
+  }
 }
 
 // ======================================================================

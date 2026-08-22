@@ -69,7 +69,7 @@
       </div>
     </div>
 
-    <div class="row">
+    <div class="row row--options">
       <div class="field">
         <label for="date">Datum</label>
         <input type="date" id="date">
@@ -78,12 +78,6 @@
         <label for="time">Uhrzeit</label>
         <input type="time" id="time" value="08:00">
       </div>
-      <div class="field field--check">
-        <label class="check">
-          <input type="checkbox" id="arrival">
-          <span>als Ankunftszeit</span>
-        </label>
-      </div>
       <div class="field">
         <label for="class">Klasse</label>
         <select id="class">
@@ -91,21 +85,21 @@
           <option value="1">1. Klasse</option>
         </select>
       </div>
-      <div class="field">
-        <label for="results">Anzahl</label>
-        <select id="results">
-          <option value="6">6 Verbindungen</option>
-          <option value="8" selected>8 Verbindungen</option>
-          <option value="12">12 Verbindungen</option>
-        </select>
+      <div class="field field--check">
+        <label class="check">
+          <input type="checkbox" id="arrival">
+          <span>als Ankunftszeit</span>
+        </label>
       </div>
-      <div class="field">
+      <div class="field field--wide">
         <label for="min-change">Umsteigezeit</label>
         <select id="min-change">
-          <option value="">egal</option>
-          <option value="1">min. 1 min</option>
+          <!-- Standard ist bewusst die kuerzestmoegliche Umsteigezeit: knappe
+               Anschluesse werden gezeigt, dazu jeweils der naechstspaetere Zug
+               als Rueckfallebene. Wer prinzipiell mehr Luft will, stellt hier um. -->
+          <option value="1" selected>egal — kürzestmöglich</option>
           <option value="3">min. 3 min</option>
-          <option value="5" selected>min. 5 min</option>
+          <option value="5">min. 5 min</option>
           <option value="8">min. 8 min</option>
           <option value="12">min. 12 min</option>
           <option value="20">min. 20 min</option>
@@ -159,33 +153,33 @@
       </details>
 
       <details class="section" open>
-        <summary>Was ist dir was wert?</summary>
+        <summary>Lieblingsstrecken</summary>
         <p class="hint">
-          Damit wird ausgerechnet, ob sich eine längere, aber angenehmere Fahrt lohnt.
-          Alle Verbindungen bekommen „effektive Kosten“ aus Preis, Zeit, Umstiegen und Komfort.
+          Im Nerd-Modus wird nicht nach Preis sortiert, sondern nach Weg: die
+          Treffer werden zu Routenvarianten gruppiert, und innerhalb einer
+          Variante steht die Verbindung mit den wenigsten Umstiegen oben — bei
+          Gleichstand die kürzere. Die Reihenfolge der Varianten bestimmst du
+          hier. Erkannt wird eine Strecke an ihren Zwischenhalten.
         </p>
-
-        <div class="slider">
-          <label for="time-value">Wert einer Reisestunde</label>
-          <input type="range" id="time-value" min="0" max="40" step="1" value="12">
-          <output id="time-value-out">12 € / Stunde</output>
-          <p class="hint">Hoch = du willst schnell ankommen. Niedrig = Zeit im Zug stört dich nicht.</p>
+        <div class="actions actions--inline">
+          <button type="button" id="routes-speed" class="btn btn--ghost">Schnelle Strecken bevorzugen</button>
+          <button type="button" id="routes-reset" class="btn btn--ghost">Bewertungen zurücksetzen</button>
         </div>
 
         <div class="slider">
-          <label for="comfort-value">Wert einer Komfortstufe</label>
-          <input type="range" id="comfort-value" min="0" max="10" step="0.5" value="2.5">
-          <output id="comfort-value-out">2.5 € je Komfortstufe und Stunde</output>
+          <label for="speed-weight">Unbenannte Strecken nach Tempo</label>
+          <input type="range" id="speed-weight" min="0" max="5" step="1" value="0">
+          <output id="speed-weight-out">aus</output>
           <p class="hint">
-            Hoch = du nimmst Umwege für den bequemeren Zug in Kauf. Der Bonus wächst mit der Fahrzeit.
+            Die Liste unten deckt Schweiz, Deutschland und Österreich ab — und auch
+            dort nicht jede Nebenbahn. Für alles andere wird das
+            Durchschnittstempo aus Luftlinie und Fahrzeit geschätzt. Das ist eine
+            Reisegeschwindigkeit inklusive Halten, keine
+            Streckenhöchstgeschwindigkeit, deshalb ein eigener Regler.
           </p>
         </div>
 
-        <div class="slider">
-          <label for="change-cost">Aufwand je Umstieg</label>
-          <input type="range" id="change-cost" min="0" max="30" step="1" value="4">
-          <output id="change-cost-out">4 € je Umstieg</output>
-        </div>
+        <div id="routes" class="models"></div>
       </details>
 
       <details class="section">
@@ -230,6 +224,10 @@
 
     <!-- Details eines angetippten Live-Zuges -->
     <aside id="train-panel" class="train-panel" hidden aria-live="polite"></aside>
+
+    <!-- Live-Verfolgung der ausgewaehlten Verbindung: Echtzeitlage aller
+         Abschnitte plus optionale GPS-Mitfahrt. -->
+    <aside id="live-panel" class="live" hidden aria-live="polite"></aside>
   </div>
 
   <main id="results-list" class="results" aria-live="polite"></main>

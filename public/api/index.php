@@ -10,6 +10,7 @@
  *   ?action=livetrains&bbox=..              Live-Positionen im Ausschnitt
  *   ?action=traindetails&jid=..             Zuglauf mit Halten und Verspaetung
  *   ?action=bestprices&from=..&to=..&date=.. Preisstrecke fuer eine Woche
+ *   ?action=nextconnection&from=..&to=..    Naechster Anschluss nach einem knappen Umstieg
  *   ?action=disruptions                     MVG-Stoerungsticker Muenchen
  *
  * Strategie bei journeys:
@@ -119,11 +120,14 @@ try {
         case 'bestprices':
             handleBestPrices($http, $config, $cache);
             break;
+        case 'nextconnection':
+            handleNextConnection($http, $config, $cache);
+            break;
         case 'disruptions':
             handleDisruptions($http, $config, $cache);
             break;
         default:
-            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, disruptions', 400);
+            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, disruptions', 400);
     }
 } catch (Throwable $e) {
     // Details bleiben im Log, der Client bekommt nur eine generische Meldung.
@@ -343,6 +347,164 @@ function handleBestPrices(Http $http, array $config, Cache $cache): void
     ok(['intervals' => $res['data'], 'cached' => false]);
 }
 
+/**
+ * Die naechsten Anschluesse ab einem Umsteigebahnhof.
+ *
+ * WOZU: Bei ein bis vier Minuten Umsteigezeit ist die Frage nicht "schaffe ich
+ * das", sondern "was passiert, wenn nicht". Und waehrend der Fahrt, wenn der
+ * Zubringer Verspaetung hat, wird daraus "was nehme ich stattdessen".
+ *
+ * Deshalb liefert der Endpunkt vollstaendige Verbindungen (mit Abschnitten,
+ * Halten und Zuglauf-IDs), nicht nur eine Kurzfassung: die Live-Verfolgung
+ * soll direkt auf eine davon umschalten koennen, ohne neu zu suchen.
+ *
+ * Bewusst ein eigener Endpunkt und kein Teil von handleJourneys: die Suche
+ * braucht eine zusaetzliche HAFAS-Abfrage je betroffenem Umstieg. Im
+ * Suchlauf wuerde das jede Suche spuerbar verlangsamen, obwohl die Antwort
+ * nur fuer die wenigen Faelle gebraucht wird, in denen es eng wird.
+ */
+function handleNextConnection(Http $http, array $config, Cache $cache): void
+{
+    $from = trim((string) ($_GET['from'] ?? ''));
+    $to   = trim((string) ($_GET['to'] ?? ''));
+    $date = trim((string) ($_GET['date'] ?? ''));
+    $time = trim((string) ($_GET['time'] ?? ''));
+
+    if ($from === '' || $to === '') {
+        fail('Parameter "from" und "to" sind erforderlich.', 400);
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        fail('Parameter "date" muss YYYY-MM-DD sein.', 400);
+    }
+    if (!preg_match('/^\d{2}:\d{2}$/', $time)) {
+        fail('Parameter "time" muss HH:MM sein.', 400);
+    }
+
+    $travelClass = ((string) ($_GET['class'] ?? '2')) === '1' ? 1 : 2;
+    // Zugnummer des Anschlusses, den man verpasst haette - der darf nicht
+    // als eigene Rueckfallebene zurueckkommen.
+    $exclude = trim((string) ($_GET['exclude'] ?? ''));
+    // Wie viele Alternativen. Eine reicht fuer den Hinweis an der Karte,
+    // waehrend der Fahrt will man die Wahl haben.
+    $limit = max(1, min(3, (int) ($_GET['limit'] ?? 1)));
+
+    $discounts = array_values(array_filter(
+        array_map('trim', explode(',', (string) ($_GET['discounts'] ?? ''))),
+        static fn($d) => $d !== ''
+    ));
+
+    $products = array_values(array_filter(
+        array_map('trim', explode(',', (string) ($_GET['products'] ?? ''))),
+        static fn($p) => $p !== '' && in_array($p, Products::allIds(), true)
+    ));
+
+    $key = 'next:' . implode('|', [
+        $from, $to, $date, $time, $travelClass, $exclude, $limit,
+        implode('+', $discounts), implode('+', $products),
+    ]);
+    $cached = $cache->get($key, (int) $config['cache_ttl']['journeys']);
+    if ($cached !== null) {
+        ok(['connections' => $cached ?: [], 'cached' => true]);
+    }
+
+    $oebb = new OebbHafas($http, $config['providers']['oebb']);
+    // Etwas mehr anfragen als gebraucht: der verpasste Zug selbst und
+    // Verbindungen vor dem Stichzeitpunkt fallen unten noch heraus.
+    $res = $oebb->journeys(
+        $from, $to, $date, $time, false, $limit + 3, $travelClass, [],
+        Products::bitmask($products), 1
+    );
+
+    if (!$res['ok']) {
+        // Beiwerk: lieber keine Rueckfallebene zeigen als die Karte kaputt machen.
+        ok(['connections' => [], 'error' => $res['error']]);
+    }
+
+    // Verglichen wird auf der Wanduhr des Bahnhofs, nicht auf Unixzeit: die
+    // Anfrage nennt eine Ortszeit ohne Zonenangabe, und der Server muss nicht
+    // in derselben Zone stehen wie die Strecke.
+    $planned = $date . ' ' . $time;
+    $out = [];
+
+    foreach ($res['data'] as $j) {
+        $dep = wallClock($j['departure'] ?? null);
+        if ($dep === null || $dep < $planned) {
+            continue;
+        }
+        // Denselben Zug noch einmal anzubieten waere sinnlos.
+        if ($exclude !== '' && firstTrainNumber($j) === $exclude) {
+            continue;
+        }
+
+        // Vollstaendig aufbereiten, damit die Live-Verfolgung ohne weitere
+        // Abfrage auf diese Verbindung umschalten kann.
+        $j = annotateTransfers($j);
+        $j = Fares::apply($j, $discounts, $travelClass);
+        $j['trains'] = trainLabels($j);
+
+        $out[] = $j;
+        if (count($out) >= $limit) {
+            break;
+        }
+    }
+
+    // Auch ein negativer Befund wird gecacht - sonst fragt jede Neuzeichnung
+    // der Liste erneut an.
+    $cache->set($key, $out);
+    ok(['connections' => $out, 'cached' => false]);
+}
+
+/**
+ * Zeitstempel als 'YYYY-MM-DD HH:MM' in seiner eigenen Zone.
+ *
+ * DateTimeImmutable uebernimmt den Offset aus dem String, format() gibt ihn
+ * also in Ortszeit zurueck - unabhaengig von date_default_timezone_get().
+ */
+function wallClock(?string $iso): ?string
+{
+    if ($iso === null || $iso === '') {
+        return null;
+    }
+    try {
+        return (new DateTimeImmutable($iso))->format('Y-m-d H:i');
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+/** Zugnummer des ersten Zuges einer Verbindung, '' wenn unbekannt. */
+function firstTrainNumber(array $journey): string
+{
+    foreach (($journey['legs'] ?? []) as $leg) {
+        if (($leg['mode'] ?? '') === 'train') {
+            return trim((string) ($leg['trainNumber'] ?? ''));
+        }
+    }
+    return '';
+}
+
+/**
+ * Kurzbezeichnungen der Zuege einer Verbindung, z.B. ["ICE 599", "RE 5"].
+ *
+ * @return string[]
+ */
+function trainLabels(array $journey): array
+{
+    $out = [];
+    foreach (($journey['legs'] ?? []) as $leg) {
+        if (($leg['mode'] ?? '') !== 'train') {
+            continue;
+        }
+        $cat = trim((string) ($leg['category'] ?? ''));
+        $num = trim((string) ($leg['trainNumber'] ?? $leg['line'] ?? ''));
+        $label = trim($cat . ' ' . $num);
+        if ($label !== '') {
+            $out[] = $label;
+        }
+    }
+    return $out;
+}
+
 function handleJourneys(Http $http, array $config, Cache $cache): void
 {
     $from = trim((string) ($_GET['from'] ?? ''));
@@ -386,10 +548,15 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         ? max(1, min(60, (int) $_GET['minchange']))
         : null;
 
+    // Weiterblaettern: Kontext aus der vorigen Antwort. HAFAS liefert je
+    // Anfrage nur rund sechs Treffer, spaetere Abfahrten gibt es nur so.
+    $scroll = trim((string) ($_GET['scroll'] ?? ''));
+
     $cacheKey = 'jny:' . implode('|', [
         $from, $to, $date, $time, $arrival ? 'a' : 'd',
         $travelClass, $results, implode('+', $discounts), implode('+', $viaIds),
         implode('+', $products), $minChange ?? '-',
+        $scroll === '' ? '-' : substr(sha1($scroll), 0, 12),
     ]);
     $cached = $cache->get($cacheKey, (int) $config['cache_ttl']['journeys']);
     if ($cached !== null) {
@@ -402,10 +569,28 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
     $sched = $oebb->journeys(
         $from, $to, $date, $time, $arrival, $results, $travelClass, $viaIds,
-        Products::bitmask($products), $minChange
+        Products::bitmask($products), $minChange, $scroll === '' ? null : $scroll
     );
 
     $journeys    = $sched['ok'] ? $sched['data'] : [];
+
+    // Beim Weiterblaettern liegt das Zeitfenster woanders als in $time. Fuer
+    // die Preisabfrage zaehlt, wann die gelieferten Verbindungen tatsaechlich
+    // fahren - sonst holt die DB Preise fuer den falschen Tagesabschnitt.
+    $priceDate = $date;
+    $priceTime = $time;
+    if ($scroll !== '' && $journeys !== []) {
+        $firstDep = $journeys[0]['departure'] ?? null;
+        if ($firstDep !== null) {
+            try {
+                $d = new DateTimeImmutable($firstDep);
+                $priceDate = $d->format('Y-m-d');
+                $priceTime = $d->format('H:i');
+            } catch (Exception $e) {
+                // Bleibt beim urspruenglichen Zeitfenster.
+            }
+        }
+    }
     $priceSource = 'estimate';
     $dbEnabled   = ($config['providers']['db']['enabled'] ?? false) === true;
     $db          = $dbEnabled ? new DbVendo($http, $config['providers']['db']) : null;
@@ -418,7 +603,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     // uebernimmt sie in dem Fall auch den Fahrplan.
     if ($db !== null) {
         $priced = $db->journeys(
-            $from, $to, $date, $time, $arrival, $travelClass, $discounts, true, $products, $minChange
+            $from, $to, $priceDate, $priceTime, $arrival, $travelClass, $discounts, true, $products, $minChange
         );
 
         if ($journeys === [] && $priced['ok'] && $priced['data'] !== []) {
@@ -427,6 +612,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
             $notices[]   = 'Fahrplan von der DB — die ÖBB kennt diese Station nicht. '
                          . 'Auf der Karte fehlt dadurch der genaue Streckenverlauf.';
         } elseif ($journeys !== [] && $priced['ok'] && $priced['data'] !== []) {
+            // Laeuft auch ohne Preise: der Merge bringt Echtzeit und Auslastung.
             $matched = mergePrices($journeys, $priced['data']);
             if ($matched > 0) {
                 $priceSource = 'db';
@@ -453,7 +639,11 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         $hint = $products !== [] || $viaIds !== []
             ? 'Keine Verbindungen gefunden. Vielleicht sind die Filter zu eng.'
             : 'Keine Verbindungen gefunden.';
-        ok(['journeys' => [], 'priceSource' => $priceSource, 'notices' => [$hint], 'cached' => false]);
+        ok([
+            'journeys' => [], 'priceSource' => $priceSource,
+            'notices' => $scroll === '' ? [$hint] : [],
+            'scroll' => null, 'cached' => false,
+        ]);
     }
 
     // --- 3. Baureihe ergaenzen (nur am Reisetag, nur deutscher Fernverkehr) ---
@@ -510,6 +700,8 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         'priceSource' => $priceSource,
         'discounts'   => $discounts,
         'notices'     => $notices,
+        // Womit sich die naechste Seite holen laesst; null = Ende der Fahne.
+        'scroll'      => $sched['scrollF'] ?? null,
     ];
 
     // Leere Ergebnisse NICHT cachen. Sonst friert eine einmalige leere
@@ -528,14 +720,20 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 // ======================================================================
 
 /**
- * Ordnet DB-Preise den OeBB-Verbindungen zu.
+ * Ordnet DB-Daten den OeBB-Verbindungen zu.
  *
  * Gematcht wird ueber Abfahrts- UND Ankunftszeit mit 4 Minuten Toleranz -
  * damit erwischen wir dieselbe Verbindung auch dann, wenn die beiden Systeme
  * bei Echtzeitdaten leicht auseinanderliegen.
  *
- * @param array $journeys wird per Referenz um Preise ergaenzt
- * @return int Anzahl zugeordneter Preise
+ * WICHTIG: Die Zuordnung laeuft ueber ALLE DB-Treffer, nicht nur ueber die
+ * mit Preis. Die DB liefert Echtzeit und Auslastung auch dann, wenn sie die
+ * Relation nicht verkauft - nachts oder bei Auslandsverbindungen ist das der
+ * Normalfall. Wuerden wir preislose Treffer ueberspringen, ginge genau dort
+ * die Verspaetungsanzeige verloren, wo sie am meisten hilft.
+ *
+ * @param array $journeys wird per Referenz um Preise und Echtzeit ergaenzt
+ * @return int Anzahl zugeordneter ECHTPREISE (nicht: zugeordneter Treffer)
  */
 function mergePrices(array &$journeys, array $priced): int
 {
@@ -552,9 +750,6 @@ function mergePrices(array &$journeys, array $priced): int
         $bestDiff = PHP_INT_MAX;
 
         foreach ($priced as $p) {
-            if (($p['price'] ?? null) === null) {
-                continue;
-            }
             $depB = toTimestamp($p['departure'] ?? null);
             $arrB = toTimestamp($p['arrival'] ?? null);
             if ($depB === null || $arrB === null) {
@@ -568,10 +763,16 @@ function mergePrices(array &$journeys, array $priced): int
             }
         }
 
-        if ($best !== null) {
+        if ($best === null) {
+            continue;
+        }
+
+        // Echtzeit, Auslastung und Deutschlandticket haengen nicht am Preis.
+        mergeLegFlags($journeys[$i]['legs'], $best['legs'] ?? []);
+
+        if (($best['price'] ?? null) !== null) {
             $journeys[$i]['price']      = $best['price'];
             $journeys[$i]['bookingUrl'] = $journey['bookingUrl'] ?? $best['bookingUrl'] ?? null;
-            mergeLegFlags($journeys[$i]['legs'], $best['legs'] ?? []);
             $count++;
         }
     }
@@ -582,24 +783,43 @@ function mergePrices(array &$journeys, array $priced): int
 /**
  * Uebertraegt DB-spezifische Angaben auf die OeBB-Abschnitte.
  *
- * Wichtigster Fall: die DB markiert selbst, auf welchen Teilstrecken das
- * Deutschlandticket gilt. Ohne diese Uebertragung wuesste Fares.php nichts
- * davon und muesste allein anhand der Gattung raten.
+ * Drei Faelle, die HAFAS nicht liefert:
+ *
+ *   1. Die DB markiert selbst, auf welchen Teilstrecken das
+ *      Deutschlandticket gilt. Ohne diese Uebertragung wuesste Fares.php
+ *      nichts davon und muesste allein anhand der Gattung raten.
+ *   2. Auslastungsangaben.
+ *   3. ECHTZEIT. Die DB schickt Ist-Zeiten und Verspaetungsgruende direkt in
+ *      der Suchantwort mit. HAFAS braeuchte dafuer je Abschnitt eine eigene
+ *      Abfrage - deshalb ist das hier der billigste Weg zu Verspaetungen
+ *      schon in der Trefferliste.
  *
  * Zugeordnet wird ueber die Zugnummer, ersatzweise ueber die Gattung.
  */
 function mergeLegFlags(array &$legs, array $dbLegs): void
 {
     $byNumber = [];
+    $dbTrains = [];
     foreach ($dbLegs as $dl) {
         if (($dl['mode'] ?? '') !== 'train') {
             continue;
         }
+        $dbTrains[] = $dl;
         $num = trim((string) ($dl['trainNumber'] ?? ''));
         if ($num !== '') {
             $byNumber[$num] = $dl;
         }
     }
+
+    // Eigene Zugabschnitte in derselben Reihenfolge - Grundlage fuer den
+    // Positionsabgleich weiter unten.
+    $ownTrains = [];
+    foreach ($legs as $i => $leg) {
+        if (($leg['mode'] ?? '') === 'train') {
+            $ownTrains[] = $i;
+        }
+    }
+    $sameShape = count($ownTrains) === count($dbTrains);
 
     foreach ($legs as $i => $leg) {
         if (($leg['mode'] ?? '') !== 'train') {
@@ -607,6 +827,17 @@ function mergeLegFlags(array &$legs, array $dbLegs): void
         }
         $num = trim((string) ($leg['trainNumber'] ?? ''));
         $match = $num !== '' ? ($byNumber[$num] ?? null) : null;
+
+        // Bei S-Bahnen nennt die DB die Linie ("S8"), die OeBB die Zugnummer
+        // ("35884") - ueber die Nummer findet sich da nichts. Haben beide
+        // Quellen gleich viele Zugabschnitte, ist die Position eindeutig
+        // genug: die Verbindung wurde ja bereits ueber Ab- UND Ankunftszeit
+        // zugeordnet.
+        if ($match === null && $sameShape) {
+            $pos = array_search($i, $ownTrains, true);
+            $match = $pos !== false ? ($dbTrains[$pos] ?? null) : null;
+        }
+
         if ($match === null) {
             continue;
         }
@@ -619,6 +850,19 @@ function mergeLegFlags(array &$legs, array $dbLegs): void
         if (($leg['operator'] ?? '') === '' && ($match['operator'] ?? '') !== '') {
             $legs[$i]['operator'] = $match['operator'];
         }
+
+        // Echtzeit uebernehmen, wenn die DB welche hat.
+        foreach (['departureReal', 'arrivalReal', 'delay'] as $k) {
+            if (($match[$k] ?? null) !== null) {
+                $legs[$i][$k] = $match[$k];
+            }
+        }
+        if (!empty($match['hasRealtime'])) {
+            $legs[$i]['hasRealtime'] = true;
+        }
+        if (!empty($match['remarks'])) {
+            $legs[$i]['remarks'] = $match['remarks'];
+        }
     }
 }
 
@@ -630,6 +874,11 @@ function mergeLegFlags(array &$legs, array $dbLegs): void
  * gelten unter 5 Minuten als riskant und unter 10 als knapp. Fusswege
  * zwischen den Zuegen werden mitgerechnet, denn die zaehlen ja auch.
  *
+ * Liegen Ist-Zeiten vor (von der DB), wird ZUSAETZLICH mit ihnen gerechnet:
+ * ein im Fahrplan bequemer Umstieg kann durch eine Verspaetung schon vor der
+ * Abfahrt geplatzt sein. Das steht dann als eigener Wert an der Verbindung,
+ * damit die Anzeige Plan und Wirklichkeit auseinanderhalten kann.
+ *
  * Zusaetzlich wird die knappste Umsteigezeit der ganzen Verbindung vermerkt,
  * damit die Liste danach warnen kann.
  */
@@ -637,6 +886,7 @@ function annotateTransfers(array $journey): array
 {
     $legs = $journey['legs'] ?? [];
     $minGap = null;
+    $minLiveGap = null;
 
     for ($i = 0; $i < count($legs); $i++) {
         if (($legs[$i]['mode'] ?? '') !== 'train') {
@@ -667,6 +917,17 @@ function annotateTransfers(array $journey): array
         if ($minGap === null || $gap < $minGap) {
             $minGap = $gap;
         }
+
+        // Dasselbe noch einmal mit den Ist-Zeiten, soweit vorhanden.
+        $arrReal = toTimestamp($legs[$i]['arrivalReal'] ?? null) ?? $arr;
+        $depReal = toTimestamp($legs[$next]['departureReal'] ?? null) ?? $dep;
+        if (($legs[$i]['arrivalReal'] ?? null) !== null || ($legs[$next]['departureReal'] ?? null) !== null) {
+            $liveGap = (int) round(($depReal - $arrReal) / 60);
+            $legs[$next]['transferMinLive'] = $liveGap;
+            if ($minLiveGap === null || $liveGap < $minLiveGap) {
+                $minLiveGap = $liveGap;
+            }
+        }
     }
 
     $journey['legs'] = $legs;
@@ -674,6 +935,23 @@ function annotateTransfers(array $journey): array
     $journey['transferRisk'] = $minGap === null
         ? null
         : ($minGap < 5 ? 'risky' : ($minGap < 10 ? 'tight' : 'ok'));
+    $journey['minTransferLive'] = $minLiveGap;
+
+    // Groesste Verspaetung ueber alle Abschnitte, fuer die Trefferliste.
+    $delay = null;
+    foreach ($legs as $l) {
+        if (($l['delay'] ?? null) !== null) {
+            $delay = $delay === null ? (int) $l['delay'] : max($delay, (int) $l['delay']);
+        }
+    }
+    $journey['delay'] = $delay;
+
+    // Ist-Abfahrt und Ist-Ankunft der ganzen Reise: erster und letzter Zug.
+    $trains = array_values(array_filter($legs, static fn($l) => ($l['mode'] ?? '') === 'train'));
+    if ($trains !== []) {
+        $journey['departureReal'] = $trains[0]['departureReal'] ?? null;
+        $journey['arrivalReal']   = $trains[count($trains) - 1]['arrivalReal'] ?? null;
+    }
 
     return $journey;
 }

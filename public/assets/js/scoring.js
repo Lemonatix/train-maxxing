@@ -6,18 +6,18 @@
  * NORMAL: gewichtete Punktzahl aus Preis, Dauer und Umstiegen. Alle Werte
  *   werden auf 0..1 normiert, damit Franken und Minuten vergleichbar werden.
  *
- * NERD: Zeitwert-Modell. Du gibst an, was dir eine Stunde wert ist, und was
- *   dir eine Stufe Komfort wert ist. Daraus werden "effektive Kosten":
- *
- *     effektiv = Preis + Dauer_h * zeitwert + Umstiege * umstiegskosten
- *                - Komfortbonus
- *
- *   Der Komfortbonus skaliert mit der Fahrzeit: ein gemütlicher Zug ist auf
- *   fünf Stunden mehr wert als auf einer. Genau damit lässt sich beantworten,
- *   ob eine halbe Stunde mehr Fahrt den bequemeren Zug rechtfertigt.
+ * NERD: kein Preismodell, sondern eine Frage der Route. Die Treffer werden
+ *   in Routenvarianten gruppiert — über den Gotthard oder über den Arlberg
+ *   ist keine Abstufung derselben Sache, sondern eine Entscheidung. Je
+ *   Variante steht die Option mit den wenigsten Umstiegen oben, bei
+ *   Gleichstand die kürzere. Die Reisezeit wird bewusst NICHT gegen Komfort
+ *   oder Preis aufgerechnet: sie entscheidet erst, wenn alles andere gleich
+ *   ist. Die Reihenfolge der Gruppen ergibt sich aus deiner Strecken- und
+ *   Zugbewertung.
  */
 
 import { typeOf, applyPreferences } from './data/trains.js';
+import { routesOf, autoRoutesOf, speedScore } from './data/routes.js';
 
 /**
  * Durchschnittlicher Komfort einer Verbindung, gewichtet nach Fahrzeit.
@@ -64,18 +64,16 @@ export function priceOf(journey) {
  * @param {Object} opts
  * @param {'normal'|'nerd'} opts.mode
  * @param {Object} opts.modelPrefs  Modell-ID -> Bonus (-5 … +5)
- * @param {number} opts.timeValue   Wert einer Stunde (Nerd)
- * @param {number} opts.comfortValue Wert einer Komfortstufe pro Stunde (Nerd)
- * @param {number} opts.changeCost  Kosten je Umstieg (Nerd)
+ * @param {Object} opts.routePrefs  Strecken-ID -> Bonus (-5 … +5), Nerd
+ * @param {number} opts.speedWeight  Gewicht fuer unbenannte Strecken (0 … 5)
  * @param {Object} opts.weights     {price,duration,changes} (Normal)
  */
 export function rank(journeys, opts) {
   const {
     mode = 'normal',
     modelPrefs = {},
-    timeValue = 12,
-    comfortValue = 2.5,
-    changeCost = 4,
+    routePrefs = {},
+    speedWeight = 0,
     weights = { price: 0.4, duration: 0.4, changes: 0.2 },
   } = opts || {};
 
@@ -94,32 +92,7 @@ export function rank(journeys, opts) {
     };
   });
 
-  if (mode === 'nerd') {
-    for (const e of enriched) {
-      const hours = e.durationMin / 60;
-      // Fehlt ein Preis, zaehlt nur Zeit und Komfort - besser als die
-      // Verbindung ganz aus der Wertung zu nehmen.
-      const base = e.price ?? 0;
-      const comfortBonus = (e.comfort - 5) * comfortValue * hours;
-
-      e.effective = base + hours * timeValue + e.changes * changeCost - comfortBonus;
-      e.score = e.effective;
-      e.explain = {
-        base,
-        time: hours * timeValue,
-        changes: e.changes * changeCost,
-        comfortBonus,
-      };
-    }
-    enriched.sort((a, b) => a.effective - b.effective);
-
-    // Abstand zur besten Option. Immer >= 0, auch wenn die Effektivkosten
-    // selbst negativ sind (hohe Komfortgewichtung auf langer Strecke).
-    const best = enriched[0].effective;
-    for (const e of enriched) e.penalty = e.effective - best;
-
-    return enriched;
-  }
+  if (mode === 'nerd') return rankByRoute(enriched, routePrefs, speedWeight);
 
   // --- Normal: normierte Punktzahl, kleiner ist besser ---
   const prices = enriched.map((e) => e.price).filter((p) => p != null);
@@ -147,6 +120,134 @@ export function rank(journeys, opts) {
   }
 
   return enriched.sort((a, b) => a.score - b.score);
+}
+
+/**
+ * Nerd-Sortierung: nach Routenvariante gruppieren.
+ *
+ * Innerhalb einer Gruppe zaehlen zuerst die Umstiege und erst danach die
+ * Reisezeit - so bleibt die Zeit unabhaengig und wird nicht gegen Komfort
+ * oder Umstiege verrechnet. Die Gruppen selbst ordnet die Streckenbewertung.
+ */
+function rankByRoute(enriched, routePrefs, speedWeight = 0) {
+  for (const e of enriched) {
+    const named = routesOf(e.journey);
+    // Was die Korridorliste nicht abdeckt, wird aus dem gemessenen Tempo
+    // ergaenzt - sonst faellt die Bewertung ausserhalb von CH/DE/AT einfach aus.
+    const auto = autoRoutesOf(e.journey, named);
+    e.routes = [...named, ...auto];
+
+    // Anteilig gewichtet: eine bevorzugte Strecke, auf der die halbe Fahrt
+    // stattfindet, zaehlt doppelt so viel wie eine, die nur kurz beruehrt wird.
+    e.routeScore = named.reduce(
+      (sum, hit) => sum + (routePrefs[hit.route.id] || 0) * hit.share,
+      0
+    );
+
+    // Unbenannte Strecken haben keinen eigenen Regler. Sie zaehlen ueber
+    // das gemessene Tempo, skaliert mit einem einzigen Gewicht - so bleibt
+    // die Schaetzung als das erkennbar, was sie ist.
+    if (speedWeight > 0) {
+      e.routeScore += auto.reduce(
+        (sum, hit) => sum + speedScore(hit.route.speed) * hit.share * (speedWeight / 5),
+        0
+      );
+    }
+    const v = variantOf(e);
+    e.variantId = v.id;
+    e.variantLabel = v.label;
+  }
+
+  const groups = new Map();
+  for (const e of enriched) {
+    if (!groups.has(e.variantId)) {
+      groups.set(e.variantId, { id: e.variantId, label: e.variantLabel, entries: [] });
+    }
+    groups.get(e.variantId).entries.push(e);
+  }
+
+  for (const g of groups.values()) {
+    // Wenigste Umstiege zuerst, dann die kuerzere Fahrt, dann der
+    // angenehmere Zug. Preis spielt hier bewusst keine Rolle mehr.
+    g.entries.sort((a, b) =>
+      a.changes - b.changes ||
+      a.durationMin - b.durationMin ||
+      b.comfort - a.comfort
+    );
+    const best = g.entries[0];
+    // Die Gruppe erbt die Werte ihrer besten Option - danach werden die
+    // Varianten untereinander sortiert.
+    g.routeScore = Math.max(...g.entries.map((e) => e.routeScore));
+    g.comfort = best.comfort;
+    g.changes = best.changes;
+    g.durationMin = best.durationMin;
+  }
+
+  const ordered = [...groups.values()].sort((a, b) =>
+    b.routeScore - a.routeScore ||
+    a.changes - b.changes ||
+    b.comfort - a.comfort ||
+    a.durationMin - b.durationMin
+  );
+
+  const out = [];
+  ordered.forEach((g, gi) => {
+    g.entries.forEach((e, i) => {
+      e.score = gi * 1000 + i;
+      e.group = {
+        id: g.id,
+        label: g.label,
+        index: gi,
+        size: g.entries.length,
+        first: i === 0,
+        // Wie viel laenger als die schnellste Option DIESER Variante.
+        slowerThanBest: e.durationMin - g.durationMin,
+      };
+      out.push(e);
+    });
+  });
+
+  return out;
+}
+
+/**
+ * Kennzeichnung der Routenvariante.
+ *
+ * Erste Wahl sind die erkannten Strecken - "über den Gotthard-Basistunnel"
+ * ist die Auskunft, die jemanden interessiert. Greift keine, behelfen wir
+ * uns mit dem Halt in der Mitte der Reise: der unterscheidet zwei Wege
+ * zuverlaessig genug, ohne dass jede Kleinigkeit eine eigene Gruppe aufmacht.
+ */
+function variantOf(entry) {
+  // Kurz angeschnittene Strecken sagen nichts ueber den Weg aus. Gepflegte
+  // Korridore haben Vorrang: "über den Gotthard-Basistunnel" ist eine
+  // bessere Auskunft als "über Arth-Goldau – Bellinzona".
+  const relevant = entry.routes.filter((h) => h.share >= 0.1);
+  const curated = relevant.filter((h) => !h.route.auto).map((h) => h.route);
+  const named = curated.length > 0 ? curated : relevant.map((h) => h.route);
+
+  if (named.length > 0) {
+    // Die Kennung braucht alle Strecken, damit zwei Wege nicht in derselben
+    // Gruppe landen. Die Beschriftung nimmt nur die beiden praegendsten -
+    // routesOf() liefert nach Fahrzeitanteil sortiert.
+    const id = [...named].map((r) => r.id).sort().join('+');
+    const shown = named.slice(0, 2).map((r) => r.label);
+    const rest = named.length - shown.length;
+    return {
+      id,
+      label: 'über ' + shown.join(' · ') + (rest > 0 ? ` +${rest}` : ''),
+    };
+  }
+
+  const stops = [];
+  for (const leg of entry.journey.legs || []) {
+    if (leg.mode !== 'train') continue;
+    for (const s of leg.stops || []) if (s.name) stops.push(s.name);
+  }
+  if (stops.length < 3) return { id: 'direkt', label: 'Direktweg' };
+
+  const mid = stops[Math.floor(stops.length / 2)];
+  return { id: 'via:' + mid, label: 'über ' + mid };
 }
 
 /** Kennzeichnet die jeweils beste Verbindung je Kategorie fuer die Badges. */
