@@ -75,6 +75,9 @@ export const api = {
 
   disruptions: (opts) => call('disruptions', {}, opts),
 
+  /** EZB-Tageskurse, um Preise auch in Franken zu zeigen. */
+  fxRate: (opts) => call('fxrate', {}, opts),
+
   bestPrices: (params, opts) =>
     call('bestprices', {
       from: params.from, to: params.to, date: params.date,

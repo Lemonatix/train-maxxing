@@ -26,6 +26,7 @@
  */
 
 import { api } from './api.js';
+import { geometryOf } from './map.js';
 
 const REFRESH_MS = 30_000;
 
@@ -138,6 +139,10 @@ export class LiveTracker {
     this.error = null;
     this.panel.hidden = false;
 
+    // Route sofort zeichnen, ohne auf die Echtzeitdaten zu warten.
+    this.pushToMap();
+    this.map?.fitTracked();
+
     this.render();
     this.refresh();
     this.startTimer();
@@ -150,6 +155,7 @@ export class LiveTracker {
     this.stopGps();
     this.journey = null;
     this.legs = [];
+    this.map?.setTrackedRoute(null);
     this.panel.hidden = true;
     this.panel.replaceChildren();
     this.onChange?.();
@@ -200,6 +206,7 @@ export class LiveTracker {
       this.error = err.message;
     } finally {
       this.loading = false;
+      this.pushToMap();
       this.render();
     }
   }
@@ -377,6 +384,140 @@ export class LiveTracker {
     const wasGps = this.gps;
     this.start(merged);
     if (wasGps) this.startGps();
+  }
+
+  // -------------------------------------------------------------------
+  // Darstellung auf der Karte
+  // -------------------------------------------------------------------
+
+  /**
+   * Die verfolgte Route an die Karte geben: Verlauf, Start, Ziel und die
+   * aktuelle Zugposition.
+   *
+   * Läuft nach jedem Auffrischen, damit sich der Zug auf der Karte bewegt.
+   */
+  pushToMap() {
+    if (!this.map) return;
+    if (!this.journey) { this.map.setTrackedRoute(null); return; }
+
+    const geometry = geometryOf(this.journey);
+    const trains = LiveTracker.trackableLegs(this.journey);
+    const first = (trains[0]?.stops || []).find((s) => s.lat != null);
+    const lastStops = trains[trains.length - 1]?.stops || [];
+    const last = [...lastStops].reverse().find((s) => s.lat != null);
+
+    this.map.setTrackedRoute({
+      geometry,
+      from: first ? [first.lat, first.lon] : null,
+      to: last ? [last.lat, last.lon] : null,
+      label: `${trains[0]?.from?.name || ''} → ${trains[trains.length - 1]?.to?.name || ''}`,
+      position: this.trainPosition(),
+    });
+  }
+
+  /**
+   * Wo ist der Zug gerade?
+   *
+   * Zwei Wege, in dieser Reihenfolge:
+   *
+   *   1. Eine GEMELDETE Position. Die Karte hält ohnehin die Live-Züge des
+   *      Ausschnitts vor; passt einer davon zur Zugnummer, ist das die
+   *      genaueste Auskunft, die zu haben ist.
+   *   2. Sonst aus dem Fahrplan HOCHGERECHNET: zwischen dem letzten
+   *      passierten und dem nächsten Halt linear nach Zeit interpoliert,
+   *      mit Ist-Zeiten wo vorhanden. Das ist eine Schätzung und wird auch
+   *      so gekennzeichnet — aber besser als gar kein Punkt, denn gemeldete
+   *      Positionen gibt es nur im aktuellen Kartenausschnitt.
+   */
+  trainPosition() {
+    const now = Date.now();
+
+    // Der Abschnitt, in dem man gerade sitzt.
+    let current = null;
+    for (const entry of this.legs) {
+      const dep = Date.parse(entry.leg.departureReal || entry.leg.departure || '');
+      const arr = Date.parse(entry.leg.arrivalReal || entry.leg.arrival || '');
+      if (Number.isFinite(dep) && Number.isFinite(arr) && now >= dep && now <= arr) {
+        current = entry;
+        break;
+      }
+    }
+    if (!current) return null;
+
+    const label = `${current.leg.category || ''} ${current.leg.trainNumber || ''}`.trim();
+
+    // 1. Gemeldete Position aus den Live-Zügen der Karte.
+    const num = String(current.leg.trainNumber || '');
+    const live = (this.map?.liveTrains || []).find((t) =>
+      (t.jid && t.jid === current.jid) ||
+      (num !== '' && String(t.trainNumber || '') === num)
+    );
+    if (live && live.lat != null && live.lon != null) {
+      return { lat: live.lat, lon: live.lon, label, estimated: false };
+    }
+
+    // 2. Aus dem Fahrplan hochrechnen.
+    const stops = (current.data?.stops || current.leg.stops || [])
+      .filter((s) => s.lat != null && s.lon != null);
+    if (stops.length < 2) return null;
+
+    // Die Halte eines Zuglaufs tragen oft nur Soll-Zeiten, während für den
+    // Abschnitt selbst eine Verspätung bekannt ist. Ohne Korrektur läge der
+    // Zug bei einem verspäteten Lauf ausserhalb jedes Zeitfensters und wäre
+    // gar nicht auffindbar. Deshalb wird der Restfahrplan um die bekannte
+    // Verspätung verschoben — genau das, was die Anzeigetafeln auch tun.
+    const shift = LiveTracker.delayOf(current) * 60_000;
+
+    const timeOf = (s, kind) => {
+      const real = kind === 'dep' ? s.departureReal : s.arrivalReal;
+      const plan = kind === 'dep' ? s.departure : s.arrival;
+      if (real) return Date.parse(real);
+      const t = Date.parse(plan || s.departure || s.arrival || '');
+      return Number.isFinite(t) ? t + shift : NaN;
+    };
+
+    for (let i = 0; i < stops.length - 1; i++) {
+      const t0 = timeOf(stops[i], 'dep');
+      const t1 = timeOf(stops[i + 1], 'arr');
+      if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) continue;
+      if (now < t0 || now > t1) continue;
+
+      const f = (now - t0) / (t1 - t0);
+      return {
+        lat: stops[i].lat + (stops[i + 1].lat - stops[i].lat) * f,
+        lon: stops[i].lon + (stops[i + 1].lon - stops[i].lon) * f,
+        label,
+        estimated: true,
+      };
+    }
+
+    // Zwischen dem letzten Halt des Laufs und der tatsächlichen Ankunft:
+    // der Zug rollt ein, also steht er praktisch am Ziel.
+    const last = stops[stops.length - 1];
+    const lastTime = timeOf(last, 'arr');
+    if (Number.isFinite(lastTime) && now >= lastTime) {
+      return { lat: last.lat, lon: last.lon, label, estimated: true };
+    }
+    return null;
+  }
+
+  /**
+   * Verspätung eines Abschnitts in Minuten.
+   *
+   * Bevorzugt die Ist-Zeiten des Abschnitts selbst (die kommen von der DB
+   * und sind die genaueren), sonst die Meldung aus dem Zuglauf.
+   */
+  static delayOf(entry) {
+    const pairs = [
+      [entry.leg.arrival, entry.leg.arrivalReal],
+      [entry.leg.departure, entry.leg.departureReal],
+    ];
+    for (const [plan, real] of pairs) {
+      const p = Date.parse(plan || '');
+      const r = Date.parse(real || '');
+      if (Number.isFinite(p) && Number.isFinite(r)) return Math.round((r - p) / 60000);
+    }
+    return Number.isFinite(entry.data?.delay) ? entry.data.delay : 0;
   }
 
   // -------------------------------------------------------------------

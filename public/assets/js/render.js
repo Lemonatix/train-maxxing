@@ -7,7 +7,7 @@
  */
 
 import { typeOf } from './data/trains.js';
-import { formatDuration, formatTime, formatPrice, priceOrigin } from './scoring.js';
+import { formatDuration, formatTime, formatPrice, priceOrigin, counterValue, fxInfo } from './scoring.js';
 
 /**
  * Höchste gemeldete Auslastung einer Verbindung, für die gewählte Klasse.
@@ -196,6 +196,17 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
     if (j.price.estimated) p.classList.add('journey__price--est');
     if (j.price.covered) p.classList.add('journey__price--covered');
     right.append(p);
+
+    // Gegenwert in der anderen Währung — bei einer Fahrt München–Zürich ist
+    // "wie viel ist das in Franken" die naheliegende Frage.
+    const other = counterValue(j.price);
+    if (other) {
+      const c = el('div', 'journey__price-alt', other);
+      const fx = fxInfo();
+      c.title = `EZB-Referenzkurs vom ${fx.date || 'aktuellen Tag'} — kein Bankkurs, `
+        + 'beim Bezahlen können Aufschläge dazukommen.';
+      right.append(c);
+    }
 
     right.append(el('div', 'journey__price-label', priceOrigin(j.price)));
   } else {

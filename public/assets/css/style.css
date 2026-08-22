@@ -88,7 +88,7 @@
   --map-stop-ring: #ffffff;
   --map-label: #0f172a;
   --map-label-halo: rgba(255, 255, 255, 0.92);
-  --map-overlay-bg: rgba(255, 255, 255, 0.9);
+  --map-overlay-bg: #ffffff;
   --map-overlay-bg-soft: rgba(255, 255, 255, 0.85);
   --map-casing: rgba(255, 255, 255, 0.9);
   --calendar-icon-filter: none;
@@ -142,7 +142,7 @@
   --map-stop-ring: #030508;
   --map-label: #e2e8f0;
   --map-label-halo: rgba(3, 5, 8, 0.9);
-  --map-overlay-bg: rgba(11, 13, 21, 0.85);
+  --map-overlay-bg: #0b0d15;
   --map-overlay-bg-soft: rgba(3, 5, 8, 0.6);
   --map-casing: rgba(3, 5, 8, 0.9);
   --calendar-icon-filter: invert(0.7);
@@ -152,11 +152,7 @@
 
 body {
   margin: 0;
-  background:
-    radial-gradient(1200px 700px at 12% -8%, var(--bg-glow-1, rgba(2, 132, 199, 0.10)), transparent 60%),
-    radial-gradient(900px 520px at 88% 4%, var(--bg-glow-2, rgba(124, 58, 237, 0.07)), transparent 60%),
-    var(--bg);
-  background-attachment: fixed;
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font-main);
   font-size: 16px;
@@ -168,6 +164,29 @@ body {
 [data-theme="dark"] {
   --bg-glow-1: rgba(56, 189, 248, 0.08);
   --bg-glow-2: rgba(192, 132, 252, 0.06);
+}
+
+/*
+ * Der Farbverlauf im Hintergrund liegt auf einer eigenen, fixierten Ebene
+ * statt auf dem body.
+ *
+ * Vorher stand er per `background-attachment: fixed` direkt auf dem body —
+ * das zwingt den Browser, bei JEDEM Scrollschritt den kompletten sichtbaren
+ * Bereich neu zu zeichnen, inklusive beider Radialverläufe. Auf Rechnern
+ * ohne GPU-Beschleunigung ist das der Hauptgrund für hakeliges Scrollen.
+ *
+ * Als eigenes fixiertes Pseudoelement bekommt der Verlauf eine eigene
+ * Ebene: beim Scrollen wird nur noch verschoben, nicht neu gezeichnet.
+ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(1200px 700px at 12% -8%, var(--bg-glow-1, rgba(2, 132, 199, 0.10)), transparent 60%),
+    radial-gradient(900px 520px at 88% 4%, var(--bg-glow-2, rgba(124, 58, 237, 0.07)), transparent 60%);
 }
 
 .wrap {
@@ -233,8 +252,6 @@ body {
   gap: 0.25rem;
   padding: 0.25rem;
   background: var(--surface-card);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
@@ -291,8 +308,6 @@ body {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-card);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
   color: var(--text-dim);
   cursor: pointer;
   transition: var(--transition);
@@ -329,6 +344,12 @@ body {
 
 /* --- Panels -------------------------------------------------------- */
 
+/* backdrop-filter nur noch hier und auf .map: das sind die einzigen beiden
+   Flächen, die wirklich halbtransparent sind. Auf allen anderen lag seit der
+   Umstellung auf deckende Flächen ein unsichtbarer Blur — jeder davon kostet
+   eine eigene Compositing-Ebene, bei .journey sogar eine pro Ergebniskarte.
+   Auf älteren Rechnern ohne GPU-Beschleunigung war das der teuerste Posten
+   der Seite. */
 .panel {
   background: var(--surface);
   backdrop-filter: var(--blur);
@@ -443,6 +464,10 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   width: 40px;
   height: 40px;
   margin-bottom: 0.05rem;
+  /* Auf dem Desktop stehen "Von" und "Nach" nebeneinander — der Pfeil muss
+     also waagerecht zeigen. Auf dem Telefon stehen sie übereinander, dort
+     wird die Drehung wieder aufgehoben. */
+  transform: rotate(90deg);
   background: var(--surface-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -819,6 +844,91 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   padding: 0 0.2rem 0.5rem;
 }
 
+/* --- Filtermenü für die Live-Züge ------------------------------------ */
+
+.live-filter { position: relative; }
+
+.live-filter__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.live-filter__summary::-webkit-details-marker { display: none; }
+.live-filter__summary::after { content: '▾'; opacity: 0.6; }
+.live-filter[open] .live-filter__summary { border-color: var(--accent); color: var(--accent); }
+.live-filter__summary:hover { border-color: var(--accent); }
+
+.live-filter__body {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  z-index: 70;
+  min-width: 200px;
+  padding: 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-lg);
+}
+
+.live-filter__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.live-filter__preset {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.live-filter__preset:hover { border-color: var(--accent); color: var(--accent); }
+
+.live-filter__list { display: flex; flex-direction: column; gap: 0.1rem; }
+
+.live-filter__item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 30px;
+  padding: 0 0.15rem;
+  font-family: var(--font-main);
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  /* Auf dem Telefon volle Breite statt eines schmalen Popovers. */
+  .live-filter { flex: 1 1 100%; }
+  .live-filter__summary { width: 100%; justify-content: space-between; min-height: 40px; }
+  .live-filter__body { right: 0; min-width: 0; }
+  .live-filter__item { min-height: 40px; }
+}
+
 .map-bar__note {
   font-family: var(--font-mono);
   font-size: 0.72rem;
@@ -879,6 +989,69 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 }
 
 .map__route { pointer-events: auto; }
+
+/* --- Verfolgte Verbindung auf der Karte ------------------------------ */
+
+/* Liegt über den Suchergebnissen und fängt keine Klicks ab — sie ist eine
+   Anzeige, keine Auswahl. Grün statt Akzentblau, damit sie sich von der
+   ausgewählten Route unterscheidet. */
+.map__tracked { pointer-events: none; }
+
+.map__tracked-casing {
+  fill: none;
+  stroke: var(--map-casing);
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.map__tracked-line {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.map__tracked-end {
+  fill: var(--map-stop-fill);
+  stroke: var(--green);
+  stroke-width: 3;
+}
+
+.map__tracked-end.is-end { fill: var(--green); }
+
+.map__tracked-train-halo {
+  fill: var(--green);
+  opacity: 0.25;
+}
+
+.map__tracked-train-dot {
+  fill: var(--green);
+  stroke: var(--map-stop-ring);
+  stroke-width: 2;
+}
+
+/* Hochgerechnete Position: hohl statt gefüllt, damit der Unterschied zu
+   einer gemeldeten Position sichtbar ist. */
+.map__tracked-train.is-estimated .map__tracked-train-dot {
+  fill: var(--map-stop-fill);
+  stroke: var(--green);
+}
+
+.map__tracked-train.is-estimated .map__tracked-train-halo { opacity: 0.12; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .map__tracked-train-halo {
+    animation: tracked-pulse 2.4s ease-in-out infinite;
+    transform-origin: center;
+  }
+}
+
+@keyframes tracked-pulse {
+  0%, 100% { opacity: 0.25; }
+  50%      { opacity: 0.08; }
+}
 
 .map__hit {
   fill: none;
@@ -1074,8 +1247,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xs);
   background: var(--map-overlay-bg);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
   box-shadow: var(--shadow-sm);
   color: var(--text);
   font-family: var(--font-mono);
@@ -1149,8 +1320,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   margin-top: 0.6rem;
   padding: 0.8rem 0.9rem;
   background: var(--surface-card);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
@@ -1309,8 +1478,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   margin-top: 0.6rem;
   padding: 0.8rem 0.9rem;
   background: var(--surface-card);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--accent);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
@@ -1635,8 +1802,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .journey {
   padding: 1rem 1.1rem;
   background: var(--surface-card);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
@@ -1714,6 +1879,16 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .journey__price--covered { color: var(--green); }
 .journey__price--none { color: var(--text-muted); }
 
+/* Gegenwert in der anderen Währung: deutlich kleiner als der Preis, damit
+   klar bleibt, was der verbindliche Wert ist. */
+.journey__price-alt {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
 .journey__price-label {
   font-family: var(--font-mono);
   font-size: 0.68rem;
@@ -1758,8 +1933,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   margin-top: 1rem;
   padding: 0.85rem 1rem;
   background: var(--surface-card);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
@@ -2101,8 +2274,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   border: 1px solid var(--border);
   border-radius: 0.7rem;
   background: var(--surface-card);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
   box-shadow: var(--shadow-sm);
   padding: 0.5rem 0.8rem;
   font-size: 0.82rem;
@@ -2225,9 +2396,22 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
      das nicht, egal wie lang der Text wird. */
   .row--options {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* Datum braucht mehr Platz als die Uhrzeit ("22.08.2026" gegen "12:31").
+       Gleich breite Spalten lassen das Uhrzeitfeld halb leer wirken, weil
+       Chrome den Inhalt nativer Datums- und Zeitfelder zentriert. */
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
     gap: 0.7rem 0.55rem;
     align-items: end;
+  }
+
+  /* Etwas flacher und links ausgerichtet — die Felder wirkten sonst wie
+     halbleere Kacheln. 44 px bleiben als Touch-Fläche erhalten. */
+  .row--options input[type="date"],
+  .row--options input[type="time"],
+  .row--options select {
+    min-height: 44px;
+    padding: 0.5rem 0.6rem;
+    text-align: left;
   }
 
   /* Ganze Breite für alles, was sonst zu eng wird. */
@@ -2250,13 +2434,30 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
     min-height: 46px;
   }
 
+  /* Der Umkehrknopf sitzt auf dem Telefon rechts auf der Kante zwischen
+     "Von" und "Nach" — dort, wo ihn jede Fahrplan-App hat. Vorher stand er
+     mittig in der eigenen Zeile und schob die Felder auseinander. Aus dem
+     Fluss genommen rücken sie direkt zusammen. */
+  .row--stations { position: relative; }
+
   .swap {
-    align-self: center;
-    width: 46px;
-    height: 46px;
-    transform: rotate(90deg);
-    margin: -0.15rem 0;
+    position: absolute;
+    right: 0.3rem;
+    /* Nicht die Mitte der Zeile, sondern die Lücke zwischen den beiden
+       Eingabefeldern — dazwischen steht noch die Beschriftung "NACH", die
+       die Zeilenmitte um eine halbe Labelzeile nach oben verschiebt. */
+    top: calc(50% + 0.55rem);
+    z-index: 5;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    /* Felder stehen jetzt übereinander: Pfeil aufrecht. */
+    transform: translateY(-50%);
+    box-shadow: var(--shadow-sm);
   }
+
+  /* Platz für den Knopf, damit lange Stationsnamen nicht darunterlaufen. */
+  .row--stations .field--grow input { padding-right: 3.4rem; }
 
   .check { min-height: 44px; }
   input[type="checkbox"] { width: 20px; height: 20px; }
@@ -2305,7 +2506,17 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   }
 
   .journey__price { font-size: 1.05rem; }
-  .journey__price-label { margin-left: auto; text-align: right; }
+  /* Gegenwert in der anderen Währung: deutlich kleiner als der Preis, damit
+   klar bleibt, was der verbindliche Wert ist. */
+.journey__price-alt {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+.journey__price-label { margin-left: auto; text-align: right; }
 
   .chain { gap: 0.25rem; }
   .chip { font-size: 0.72rem; padding: 0.15rem 0.4rem; }

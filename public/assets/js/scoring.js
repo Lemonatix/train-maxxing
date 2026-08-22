@@ -282,6 +282,47 @@ export function formatTime(iso) {
   return d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
 }
 
+/**
+ * Wechselkurse der EZB, von app.js einmal je Sitzung gefüllt.
+ *
+ * Als Modulzustand und nicht als Parameter: formatPrice() wird an einem
+ * Dutzend Stellen gerufen, und der Kurs ist für alle derselbe.
+ */
+let fx = { base: 'EUR', rates: {}, date: null };
+
+export function setFxRates(data) {
+  if (data && data.rates) fx = data;
+}
+
+export function fxInfo() {
+  return fx;
+}
+
+/**
+ * Gegenwert in der jeweils anderen Währung.
+ *
+ * Nur EUR und CHF, und nur als Näherung: der EZB-Referenzkurs ist kein
+ * Bankkurs, beim Kartenzahlen kommen Aufschläge dazu. Deshalb gibt die
+ * Anzeige ihn auch mit "≈" und nicht als zweiten Preis aus.
+ *
+ * @returns {?string} z.B. "≈ 49,05 CHF"
+ */
+export function counterValue(price) {
+  const chf = fx.rates?.CHF;
+  if (!chf || !price || typeof price.amount !== 'number' || price.covered) return null;
+
+  const cur = price.currency === 'CHF' ? 'CHF' : 'EUR';
+  const target = cur === 'EUR' ? 'CHF' : '€';
+  const conv = (v) => (cur === 'EUR' ? v * chf : v / chf).toFixed(2).replace('.', ',');
+
+  // Schätzungen haben eine Spanne. Nur die Untergrenze umzurechnen sähe
+  // neben "ca. 57,75–105,00 €" aus wie ein fester Preis.
+  if (typeof price.amountMax === 'number' && price.amountMax > price.amount) {
+    return `≈ ${conv(price.amount)}–${conv(price.amountMax)} ${target}`;
+  }
+  return `≈ ${conv(price.amount)} ${target}`;
+}
+
 export function formatPrice(price) {
   if (!price || typeof price.amount !== 'number') return null;
   const cur = price.currency === 'CHF' ? 'CHF' : '€';

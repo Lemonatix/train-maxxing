@@ -216,6 +216,24 @@
         <input type="checkbox" id="live-trains" checked>
         <span>Züge live anzeigen</span>
       </label>
+
+      <!-- Welche Verkehrsmittel auf der Karte erscheinen. Unabhaengig vom
+           Filter der Verbindungssuche: auf der Karte will man oft nur den
+           Fernverkehr sehen, ohne die Suche einzuschraenken. -->
+      <details class="live-filter" id="live-filter">
+        <summary class="live-filter__summary">
+          <span id="live-filter-label">alle Verkehrsmittel</span>
+        </summary>
+        <div class="live-filter__body">
+          <div class="live-filter__presets">
+            <button type="button" data-preset="fern" class="live-filter__preset">nur Fernverkehr</button>
+            <button type="button" data-preset="ice" class="live-filter__preset">nur ICE &amp; railjet</button>
+            <button type="button" data-preset="alle" class="live-filter__preset">alle</button>
+          </div>
+          <div id="live-filter-list" class="live-filter__list"></div>
+        </div>
+      </details>
+
       <span id="live-note" class="map-bar__note"></span>
     </div>
     <!-- Routenkarte: Kacheln von OpenStreetMap/CARTO, darüber die Routen

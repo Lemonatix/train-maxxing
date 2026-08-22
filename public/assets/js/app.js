@@ -7,7 +7,7 @@
  */
 
 import { api } from './api.js';
-import { rank, highlights } from './scoring.js';
+import { rank, highlights, setFxRates } from './scoring.js';
 import { renderResults, renderNotices } from './render.js';
 import { RouteMap, setMapTheme } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
@@ -55,6 +55,10 @@ const state = {
   routePrefs: {},      // Strecken-ID -> Bonus (-5 … +5)
   speedWeight: 0,      // Gewicht fuer unbenannte Strecken (0 … 5)
   liveTrains: true,    // Zugpositionen auf der Karte
+  // Welche Verkehrsmittel auf der Karte erscheinen. Leer = alle. Bewusst
+  // getrennt von state.products: auf der Karte will man oft nur den
+  // Fernverkehr sehen, ohne die Verbindungssuche einzuschraenken.
+  liveProducts: [],
   // Laufzeit
   lastPayload: null,
   ranked: [],
@@ -103,11 +107,10 @@ document.addEventListener('DOMContentLoaded', () => {
   setupLiveToggle();
   setupStationInputs();
   setupForm();
-  setupRoutes();
-  setupModels();
   setupResize();
   setupShare();
   loadCatalogue();
+  loadFxRates();
   applyStateToForm();
   // MVG-Stoerungsticker Muenchen einblenden, wenn der Endpoint Meldungen hat.
   initMvgTicker(document.getElementById('mvg-ticker'));
@@ -133,7 +136,7 @@ function loadSettings() {
     for (const key of [
       'mode', 'from', 'to', 'via', 'arrival', 'travelClass',
       'minChange', 'discounts', 'products',
-      'modelPrefs', 'routePrefs', 'speedWeight', 'liveTrains',
+      'modelPrefs', 'routePrefs', 'speedWeight', 'liveTrains', 'liveProducts',
     ]) {
       if (saved[key] !== undefined) state[key] = saved[key];
     }
@@ -160,6 +163,7 @@ function saveSettings() {
         discounts: state.discounts, products: state.products,
         modelPrefs: state.modelPrefs, routePrefs: state.routePrefs,
         speedWeight: state.speedWeight, liveTrains: state.liveTrains,
+        liveProducts: state.liveProducts,
       })
     );
   } catch {
@@ -227,12 +231,81 @@ function setupLiveToggle() {
   cb.addEventListener('change', (e) => {
     state.liveTrains = e.target.checked;
     saveSettings();
+    $('#live-filter')?.toggleAttribute('hidden', !state.liveTrains);
     if (state.liveTrains) scheduleLiveTrains();
     else {
       map.setLiveTrains([]);
       $('#live-note').textContent = '';
     }
   });
+  $('#live-filter')?.toggleAttribute('hidden', !state.liveTrains);
+}
+
+/**
+ * Filtermenue fuer die Live-Zuege auf der Karte.
+ *
+ * Baut auf demselben Verkehrsmittel-Katalog auf wie der Suchfilter, wirkt
+ * aber nur auf die Karte. Wird erst gerufen, wenn der Katalog geladen ist.
+ */
+function setupLiveFilter(products) {
+  const list = $('#live-filter-list');
+  const box = $('#live-filter');
+  if (!list || !box || products.length === 0) return;
+
+  const PRESETS = {
+    fern: ['highspeed', 'longdistance', 'night'],
+    ice:  ['highspeed'],
+    alle: [],
+  };
+
+  const label = () => {
+    const n = state.liveProducts.length;
+    if (n === 0) return 'alle Verkehrsmittel';
+    if (n === 1) {
+      const p = products.find((x) => x.id === state.liveProducts[0]);
+      return 'nur ' + (p ? p.label : state.liveProducts[0]);
+    }
+    return `${n} Verkehrsmittel`;
+  };
+
+  const boxes = new Map();
+  const sync = () => {
+    for (const [id, cb] of boxes) {
+      cb.checked = state.liveProducts.length === 0 || state.liveProducts.includes(id);
+    }
+    $('#live-filter-label').textContent = label();
+  };
+
+  list.replaceChildren();
+  for (const p of products) {
+    const lab = document.createElement('label');
+    lab.className = 'live-filter__item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = p.id;
+    cb.addEventListener('change', () => {
+      const checked = [...boxes].filter(([, c]) => c.checked).map(([id]) => id);
+      // Alles angehakt heisst "keine Einschraenkung" - das spart den Parameter.
+      state.liveProducts = checked.length === products.length ? [] : checked;
+      sync();
+      saveSettings();
+      scheduleLiveTrains();
+    });
+    boxes.set(p.id, cb);
+    lab.append(cb, document.createTextNode(p.label));
+    list.append(lab);
+  }
+
+  for (const btn of box.querySelectorAll('.live-filter__preset')) {
+    btn.addEventListener('click', () => {
+      state.liveProducts = [...(PRESETS[btn.dataset.preset] || [])];
+      sync();
+      saveSettings();
+      scheduleLiveTrains();
+    });
+  }
+
+  sync();
 }
 
 function setupMode() {
@@ -253,6 +326,26 @@ function applyMode() {
     btn.setAttribute('aria-pressed', String(active));
   }
   document.body.dataset.mode = state.mode;
+  if (state.mode === 'nerd') buildNerdControls();
+}
+
+/**
+ * Strecken- und Zugregler erst bauen, wenn der Nerd-Modus zum ersten Mal
+ * geöffnet wird.
+ *
+ * Zusammen sind das über fünfzig Schieberegler samt Beschriftungen und
+ * Notizen. Vorher entstanden sie bei jedem Seitenaufruf, auch im
+ * Normal-Modus, wo sie hinter `display: none` liegen — auf schwacher
+ * Hardware spürbar beim Start. Die Bewertung selbst hängt an state,
+ * nicht an den Reglern, die Sortierung funktioniert also auch ungebaut.
+ */
+let nerdControlsBuilt = false;
+
+function buildNerdControls() {
+  if (nerdControlsBuilt) return;
+  nerdControlsBuilt = true;
+  setupRoutes();
+  setupModels();
 }
 
 // ======================================================================
@@ -456,6 +549,7 @@ async function loadCatalogue() {
   try {
     const res = await api.catalogue();
     renderProducts(res.products || []);
+    setupLiveFilter(res.products || []);
     box.replaceChildren();
 
     const byCountry = { ch: [], de: [], at: [] };
@@ -520,6 +614,22 @@ async function loadCatalogue() {
     p.className = 'notice notice--warn';
     p.textContent = 'Abo-Liste konnte nicht geladen werden: ' + err.message;
     box.append(p);
+  }
+}
+
+/**
+ * Wechselkurse einmal je Sitzung holen.
+ *
+ * Beiwerk: schlaegt es fehl, fehlt nur der Gegenwert in Franken. Deshalb
+ * ohne Fehlermeldung und ohne die Suche aufzuhalten.
+ */
+async function loadFxRates() {
+  try {
+    const res = await api.fxRate();
+    setFxRates(res);
+    if (state.ranked.length > 0) draw();
+  } catch {
+    // Kein Kurs, kein Gegenwert - sonst aendert sich nichts.
   }
 }
 
@@ -1094,13 +1204,15 @@ function renderTrainPanel(panel, head, t) {
 }
 
 async function fetchLiveTrains() {
-  if (!state.liveTrains || state.ranked.length === 0) return;
+  // Auch ohne Trefferliste sinnvoll, sobald eine Verbindung verfolgt wird -
+  // dann liefern die Live-Zuege die gemeldete Position des eigenen Zuges.
+  if (!state.liveTrains || (state.ranked.length === 0 && !live?.journey)) return;
 
   if (liveAbort) liveAbort.abort();
   liveAbort = new AbortController();
 
   try {
-    const res = await api.liveTrains(map.bounds(), state.products, { signal: liveAbort.signal });
+    const res = await api.liveTrains(map.bounds(), state.liveProducts, { signal: liveAbort.signal });
     map.setLiveTrains(res.trains || []);
     const box = $('#live-note');
     if (box) {

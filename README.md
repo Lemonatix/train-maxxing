@@ -33,6 +33,29 @@ Karte wechselt auf schmalen Bildschirmen ins Hochformat.
 *MVG liefert Ortssuche und Störungsmeldungen für den Münchner Nahverkehr, aber
 keine Verbindungssuche. Details unter [Münchner Nahverkehr](#münchner-nahverkehr-über-die-mvg-api).
 
+### Preise: warum nur die DB
+
+Nachgemessen, ob sich SBB oder ÖBB als zweite Preisquelle anzapfen lassen:
+
+| Endpunkt | Ergebnis |
+|---|---|
+| `journey-service-int.api.sbb.ch` | **401** — SBB-Partner-API, braucht Registrierung |
+| `www.sbb.ch/api/journeys` | **403** — Bot-Schutz, wie bei bahn.de |
+| `shop.oebbtickets.at/api/domria/…` | **403 / 404** — Shop-API abgeriegelt |
+| `transport.opendata.ch` | **200**, aber **kein Preisfeld** (nachgeprüft) |
+
+Kurz: **ohne Zugangsdaten gibt es keine Schweizer oder österreichischen
+Preise.** Die DB bleibt die einzige Quelle, und ÖBB/SBB steuern nur den
+Deeplink in ihren Shop bei.
+
+Was stattdessen geht: der **Gegenwert in der anderen Währung**. Die
+Tageskurse kommen von der Europäischen Zentralbank
+(`?action=fxrate`, sechs Stunden gecacht) — kein Schlüssel, keine
+Registrierung, offizieller Referenzkurs mit Datum. An jeder Verbindung steht
+damit z.B. `40,99 €` und darunter `≈ 38,34 CHF`. Bewusst mit „≈" und als
+Nebenzeile: der Referenzkurs ist **kein Bankkurs**, beim Kartenzahlen kommen
+Aufschläge dazu.
+
 ### Warum ÖBB HAFAS den Fahrplan liefert und die DB nur die Preise
 
 Nachgemessen für fünf Relationen, jeweils dieselbe Abfrage an beide Quellen:
@@ -224,6 +247,27 @@ Entscheidung unter `train-maxxing:theme` ab. Die hellen Werte stehen in
 `:root`, die dunklen in `[data-theme="dark"]` — alle Komponenten leiten ihre
 Farben davon ab.
 
+### Leistung auf schwacher Hardware
+
+Vier Posten, die auf einem älteren Laptop ohne GPU-Beschleunigung spürbar sind
+und deshalb entschärft wurden:
+
+- **`backdrop-filter` nur noch auf `.panel` und `.map`.** Vorher lag er auf
+  zehn Selektoren, davon acht mit inzwischen deckendem Hintergrund — der Blur
+  war dort unsichtbar und kostete trotzdem je eine Compositing-Ebene, bei
+  `.journey` sogar eine **pro Ergebniskarte**.
+- **Der Hintergrundverlauf liegt auf `body::before`**, nicht mehr per
+  `background-attachment: fixed` auf dem `body` selbst. Fixierte Hintergründe
+  erzwingen bei jedem Scrollschritt ein Neuzeichnen des ganzen Sichtbereichs;
+  als eigene fixierte Ebene wird nur noch verschoben.
+- **Die Nerd-Regler entstehen erst beim ersten Öffnen** des Modus. Es sind über
+  fünfzig Schieberegler; vorher wurden sie bei jedem Seitenaufruf gebaut, auch
+  im Normal-Modus hinter `display: none`. Gemessen: 294 statt 683 DOM-Knoten
+  und 1 statt 49 `input[type=range]` beim Start.
+- **Kartenschwenks sind auf einen Frame gebündelt.** `pointermove` feuert auf
+  schnellen Mäusen über hundertmal pro Sekunde, und jedes `render()` baut
+  Kachelgitter und SVG-Overlay komplett neu auf.
+
 **Eine Regel dabei ist wichtig: alles Anklickbare bekommt einen deckenden
 Grund.** Karten, Knöpfe, Panels und Eingabefelder benutzen `--surface-card`
 bzw. `--field-bg`, nicht das halbtransparente `--surface`. Der Grund ist
@@ -341,6 +385,13 @@ ja im Zug — und die Verfolgung läuft mit der neuen Route weiter.
 
 Alarm gibt es nur bei echten Echtzeitdaten. Ein knapper *Fahrplan*-Umstieg steht
 schon an der Verbindungskarte und würde hier nur doppelt warnen.
+
+**Auf der Karte** wird die verfolgte Verbindung grün hervorgehoben — Verlauf,
+Start, Ziel und die aktuelle Zugposition. Die Position kommt entweder aus den
+Live-Zügen des Kartenausschnitts (gemeldet, gefüllter Punkt) oder wird aus dem
+Fahrplan hochgerechnet (geschätzt, hohler Punkt). Für die Hochrechnung wird der
+Restfahrplan um die bekannte Verspätung verschoben; sonst läge ein verspäteter
+Zug ausserhalb jedes Zeitfensters und wäre gar nicht auffindbar.
 
 **Mitfahren (GPS)** schaltet `watchPosition` dazu: die Position landet auf der
 Karte, und die Route wird zugeordnet — „Zwischen Augsburg Hbf und Günzburg —
@@ -838,6 +889,7 @@ Alles per GET auf `api/`:
 | `?action=traindetails&jid=…` | Zuglauf mit Halten und Verspätung |
 | `?action=bestprices&from=…&to=…&date=…` | Günstigste Zeitfenster am Tag |
 | `?action=nextconnection&from=…&to=…&date=…&time=…` | Nächster Anschluss nach einem knappen Umstieg |
+| `?action=fxrate` | EZB-Tageskurse, für den Gegenwert in Franken |
 | `?action=disruptions` | Aktive Störungsmeldungen der MVG München |
 
 `journeys` versteht zusätzlich `discounts` (kommagetrennt), `products`

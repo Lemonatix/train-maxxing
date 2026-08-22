@@ -11,6 +11,7 @@
  *   ?action=traindetails&jid=..             Zuglauf mit Halten und Verspaetung
  *   ?action=bestprices&from=..&to=..&date=.. Preisstrecke fuer eine Woche
  *   ?action=nextconnection&from=..&to=..    Naechster Anschluss nach einem knappen Umstieg
+ *   ?action=fxrate                          EZB-Tageskurse (fuer CHF neben EUR)
  *   ?action=disruptions                     MVG-Stoerungsticker Muenchen
  *
  * Strategie bei journeys:
@@ -123,11 +124,14 @@ try {
         case 'nextconnection':
             handleNextConnection($http, $config, $cache);
             break;
+        case 'fxrate':
+            handleFxRate($http, $config, $cache);
+            break;
         case 'disruptions':
             handleDisruptions($http, $config, $cache);
             break;
         default:
-            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, disruptions', 400);
+            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, fxrate, disruptions', 400);
     }
 } catch (Throwable $e) {
     // Details bleiben im Log, der Client bekommt nur eine generische Meldung.
@@ -503,6 +507,59 @@ function trainLabels(array $journey): array
         }
     }
     return $out;
+}
+
+/**
+ * Wechselkurse der Europaeischen Zentralbank.
+ *
+ * WOZU: Die Preise kommen von der DB und damit in Euro. Wer eine Fahrt
+ * Muenchen-Zuerich einordnen will, denkt aber in beiden Waehrungen. Ein
+ * Gegenwert in Franken beantwortet das, ohne dass wir Preise aus einer
+ * zweiten Quelle bräuchten.
+ *
+ * WARUM DIE EZB: keine Registrierung, kein Schluessel, offizieller
+ * Referenzkurs, und sie nennt das Datum dazu. Der Referenzkurs ist bewusst
+ * KEIN Bankkurs - beim Kartenzahlen kommen Aufschläge dazu. Deshalb wird er
+ * in der Anzeige auch als Naeherung gekennzeichnet.
+ *
+ * Die Kurse werden einmal am Werktag gegen 16 Uhr veroeffentlicht; sechs
+ * Stunden Cache sind entsprechend grosszuegig genug.
+ */
+function handleFxRate(Http $http, array $config, Cache $cache): void
+{
+    $key    = 'fx:ecb';
+    $cached = $cache->get($key, (int) ($config['cache_ttl']['fxrate'] ?? 21600));
+    if ($cached !== null) {
+        ok($cached + ['cached' => true]);
+    }
+
+    $res = $http->request('GET', 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml',
+        ['Accept' => 'application/xml']);
+    if (!$res['ok'] || !is_string($res['body']) || $res['body'] === '') {
+        // Kurse sind Beiwerk - ohne sie fehlt nur der Gegenwert.
+        ok(['base' => 'EUR', 'rates' => [], 'date' => null, 'error' => 'EZB nicht erreichbar']);
+    }
+
+    $rates = [];
+    if (preg_match_all("/currency='([A-Z]{3})'\s+rate='([0-9.]+)'/", $res['body'], $m, PREG_SET_ORDER)) {
+        foreach ($m as $hit) {
+            $rates[$hit[1]] = (float) $hit[2];
+        }
+    }
+    if ($rates === []) {
+        ok(['base' => 'EUR', 'rates' => [], 'date' => null, 'error' => 'Kursliste unlesbar']);
+    }
+
+    preg_match("/time='(\d{4}-\d{2}-\d{2})'/", $res['body'], $d);
+
+    $payload = [
+        'base'  => 'EUR',
+        'rates' => $rates,
+        'date'  => $d[1] ?? null,
+        'note'  => 'EZB-Referenzkurs, kein Bankkurs.',
+    ];
+    $cache->set($key, $payload);
+    ok($payload + ['cached' => false]);
 }
 
 function handleJourneys(Http $http, array $config, Cache $cache): void

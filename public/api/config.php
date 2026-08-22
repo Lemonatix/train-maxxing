@@ -22,6 +22,7 @@ return [
         'journeys'    => 300,    // Verbindungen: 5 Minuten
         'prices'      => 600,    // Preise: 10 Minuten
         'disruptions' => 120,    // MVG-Stoerungsticker: 2 Minuten
+        'fxrate'      => 21600,  // EZB-Wechselkurse: 6 Stunden (taeglich neu)
     ],
 
     // Timeout pro Upstream-Request in Sekunden.

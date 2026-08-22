@@ -79,7 +79,7 @@ function yToLat(y, z) {
 // Daten aus den Verbindungen
 // ---------------------------------------------------------------------------
 
-function geometryOf(journey) {
+export function geometryOf(journey) {
   const parts = [];
   for (const leg of journey.legs || []) {
     if (leg.mode !== 'train') continue;
@@ -129,6 +129,9 @@ export class RouteMap {
     this.activeIdx = 0;
     this.onSelect = null;
     this.liveTrains = [];
+    // Die gerade live verfolgte Verbindung. Wird über allen Suchergebnissen
+    // gezeichnet und bleibt stehen, auch wenn die Liste etwas anderes zeigt.
+    this.tracked = null;
     this.built = false;
     // Maßstabsleiste unten links; wird bei jedem render() aktualisiert.
     this.scaleEl = null;
@@ -392,7 +395,20 @@ export class RouteMap {
       lat: yToLat(latToY(lat, z) + dy, z),
       lon: xToLon(lonToX(lon, z) + dx, z),
     };
-    this.render();
+    // Beim Ziehen NICHT sofort zeichnen: pointermove feuert auf schnellen
+    // Mäusen und Trackpads über hundertmal pro Sekunde, und jedes render()
+    // baut Kachelgitter und SVG-Overlay komplett neu auf. Gebündelt auf
+    // einen Frame bleibt das Ziehen auch auf schwacher Hardware flüssig.
+    this.renderSoon();
+  }
+
+  /** Höchstens ein render() je Animationsframe. */
+  renderSoon() {
+    if (this._renderRaf) return;
+    this._renderRaf = requestAnimationFrame(() => {
+      this._renderRaf = null;
+      this.render();
+    });
   }
 
   zoomBy(delta, px, py) {
@@ -428,6 +444,13 @@ export class RouteMap {
     for (const e of this.ranked) {
       for (const part of geometryOf(e.journey)) pts.push(...part);
     }
+    // Ohne Suchergebnisse trotzdem etwas zeigen: die verfolgte Route.
+    if (pts.length < 2 && this.tracked) pts.push(...this.tracked.geometry.flat());
+    this.fitPoints(pts);
+  }
+
+  /** Ausschnitt so wählen, dass alle Punkte hineinpassen. */
+  fitPoints(pts) {
     if (pts.length < 2) return;
 
     let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
@@ -478,6 +501,30 @@ export class RouteMap {
   setLiveTrains(trains) {
     this.liveTrains = trains || [];
     if (this.built) this.render();
+  }
+
+  /**
+   * Die gerade verfolgte Verbindung auf der Karte hervorheben.
+   *
+   * Sie wird zusätzlich zu den Suchergebnissen gezeichnet und liegt darüber:
+   * wer im Zug sitzt, will seine Route sehen, auch wenn die Liste inzwischen
+   * eine ganz andere Suche zeigt. `position` ist die aktuelle Zugposition,
+   * soweit bekannt — sonst null.
+   *
+   * @param {?object} route {geometry: [[lat,lon][]], stops: [], label, position}
+   */
+  setTrackedRoute(route) {
+    this.tracked = route || null;
+    if (this.built) this.render();
+  }
+
+  /** Ausschnitt auf die verfolgte Route setzen. */
+  fitTracked() {
+    if (!this.tracked) return;
+    const pts = this.tracked.geometry.flat();
+    if (pts.length < 2) return;
+    this.fitPoints(pts);
+    this.render();
   }
 
   /** Aktueller Kartenausschnitt als [südLat, westLon, nordLat, ostLon]. */
@@ -738,8 +785,11 @@ export class RouteMap {
     const cxi = cx / 2 ** (this.zoom - zi);
     const cyi = cy / 2 ** (this.zoom - zi);
 
-    const halfW = w / 2 / scale;
-    const halfH = h / 2 / scale;
+    // Eine Kachelreihe über den Rand hinaus laden. Beim Ziehen ist der neue
+    // Ausschnitt dadurch schon abgedeckt, statt erst weiss aufzublitzen und
+    // dann nachzuladen.
+    const halfW = w / 2 / scale + TILE_SIZE;
+    const halfH = h / 2 / scale + TILE_SIZE;
     const x0 = Math.floor((cxi - halfW) / TILE_SIZE);
     const x1 = Math.floor((cxi + halfW) / TILE_SIZE);
     const y0 = Math.floor((cyi - halfH) / TILE_SIZE);
@@ -882,8 +932,94 @@ export class RouteMap {
       placeLabels(svg, labelled, toPx, w, h);
     }
 
+    // Die verfolgte Route zuletzt vor den Zügen: sie soll über den
+    // Suchergebnissen liegen, aber unter den Positionsmarkern.
+    this.renderTracked(svg, toPx);
     this.renderLiveTrains(svg, w, h, toPx);
     this.renderUserLocation(svg, w, h, toPx);
+  }
+
+  /**
+   * Die live verfolgte Verbindung: Streckenverlauf, Start und Ziel, und wo
+   * der Zug gerade ist.
+   *
+   * Bewusst eine eigene Ebene und nicht bloss eine weitere Route aus der
+   * Liste — sie überlebt neue Suchen und muss deshalb unabhängig von
+   * `ranked` gezeichnet werden.
+   */
+  renderTracked(svg, toPx) {
+    const t = this.tracked;
+    if (!t) return;
+
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', 'map__tracked');
+    if (t.label) {
+      const title = document.createElementNS(NS, 'title');
+      title.textContent = 'Verfolgt: ' + t.label;
+      g.append(title);
+    }
+
+    for (const part of t.geometry || []) {
+      if (part.length < 2) continue;
+      const d = part
+        .map((pt, k) => `${k === 0 ? 'M' : 'L'}${toPx(pt).map((v) => v.toFixed(1)).join(' ')}`)
+        .join(' ');
+
+      const casing = document.createElementNS(NS, 'path');
+      casing.setAttribute('d', d);
+      casing.setAttribute('class', 'map__tracked-casing');
+      g.append(casing);
+
+      const line = document.createElementNS(NS, 'path');
+      line.setAttribute('d', d);
+      line.setAttribute('class', 'map__tracked-line');
+      g.append(line);
+    }
+
+    // Start und Ziel als Ringe - der Rest der Halte steckt schon in der Linie.
+    for (const [pt, cls] of [[t.from, 'is-start'], [t.to, 'is-end']]) {
+      if (!pt) continue;
+      const [x, y] = toPx(pt);
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('cx', x.toFixed(1));
+      c.setAttribute('cy', y.toFixed(1));
+      c.setAttribute('r', '5');
+      c.setAttribute('class', 'map__tracked-end ' + cls);
+      g.append(c);
+    }
+
+    // Zugposition. `estimated` heisst: aus dem Fahrplan hochgerechnet, nicht
+    // gemeldet - das wird im Tooltip auch so gesagt.
+    if (t.position) {
+      const [x, y] = toPx([t.position.lat, t.position.lon]);
+      const marker = document.createElementNS(NS, 'g');
+      marker.setAttribute('class',
+        'map__tracked-train' + (t.position.estimated ? ' is-estimated' : ''));
+
+      const halo = document.createElementNS(NS, 'circle');
+      halo.setAttribute('cx', x.toFixed(1));
+      halo.setAttribute('cy', y.toFixed(1));
+      halo.setAttribute('r', '10');
+      halo.setAttribute('class', 'map__tracked-train-halo');
+      marker.append(halo);
+
+      const dot = document.createElementNS(NS, 'circle');
+      dot.setAttribute('cx', x.toFixed(1));
+      dot.setAttribute('cy', y.toFixed(1));
+      dot.setAttribute('r', '5');
+      dot.setAttribute('class', 'map__tracked-train-dot');
+      marker.append(dot);
+
+      const title = document.createElementNS(NS, 'title');
+      title.textContent = t.position.estimated
+        ? `${t.position.label || 'Zug'} — Position aus dem Fahrplan geschätzt`
+        : `${t.position.label || 'Zug'} — gemeldete Position`;
+      marker.append(title);
+
+      g.append(marker);
+    }
+
+    svg.append(g);
   }
 
   /**
