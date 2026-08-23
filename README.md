@@ -311,6 +311,22 @@ ein. Wichtig: Das Skript braucht `type="module"`.
 
 ## Wie die Bewertung funktioniert
 
+### Sortierung der Trefferliste
+
+Über der Liste steht ein Menü mit drei Möglichkeiten. Es merkt sich die Wahl
+zusammen mit den übrigen Einstellungen.
+
+| Auswahl | Reihenfolge |
+|---|---|
+| **Empfehlung** (Normal) / **Strecke & Komfort** (Nerd) | das Bewertungsmodell des jeweiligen Modus, siehe unten |
+| **Preis** | günstigste zuerst; bei Gleichstand die frühere Abfahrt. Verbindungen **ohne** Preisangabe stehen am Ende — eine fehlende Angabe ist kein Nullpreis |
+| **Abfahrt** | chronologisch. Die Suche liefert die Verbindungen ab der gewählten Zeit, nach unten wird es also später |
+
+Eine ausdrückliche Sortierung **schlägt beide Bewertungsmodelle**: wer „nach
+Preis" wählt, will eine Preisliste sehen, keine Empfehlung — und im Nerd-Modus
+auch keine Gruppierung nach Routenvarianten. Die Variantenüberschriften
+entfallen dann.
+
 ### Normal-Modus
 
 Preis, Dauer und Umstiege werden je auf 0–1 normiert und gewichtet

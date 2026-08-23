@@ -59,6 +59,9 @@ const state = {
   // getrennt von state.products: auf der Karte will man oft nur den
   // Fernverkehr sehen, ohne die Verbindungssuche einzuschraenken.
   liveProducts: [],
+  // Sortierung der Trefferliste: 'smart' = das Bewertungsmodell des Modus,
+  // 'price' = guenstigste zuerst, 'departure' = chronologisch.
+  sort: 'smart',
   // Laufzeit
   lastPayload: null,
   ranked: [],
@@ -104,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
   live.onJourneyChange = saveTracked;
 
   setupMode();
+  setupSort();
   setupLiveToggle();
   setupStationInputs();
   setupForm();
@@ -137,6 +141,7 @@ function loadSettings() {
       'mode', 'from', 'to', 'via', 'arrival', 'travelClass',
       'minChange', 'discounts', 'products',
       'modelPrefs', 'routePrefs', 'speedWeight', 'liveTrains', 'liveProducts',
+      'sort',
     ]) {
       if (saved[key] !== undefined) state[key] = saved[key];
     }
@@ -163,7 +168,7 @@ function saveSettings() {
         discounts: state.discounts, products: state.products,
         modelPrefs: state.modelPrefs, routePrefs: state.routePrefs,
         speedWeight: state.speedWeight, liveTrains: state.liveTrains,
-        liveProducts: state.liveProducts,
+        liveProducts: state.liveProducts, sort: state.sort,
       })
     );
   } catch {
@@ -327,6 +332,61 @@ function applyMode() {
   }
   document.body.dataset.mode = state.mode;
   if (state.mode === 'nerd') buildNerdControls();
+  applySort();
+}
+
+// ======================================================================
+// Sortierung der Trefferliste
+// ======================================================================
+
+function setupSort() {
+  const sel = $('#sort');
+  if (!sel) return;
+  sel.value = state.sort;
+  sel.addEventListener('change', () => {
+    state.sort = sel.value;
+    applySort();
+    saveSettings();
+    // Die Auswahl bleibt an derselben Verbindung haengen, sie steht nur
+    // woanders - darum kuemmert sich rerank().
+    if (state.lastPayload) rerank();
+  });
+  applySort();
+}
+
+/**
+ * Beschriftung und Hinweistext der Sortierung nachziehen.
+ *
+ * Die Voreinstellung heisst je nach Modus etwas anderes, weil sie etwas
+ * anderes TUT: im Normal-Modus eine Punktzahl aus Preis, Dauer und
+ * Umstiegen, im Nerd-Modus die Gruppierung nach Streckenvarianten. Ein
+ * gemeinsames "Empfehlung" waere in einem der beiden Faelle gelogen.
+ */
+function applySort() {
+  const sel = $('#sort');
+  if (!sel) return;
+
+  const smart = sel.querySelector('option[value="smart"]');
+  if (smart) {
+    smart.textContent = state.mode === 'nerd'
+      ? 'Strecke & Komfort'
+      : 'Empfehlung — Preis & Zeit';
+  }
+  sel.value = state.sort;
+
+  const note = $('#sort-note');
+  if (note) {
+    note.textContent = {
+      price: 'Ohne Preisangabe stehen unten.',
+      departure: 'Ab der gesuchten Zeit, nach unten wird es später.',
+    }[state.sort] || '';
+  }
+}
+
+/** Die Sortierleiste erscheint erst, wenn es etwas zu sortieren gibt. */
+function showSortBar(show) {
+  const bar = $('#results-bar');
+  if (bar) bar.hidden = !show;
 }
 
 /**
@@ -809,6 +869,7 @@ function rerank() {
 
   const ranked = rank(payload.journeys, {
     mode: state.mode,
+    sort: state.sort,
     modelPrefs: state.modelPrefs,
     routePrefs: state.routePrefs,
     speedWeight: state.speedWeight,
@@ -834,6 +895,7 @@ function rerank() {
 /** Liste und Karte zeichnen. Beide teilen sich die Auswahl. */
 function draw() {
   const ranked = state.ranked;
+  showSortBar(ranked.length > 0);
   // Bestenzeichen ueber ALLE Treffer bestimmen, nicht nur die sichtbaren:
   // sonst wandert das Label "guenstigste" beim Ausklappen weiter.
   renderResults($('#results-list'), ranked, highlights(ranked), state, select, showMore, {

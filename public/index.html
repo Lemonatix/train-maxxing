@@ -261,6 +261,21 @@
     <aside id="live-panel" class="live" hidden aria-live="polite"></aside>
   </div>
 
+  <!-- Sortierung der Trefferliste. Erscheint erst, wenn es etwas zu
+       sortieren gibt. -->
+  <div id="results-bar" class="results-bar" hidden>
+    <label for="sort">Sortieren nach</label>
+    <select id="sort">
+      <!-- Die Beschriftung wechselt mit dem Modus: im Normal-Modus ist die
+           Empfehlung eine Punktzahl aus Preis und Zeit, im Nerd-Modus die
+           Gruppierung nach Streckenvarianten. Siehe app.js. -->
+      <option value="smart" selected>Empfehlung</option>
+      <option value="price">Preis — günstigste zuerst</option>
+      <option value="departure">Abfahrt — chronologisch</option>
+    </select>
+    <span id="sort-note" class="results-bar__note"></span>
+  </div>
+
   <main id="results-list" class="results" aria-live="polite"></main>
 
   <!-- MVG-Stoerungsticker Muenchen, per JS eingeblendet wenn aktive Meldungen vorliegen. -->

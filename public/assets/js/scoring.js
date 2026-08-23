@@ -71,6 +71,7 @@ export function priceOf(journey) {
 export function rank(journeys, opts) {
   const {
     mode = 'normal',
+    sort = 'smart',
     modelPrefs = {},
     routePrefs = {},
     speedWeight = 0,
@@ -84,6 +85,7 @@ export function rank(journeys, opts) {
     return {
       journey: j,
       price: priceOf(j),
+      departAt: Date.parse(j.departureReal || j.departure || '') || 0,
       durationMin: j.durationMin || 0,
       changes: j.changes || 0,
       comfort: comfort.score,
@@ -91,6 +93,15 @@ export function rank(journeys, opts) {
       comfortPerLeg: comfort.perLeg,
     };
   });
+
+  // Eine ausdrueckliche Sortierung schlaegt beide Bewertungsmodelle: wer
+  // "nach Preis" waehlt, will eine Preisliste sehen und keine Empfehlung
+  // und auch keine Gruppierung nach Streckenvarianten. Deshalb steht das
+  // hier vor dem Nerd-Zweig - und `group` wird nicht gesetzt, damit die
+  // Liste ohne Variantenueberschriften durchlaeuft.
+  if (sort === 'price' || sort === 'departure') {
+    return sortExplicitly(enriched, sort);
+  }
 
   if (mode === 'nerd') return rankByRoute(enriched, routePrefs, speedWeight);
 
@@ -120,6 +131,35 @@ export function rank(journeys, opts) {
   }
 
   return enriched.sort((a, b) => a.score - b.score);
+}
+
+/**
+ * Sortierung nach einem einzelnen, benannten Kriterium.
+ *
+ * `price`     - guenstigste zuerst. Verbindungen ohne Preis wandern ans Ende
+ *               statt an den Anfang: eine fehlende Angabe ist kein Nullpreis.
+ * `departure` - chronologisch. Die Suche liefert die Verbindungen ab der
+ *               gewaehlten Zeit, nach unten wird es also spaeter.
+ *
+ * `score` bleibt die Position in der Liste, damit sich das Feld verhaelt wie
+ * in den anderen Modellen: kleiner ist weiter oben.
+ */
+function sortExplicitly(enriched, sort) {
+  const byDeparture = (a, b) => a.departAt - b.departAt || a.durationMin - b.durationMin;
+
+  const cmp = sort === 'price'
+    ? (a, b) => {
+        // null ist kein Preis, sondern eine Luecke - ans Ende damit.
+        if (a.price == null && b.price == null) return byDeparture(a, b);
+        if (a.price == null) return 1;
+        if (b.price == null) return -1;
+        return a.price - b.price || byDeparture(a, b);
+      }
+    : byDeparture;
+
+  const out = [...enriched].sort(cmp);
+  out.forEach((e, i) => { e.score = i; });
+  return out;
 }
 
 /**
