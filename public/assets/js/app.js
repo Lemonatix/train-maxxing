@@ -9,7 +9,7 @@
 import { api } from './api.js';
 import { rank, highlights, setFxRates } from './scoring.js';
 import { renderResults, renderNotices } from './render.js';
-import { RouteMap, setMapTheme } from './map.js';
+import { RouteMap, setMapTheme, trainLabel } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
 import { ROUTES, ratingsBySpeed } from './data/routes.js';
 import { initMvgTicker } from './mvgTicker.js';
@@ -1084,15 +1084,21 @@ async function showTrainDetails(train) {
 
   const head = document.createElement('div');
   head.className = 'train-panel__head';
+
+  // "ICE 516 → Hamburg Hbf". Die Nummer kommt aus dem Live-Zug, ist dort
+  // aber nicht immer getrennt geliefert - trainLabel() faellt in dem Fall
+  // auf den Produktnamen zurueck. Sobald der Zuglauf geladen ist, wird der
+  // Titel mit den vollstaendigeren Daten von dort ueberschrieben.
   const title = document.createElement('strong');
-  title.textContent = `${train.category || ''} ${train.trainNumber || ''}`.trim() || 'Zug';
+  title.className = 'train-panel__train';
+  title.textContent = trainLabel(train);
   head.append(title);
-  if (train.direction) {
-    const dir = document.createElement('span');
-    dir.className = 'train-panel__dir';
-    dir.textContent = '→ ' + train.direction;
-    head.append(dir);
-  }
+
+  const dir = document.createElement('span');
+  dir.className = 'train-panel__dir';
+  dir.textContent = train.direction ? '→ ' + train.direction : '';
+  dir.hidden = !train.direction;
+  head.append(dir);
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'train-panel__close';
@@ -1121,6 +1127,17 @@ async function showTrainDetails(train) {
 
 function renderTrainPanel(panel, head, t) {
   panel.replaceChildren(head);
+
+  // Der Zuglauf kennt Gattung, Nummer und Ziel zuverlaessiger als die
+  // Positionsmeldung, aus der der Kopf gebaut wurde - jetzt nachziehen.
+  const title = head.querySelector('.train-panel__train');
+  if (title) title.textContent = trainLabel(t);
+
+  const dir = head.querySelector('.train-panel__dir');
+  if (dir && t.direction) {
+    dir.textContent = '→ ' + t.direction;
+    dir.hidden = false;
+  }
 
   // Verspätung prominent, weil das die eigentliche Frage ist.
   const badge = document.createElement('span');

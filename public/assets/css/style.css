@@ -92,6 +92,10 @@
   --map-overlay-bg-soft: rgba(255, 255, 255, 0.85);
   --map-casing: rgba(255, 255, 255, 0.9);
   --calendar-icon-filter: none;
+
+  /* Schiene der Schieberegler — kräftiger als --surface-inset, damit sie
+     auf dem hellen Panel überhaupt sichtbar ist. */
+  --slider-track: rgba(15, 23, 42, 0.13);
 }
 
 /* --- Dunkles Theme (per data-theme="dark" auf <html>) ------------------ */
@@ -146,6 +150,8 @@
   --map-overlay-bg-soft: rgba(3, 5, 8, 0.6);
   --map-casing: rgba(3, 5, 8, 0.9);
   --calendar-icon-filter: invert(0.7);
+
+  --slider-track: rgba(255, 255, 255, 0.16);
 }
 
 * { box-sizing: border-box; }
@@ -625,11 +631,118 @@ body[data-mode="nerd"] .nerd-only { display: block; }
 .slider { margin: 1rem 0; }
 .slider label { display: block; margin-bottom: 0.4rem; }
 
+/*
+ * Schieberegler komplett selbst gezeichnet.
+ *
+ * Mit blossem `accent-color` zeichnet jedes Betriebssystem seinen eigenen
+ * Regler — unter Windows einen flachen grauen Balken mit rechteckigem
+ * Griff, der neben den runden Feldern und Knöpfen hier wie aus einem
+ * anderen Programm aussieht. Ab hier gilt überall dasselbe: dünne
+ * abgerundete Schiene, runder Griff in Akzentfarbe, Fokusring aus
+ * derselben Variablen wie bei den Eingabefeldern.
+ *
+ * Die Regeln stehen doppelt, weil sich die Pseudo-Elemente von WebKit und
+ * Firefox nicht in einer Selektorliste zusammenfassen lassen: ein
+ * unbekannter Selektor macht bei beiden die ganze Regel ungültig.
+ */
 input[type="range"] {
+  --track-h: 6px;
+  --thumb: 18px;
+
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
-  accent-color: var(--accent);
+  /* Die Höhe ist die Trefferfläche, nicht die Optik: die Schiene ist nur
+     --track-h hoch und wird darin senkrecht zentriert. */
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
   cursor: pointer;
 }
+
+/* Schiene */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: var(--track-h);
+  border-radius: 999px;
+  background: var(--slider-track);
+}
+
+input[type="range"]::-moz-range-track {
+  height: var(--track-h);
+  border-radius: 999px;
+  background: var(--slider-track);
+}
+
+/* Griff */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  /* WebKit setzt den Griff auf die OBERKANTE der Schiene. Um die halbe
+     Differenz nach oben geschoben liegt seine Mitte auf der Schiene. */
+  margin-top: calc((var(--track-h) - var(--thumb)) / 2);
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition), border-color var(--transition);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: var(--thumb);
+  height: var(--thumb);
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition), border-color var(--transition);
+}
+
+/* Ein weicher Ring um den Griff statt des System-Fokusrahmens — dieselbe
+   Sprache wie `input:focus` weiter oben. */
+input[type="range"]:focus { outline: none; }
+
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:focus-visible::-webkit-slider-thumb,
+input[type="range"]:active::-webkit-slider-thumb {
+  box-shadow: 0 0 0 5px var(--accent-soft), var(--shadow-sm);
+}
+
+input[type="range"]:hover::-moz-range-thumb,
+input[type="range"]:focus-visible::-moz-range-thumb,
+input[type="range"]:active::-moz-range-thumb {
+  box-shadow: 0 0 0 5px var(--accent-soft), var(--shadow-sm);
+}
+
+/* Firefox kann den zurückgelegten Teil der Schiene einfärben. WebKit kann
+   das nicht, deshalb bleibt es ein Extra und keine tragende Information. */
+input[type="range"]::-moz-range-progress {
+  height: var(--track-h);
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/* Die Bewertungsregler laufen von -5 bis +5. Ein Strich in der Mitte zeigt,
+   wo "egal" liegt — ohne ihn muss man den Griff hin und her schieben und
+   die Beschriftung lesen, um die Null zu treffen. Der Regler für das Tempo
+   unbenannter Strecken geht dagegen von 0 bis 5 und bekommt keinen. */
+.model__ctl input[type="range"]::-webkit-slider-runnable-track {
+  background:
+    linear-gradient(var(--border-strong), var(--border-strong)) 50% / 2px 100% no-repeat,
+    var(--slider-track);
+}
+
+.model__ctl input[type="range"]::-moz-range-track {
+  background:
+    linear-gradient(var(--border-strong), var(--border-strong)) 50% / 2px 100% no-repeat,
+    var(--slider-track);
+}
+
+/* Bei bewerteten Strecken/Zügen wäre eine von links gefüllte Schiene
+   irreführend — die Null liegt in der Mitte, nicht am Anfang. */
+.model__ctl input[type="range"]::-moz-range-progress { background: transparent; }
 
 .slider output {
   display: inline-block;
@@ -1021,13 +1134,18 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .map__tracked-end.is-end { fill: var(--green); }
 
+/* Die Zugposition ist ROT, nicht grün wie die Linie.
+
+   Grün sind auf der Karte alle Live-Züge — der eigene ging darin unter,
+   obwohl er der einzige ist, den man wirklich sucht. Die verfolgte Strecke
+   bleibt grün, der Punkt darauf hebt sich jetzt davon ab. */
 .map__tracked-train-halo {
-  fill: var(--green);
-  opacity: 0.25;
+  fill: var(--rose);
+  opacity: 0.28;
 }
 
 .map__tracked-train-dot {
-  fill: var(--green);
+  fill: var(--rose);
   stroke: var(--map-stop-ring);
   stroke-width: 2;
 }
@@ -1036,10 +1154,10 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
    einer gemeldeten Position sichtbar ist. */
 .map__tracked-train.is-estimated .map__tracked-train-dot {
   fill: var(--map-stop-fill);
-  stroke: var(--green);
+  stroke: var(--rose);
 }
 
-.map__tracked-train.is-estimated .map__tracked-train-halo { opacity: 0.12; }
+.map__tracked-train.is-estimated .map__tracked-train-halo { opacity: 0.14; }
 
 @media (prefers-reduced-motion: no-preference) {
   .map__tracked-train-halo {
@@ -1168,6 +1286,23 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   fill: var(--green);
   stroke: var(--map-stop-ring);
   stroke-width: 1.4;
+}
+
+/* Der gerade verfolgte Zug ist auch ein Live-Zug und wird deshalb ein
+   zweites Mal gezeichnet — diese Ebene liegt über der verfolgten Route.
+   Ohne eigene Farbe hätte der grüne Punkt den roten Positionsmarker
+   darunter wieder zugedeckt. */
+.map__train.is-tracked .map__train-dot {
+  fill: var(--rose);
+  stroke-width: 2;
+}
+
+.map__train.is-tracked .map__train-halo { fill: var(--rose); }
+
+.map__train.is-tracked:hover .map__train-dot,
+.map__train.is-tracked:focus-visible .map__train-dot {
+  fill: var(--map-stop-fill);
+  stroke: var(--rose);
 }
 
 @keyframes trainPulse {
@@ -2385,7 +2520,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
   /* Eingaben untereinander statt gequetscht nebeneinander */
   .row { gap: 0.6rem; margin-bottom: 0.7rem; }
-  .row--stations { flex-direction: column; align-items: stretch; }
 
   .field--grow { flex: 1 1 100%; }
 
@@ -2414,6 +2548,45 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
     text-align: left;
   }
 
+  /* iOS zeichnet Datums- und Zeitfelder als Systemsteuerelement und gibt
+     ihnen dabei die Breite ihres INHALTS — `width: 100%` wird schlicht
+     ignoriert. Im zweispaltigen Raster lief das Datumsfeld deshalb über
+     das Uhrzeitfeld, und die Uhrzeit stand rechts aus dem Panel heraus.
+     Ohne Systemaussehen gilt wieder die Rasterbreite.
+
+     `-webkit-touch-callout` gibt es nur unter iOS — Android und Desktop
+     behalten damit ihre native Darstellung samt Kalendersymbol, das
+     `appearance: none` sonst mit abräumen würde. */
+  @supports (-webkit-touch-callout: none) {
+    .row--options input[type="date"],
+    .row--options input[type="time"] {
+      -webkit-appearance: none;
+      appearance: none;
+      display: block;
+      width: 100%;
+    }
+
+    /* Der angezeigte Wert steckt in einem eigenen Schattenknoten, der seine
+       Inhaltsbreite ebenfalls behält. Ohne die Regel rutscht er weiterhin
+       über den rechten Feldrand. */
+    .row--options input[type="date"]::-webkit-date-and-time-value,
+    .row--options input[type="time"]::-webkit-date-and-time-value {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      margin: 0;
+      text-align: left;
+    }
+  }
+
+  /* Sicherheitsnetz, falls sich doch etwas breit macht: lieber am Feldrand
+     abschneiden als über das Nachbarfeld laufen. */
+  .row--options input[type="date"],
+  .row--options input[type="time"] {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
   /* Ganze Breite für alles, was sonst zu eng wird. */
   .row--options .field--wide { grid-column: 1 / -1; }
 
@@ -2434,30 +2607,42 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
     min-height: 46px;
   }
 
-  /* Der Umkehrknopf sitzt auf dem Telefon rechts auf der Kante zwischen
-     "Von" und "Nach" — dort, wo ihn jede Fahrplan-App hat. Vorher stand er
-     mittig in der eigenen Zeile und schob die Felder auseinander. Aus dem
-     Fluss genommen rücken sie direkt zusammen. */
-  .row--stations { position: relative; }
+  /* Der Umkehrknopf steht auf dem Telefon rechts neben den beiden
+     Eingabefeldern, auf Höhe der Lücke dazwischen.
+
+     Vorher lag er absolut positioniert über dem Feld, mit einer aus
+     Beschriftungs- und Feldhöhe zusammengerechneten Position
+     (`top: calc(50% + 0.55rem)`). Diese Rechnung stimmt nur bei genau
+     einer Schriftgröße — bei grösserer Systemschrift oder umgebrochenem
+     Label sass der Knopf schief im Feld. Als eigene Rasterspalte, die
+     über beide Zeilen geht, ergibt sich die Mitte von selbst und kann
+     nicht mehr verrutschen. */
+  .row--stations {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "from swap"
+      "to   swap";
+    align-items: end;
+    column-gap: 0.5rem;
+  }
+
+  .row--stations > .field:nth-of-type(1) { grid-area: from; }
+  .row--stations > .field:nth-of-type(2) { grid-area: to; }
 
   .swap {
-    position: absolute;
-    right: 0.3rem;
-    /* Nicht die Mitte der Zeile, sondern die Lücke zwischen den beiden
-       Eingabefeldern — dazwischen steht noch die Beschriftung "NACH", die
-       die Zeilenmitte um eine halbe Labelzeile nach oben verschiebt. */
-    top: calc(50% + 0.55rem);
-    z-index: 5;
+    grid-area: swap;
+    /* Über beide Zeilen zentriert = genau in der Lücke zwischen "Von" und
+       "Nach", unabhängig davon, wie hoch die Felder tatsächlich sind. */
+    align-self: center;
     width: 44px;
     height: 44px;
     margin: 0;
-    /* Felder stehen jetzt übereinander: Pfeil aufrecht. */
-    transform: translateY(-50%);
+    /* Felder stehen übereinander: der Pfeil zeigt auf und ab, die Drehung
+       aus der Desktop-Regel wird zurückgenommen. */
+    transform: none;
     box-shadow: var(--shadow-sm);
   }
-
-  /* Platz für den Knopf, damit lange Stationsnamen nicht darunterlaufen. */
-  .row--stations .field--grow input { padding-right: 3.4rem; }
 
   .check { min-height: 44px; }
   input[type="checkbox"] { width: 20px; height: 20px; }

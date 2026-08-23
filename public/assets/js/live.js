@@ -26,7 +26,7 @@
  */
 
 import { api } from './api.js';
-import { geometryOf } from './map.js';
+import { geometryOf, trainLabel } from './map.js';
 
 const REFRESH_MS = 30_000;
 
@@ -301,7 +301,7 @@ export class LiveTracker {
           gap,
           status,
           arrivalAt: arr.at,
-          train: `${out.leg.category || ''} ${out.leg.trainNumber || ''}`.trim(),
+          train: trainLabel(out.leg),
           // Kennung, damit Alternativen nicht bei jedem Auffrischen neu geholt werden.
           key: [out.leg.from?.id, out.leg.trainNumber, Math.round(arr.at / 60000)].join('|'),
         };
@@ -444,16 +444,21 @@ export class LiveTracker {
     }
     if (!current) return null;
 
-    const label = `${current.leg.category || ''} ${current.leg.trainNumber || ''}`.trim();
+    const label = trainLabel(current.leg);
+
+    // Kennung des eigenen Zuges. Sie geht mit an die Karte, damit die
+    // Live-Zug-Ebene denselben Zug nicht noch einmal als gewöhnlichen
+    // grünen Punkt über den eigenen Positionsmarker zeichnet.
+    const num = String(current.leg.trainNumber || '');
+    const id = { jid: current.jid || null, trainNumber: num || null };
 
     // 1. Gemeldete Position aus den Live-Zügen der Karte.
-    const num = String(current.leg.trainNumber || '');
     const live = (this.map?.liveTrains || []).find((t) =>
       (t.jid && t.jid === current.jid) ||
       (num !== '' && String(t.trainNumber || '') === num)
     );
     if (live && live.lat != null && live.lon != null) {
-      return { lat: live.lat, lon: live.lon, label, estimated: false };
+      return { lat: live.lat, lon: live.lon, label, estimated: false, ...id };
     }
 
     // 2. Aus dem Fahrplan hochrechnen.
@@ -488,6 +493,7 @@ export class LiveTracker {
         lon: stops[i].lon + (stops[i + 1].lon - stops[i].lon) * f,
         label,
         estimated: true,
+        ...id,
       };
     }
 
@@ -496,7 +502,7 @@ export class LiveTracker {
     const last = stops[stops.length - 1];
     const lastTime = timeOf(last, 'arr');
     if (Number.isFinite(lastTime) && now >= lastTime) {
-      return { lat: last.lat, lon: last.lon, label, estimated: true };
+      return { lat: last.lat, lon: last.lon, label, estimated: true, ...id };
     }
     return null;
   }

@@ -256,12 +256,14 @@ final class OebbHafas
             $prod = $prodL[$jny['prodX'] ?? -1] ?? [];
             $ctx  = $prod['prodCtx'] ?? [];
 
+            $name = self::productName($prod);
+
             $out[] = [
                 'lat'         => $pos['y'] / 1000000,
                 'lon'         => $pos['x'] / 1000000,
                 'category'    => trim((string) ($ctx['catOut'] ?? '')),
-                'trainNumber' => trim((string) ($ctx['num'] ?? '')),
-                'name'        => trim((string) ($prod['nameS'] ?? $prod['name'] ?? '')),
+                'trainNumber' => self::trainNumber($ctx, $name),
+                'name'        => $name,
                 'direction'   => trim((string) ($jny['dirTxt'] ?? '')),
                 // Mit dieser Kennung laesst sich der Lauf im Detail nachladen.
                 'jid'         => (string) ($jny['jid'] ?? ''),
@@ -298,6 +300,7 @@ final class OebbHafas
 
         $prod = ($common['prodL'] ?? [])[$jny['prodX'] ?? -1] ?? [];
         $ctx  = $prod['prodCtx'] ?? [];
+        $name = self::productName($prod);
         $date = (string) ($jny['date'] ?? '');
         $locL = $common['locL'] ?? [];
 
@@ -361,8 +364,8 @@ final class OebbHafas
             'data'  => [
                 'category'    => trim((string) ($ctx['catOut'] ?? '')),
                 'categoryName' => trim((string) ($ctx['catOutL'] ?? '')),
-                'trainNumber' => trim((string) ($ctx['num'] ?? '')),
-                'name'        => trim((string) ($prod['nameS'] ?? $prod['name'] ?? '')),
+                'trainNumber' => self::trainNumber($ctx, $name),
+                'name'        => $name,
                 'direction'   => trim((string) ($jny['dirTxt'] ?? '')),
                 'operator'    => trim((string) ($ctx['admin'] ?? '')),
                 'delay'       => $hasRealtime ? $maxDelay : null,
@@ -377,6 +380,43 @@ final class OebbHafas
     // ------------------------------------------------------------------
     // Mapping HAFAS -> unser normalisiertes Format
     // ------------------------------------------------------------------
+
+    /**
+     * Anzeigename eines Produkts, z.B. "ICE 516".
+     *
+     * HAFAS liefert zwei Namen und haelt sich nicht daran, welcher von beiden
+     * die Zugnummer traegt: mal steht sie im langen (`name`), mal nur im
+     * kurzen (`nameS`). Genommen wird deshalb der laengere - er enthaelt den
+     * anderen praktisch immer und dazu die Nummer.
+     */
+    private static function productName(array $prod): string
+    {
+        $long  = trim((string) preg_replace('/\s+/u', ' ', (string) ($prod['name'] ?? '')));
+        $short = trim((string) preg_replace('/\s+/u', ' ', (string) ($prod['nameS'] ?? '')));
+
+        if ($long === '' || $short === '') {
+            return $long !== '' ? $long : $short;
+        }
+        return strlen($long) >= strlen($short) ? $long : $short;
+    }
+
+    /**
+     * Zugnummer.
+     *
+     * In `prodCtx.num` steht sie nur, wenn HAFAS sie getrennt fuehrt - in den
+     * Positionsmeldungen (JourneyGeoPos) fehlt sie regelmaessig, und die
+     * Karte zeigte dann bloss "ICE" statt "ICE 516". Fehlt sie, wird sie aus
+     * dem Produktnamen gezogen. Gattungen ohne Nummer (S-Bahn, Bus) liefern
+     * erwartungsgemaess einen leeren String.
+     */
+    private static function trainNumber(array $ctx, string $name): string
+    {
+        $num = trim((string) ($ctx['num'] ?? ''));
+        if ($num !== '') {
+            return $num;
+        }
+        return preg_match('/(?:^|\s)(\d{1,5}[A-Za-z]?)$/u', $name, $m) === 1 ? $m[1] : '';
+    }
 
     private function mapConnection(array $con, array $common): ?array
     {
@@ -412,6 +452,7 @@ final class OebbHafas
                 $jny  = $sec['jny'] ?? [];
                 $prod = $prodL[$jny['prodX'] ?? -1] ?? [];
                 $ctx  = $prod['prodCtx'] ?? [];
+                $prodName = self::productName($prod);
 
                 $stops = $this->mapStops($jny['stopL'] ?? [], $locL, $baseDate);
                 foreach ($stops as $s) {
@@ -430,8 +471,8 @@ final class OebbHafas
                     'category'     => trim((string) ($ctx['catOut'] ?? '')),
                     'categoryName' => trim((string) ($ctx['catOutL'] ?? '')),
                     'line'         => trim((string) ($ctx['line'] ?? $ctx['matchId'] ?? '')),
-                    'trainNumber'  => trim((string) ($ctx['num'] ?? '')),
-                    'name'         => trim((string) ($prod['nameS'] ?? $prod['name'] ?? '')),
+                    'trainNumber'  => self::trainNumber($ctx, $prodName),
+                    'name'         => $prodName,
                     'direction'    => trim((string) ($jny['dirTxt'] ?? '')),
                     'operator'     => trim((string) ($ctx['admin'] ?? '')),
                     'from'         => $fromLoc,

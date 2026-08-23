@@ -288,6 +288,21 @@ Ziel steht in `index.html` und zeigt standardmäßig auf `/`:
 Liegt das Tool in einem Unterordner einer größeren Seite, trag dort die
 gewünschte Adresse ein.
 
+**Tab-Icon anpassen:** In `index.html` stehen drei `<link rel="icon">`-Zeilen
+mit absoluten Pfaden auf die Icons der Hauptseite:
+
+```html
+<link rel="icon" type="image/svg+xml" href="/assets/pictures/MMR_v2.svg?v=2">
+<link rel="icon" type="image/png" sizes="192x192" href="/assets/pictures/MMR_v2.png?v=2">
+<link rel="apple-touch-icon" href="/assets/pictures/MMR_v2.png?v=2">
+```
+
+Absolut, damit sie auch aus einem Unterordner heraus stimmen — die Dateien
+liegen ja bei der Hauptseite, nicht beim Tool. Läuft das Tool auf einer eigenen
+Domain, leg die Icons dort ab und trag den passenden Pfad ein. Das PNG ist
+Absicht: SVG-Favicons zeichnen nicht alle Browser, unter Windows blieb der Tab
+sonst leer.
+
 **Als Teilseite einbetten:** Übernimm den Inhalt von `<div class="wrap">` in deine
 Seite und binde `style.css` sowie `<script type="module" src="assets/js/app.js">`
 ein. Wichtig: Das Skript braucht `type="module"`.
@@ -387,11 +402,17 @@ Alarm gibt es nur bei echten Echtzeitdaten. Ein knapper *Fahrplan*-Umstieg steht
 schon an der Verbindungskarte und würde hier nur doppelt warnen.
 
 **Auf der Karte** wird die verfolgte Verbindung grün hervorgehoben — Verlauf,
-Start, Ziel und die aktuelle Zugposition. Die Position kommt entweder aus den
-Live-Zügen des Kartenausschnitts (gemeldet, gefüllter Punkt) oder wird aus dem
-Fahrplan hochgerechnet (geschätzt, hohler Punkt). Für die Hochrechnung wird der
-Restfahrplan um die bekannte Verspätung verschoben; sonst läge ein verspäteter
-Zug ausserhalb jedes Zeitfensters und wäre gar nicht auffindbar.
+Start und Ziel. Die Zugposition selbst ist **rot**: alle Live-Züge des
+Ausschnitts sind grün, und der eigene ging darin unter, obwohl er der einzige
+ist, den man wirklich sucht. Der Zug wird auch in der Live-Zug-Ebene erkannt
+(über `jid` bzw. Zugnummer) und dort ebenfalls rot gezeichnet — sonst läge
+sein grüner Punkt genau über dem roten Positionsmarker.
+
+Die Position kommt entweder aus den Live-Zügen des Kartenausschnitts
+(gemeldet, gefüllter Punkt) oder wird aus dem Fahrplan hochgerechnet
+(geschätzt, hohler Punkt). Für die Hochrechnung wird der Restfahrplan um die
+bekannte Verspätung verschoben; sonst läge ein verspäteter Zug ausserhalb
+jedes Zeitfensters und wäre gar nicht auffindbar.
 
 **Mitfahren (GPS)** schaltet `watchPosition` dazu: die Position landet auf der
 Karte, und die Route wird zugeordnet — „Zwischen Augsburg Hbf und Günzburg —

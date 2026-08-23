@@ -79,6 +79,27 @@ function yToLat(y, z) {
 // Daten aus den Verbindungen
 // ---------------------------------------------------------------------------
 
+/**
+ * Zugbezeichnung fuer die Anzeige: "ICE 516" statt bloss "ICE".
+ *
+ * HAFAS liefert die Nummer nicht bei jedem Zug getrennt in `trainNumber` —
+ * mal steckt sie nur im Produktnamen ("ICE 516"), mal gibt es ueberhaupt
+ * keine (S-Bahnen, Busse). Deshalb der Reihe nach: Gattung plus Nummer,
+ * sonst der Produktname, sonst die blosse Gattung.
+ *
+ * @param {?object} t Zug mit {category, trainNumber, name}
+ * @returns {string}
+ */
+export function trainLabel(t) {
+  const cat  = String(t?.category || '').trim();
+  const num  = String(t?.trainNumber || '').trim();
+  const name = String(t?.name || '').replace(/\s+/g, ' ').trim();
+
+  if (cat && num) return `${cat} ${num}`;
+  if (name) return name;
+  return cat || 'Zug';
+}
+
 export function geometryOf(journey) {
   const parts = [];
   for (const leg of journey.legs || []) {
@@ -870,7 +891,7 @@ export class RouteMap {
 
       const label = this.ranked[i].journey.legs
         .filter((l) => l.mode === 'train')
-        .map((l) => `${l.category} ${l.trainNumber}`.trim())
+        .map((l) => trainLabel(l))
         .join(' → ');
       g.setAttribute('aria-label', `Route ${i + 1}: ${label}`);
 
@@ -1051,19 +1072,30 @@ export class RouteMap {
   }
 
   renderLiveTrains(svg, w, h, toPx) {
+    // Der gerade verfolgte Zug steckt auch in dieser Liste. Er wird
+    // markiert, damit er nicht als gruener Punkt ueber seinem eigenen roten
+    // Positionsmarker landet - siehe .map__train.is-tracked im Stylesheet.
+    const tracked = this.tracked?.position || null;
+    const isTracked = (t) => !!tracked && (
+      (!!tracked.jid && t.jid === tracked.jid) ||
+      (!!tracked.trainNumber && String(t.trainNumber || '') === String(tracked.trainNumber))
+    );
+
     for (const t of this.liveTrains) {
       if (t.lat == null || t.lon == null) continue;
       const [x, y] = toPx([t.lat, t.lon]);
       if (x < 0 || y < 0 || x > w || y > h) continue;
 
       const g = document.createElementNS(NS, 'g');
-      g.setAttribute('class', 'map__train' + (t.onRoute ? ' is-onroute' : ''));
+      g.setAttribute('class', 'map__train'
+        + (t.onRoute ? ' is-onroute' : '')
+        + (isTracked(t) ? ' is-tracked' : ''));
       if (t.jid) {
         g.dataset.jid = t.jid;
         g.setAttribute('tabindex', '0');
         g.setAttribute('role', 'button');
         g.setAttribute('aria-label',
-          `${t.category} ${t.trainNumber} nach ${t.direction} — Details anzeigen`);
+          `${trainLabel(t)}${t.direction ? ' nach ' + t.direction : ''} — Details anzeigen`);
       }
 
       // Grosszuegige, unsichtbare Trefferflaeche: der Punkt allein ist auf
@@ -1090,7 +1122,7 @@ export class RouteMap {
       g.append(dot);
 
       const title = document.createElementNS(NS, 'title');
-      title.textContent = `${t.name || t.category || 'Zug'}${t.direction ? ' → ' + t.direction : ''}`
+      title.textContent = `${trainLabel(t)}${t.direction ? ' → ' + t.direction : ''}`
         + (t.jid ? ' (antippen für Details)' : '');
       g.append(title);
 
