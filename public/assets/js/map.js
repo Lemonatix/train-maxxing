@@ -1009,13 +1009,19 @@ export class RouteMap {
       g.append(c);
     }
 
-    // Zugposition. `estimated` heisst: aus dem Fahrplan hochgerechnet, nicht
-    // gemeldet - das wird im Tooltip auch so gesagt.
-    if (t.position) {
+    // Zugposition - aber NUR die hochgerechnete.
+    //
+    // Ist der eigene Zug unter den Live-Zuegen des Ausschnitts, zeichnet ihn
+    // schon die Live-Ebene, dort rot markiert (.map__train.is-tracked). Ein
+    // zweiter, groesserer Punkt an derselben Stelle waere blosse Dopplung.
+    //
+    // Bleibt der Fall, dass keine Position gemeldet ist - dann rechnet
+    // live.js sie aus dem Fahrplan hoch, es gibt keinen Live-Punkt, und
+    // dieser hohle Marker ist die einzige Anzeige.
+    if (t.position && t.position.estimated) {
       const [x, y] = toPx([t.position.lat, t.position.lon]);
       const marker = document.createElementNS(NS, 'g');
-      marker.setAttribute('class',
-        'map__tracked-train' + (t.position.estimated ? ' is-estimated' : ''));
+      marker.setAttribute('class', 'map__tracked-train is-estimated');
 
       const halo = document.createElementNS(NS, 'circle');
       halo.setAttribute('cx', x.toFixed(1));
@@ -1032,9 +1038,8 @@ export class RouteMap {
       marker.append(dot);
 
       const title = document.createElementNS(NS, 'title');
-      title.textContent = t.position.estimated
-        ? `${t.position.label || 'Zug'} — Position aus dem Fahrplan geschätzt`
-        : `${t.position.label || 'Zug'} — gemeldete Position`;
+      title.textContent =
+        `${t.position.label || 'Zug'} — Position aus dem Fahrplan geschätzt`;
       marker.append(title);
 
       g.append(marker);

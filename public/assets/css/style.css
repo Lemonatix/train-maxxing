@@ -1134,30 +1134,23 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .map__tracked-end.is-end { fill: var(--green); }
 
-/* Die Zugposition ist ROT, nicht grün wie die Linie.
+/* Die Zugposition ist ROT, nicht grün wie die Linie — grün sind auf der
+   Karte alle Live-Züge, der eigene ging darin unter.
 
-   Grün sind auf der Karte alle Live-Züge — der eigene ging darin unter,
-   obwohl er der einzige ist, den man wirklich sucht. Die verfolgte Strecke
-   bleibt grün, der Punkt darauf hebt sich jetzt davon ab. */
-.map__tracked-train-halo {
+   Gezeichnet wird hier nur noch die HOCHGERECHNETE Position: ist der Zug
+   unter den Live-Zügen des Ausschnitts, zeigt ihn schon die Live-Ebene,
+   dort rot markiert (`.map__train.is-tracked`). Hohl statt gefüllt, damit
+   „geschätzt" auch ohne Vergleichspunkt daneben ablesbar bleibt. */
+.map__tracked-train.is-estimated .map__tracked-train-halo {
   fill: var(--rose);
-  opacity: 0.28;
+  opacity: 0.14;
 }
 
-.map__tracked-train-dot {
-  fill: var(--rose);
-  stroke: var(--map-stop-ring);
-  stroke-width: 2;
-}
-
-/* Hochgerechnete Position: hohl statt gefüllt, damit der Unterschied zu
-   einer gemeldeten Position sichtbar ist. */
 .map__tracked-train.is-estimated .map__tracked-train-dot {
   fill: var(--map-stop-fill);
   stroke: var(--rose);
+  stroke-width: 2;
 }
-
-.map__tracked-train.is-estimated .map__tracked-train-halo { opacity: 0.14; }
 
 @media (prefers-reduced-motion: no-preference) {
   .map__tracked-train-halo {
@@ -2504,7 +2497,8 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 @media (max-width: 640px) {
   .wrap { padding: 1rem 0.75rem 3rem; }
 
-  .page-head { flex-direction: column; gap: 0.75rem; margin-bottom: 1rem; }
+  /* position: relative als Anker fuer den Design-Umschalter, siehe unten. */
+  .page-head { position: relative; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem; }
   .page-head h1 { font-size: 1.35rem; }
   .sub { font-size: 0.85rem; }
 
@@ -2513,8 +2507,25 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   .mode-btn small { font-size: 0.64rem; }
 
   .page-head__ctl { width: 100%; }
-  .theme-toggle { --size: 48px; flex: 0 0 auto; }
-  .page-head__ctl .modes { flex: 1 1 auto; }
+
+  /* Der Design-Umschalter gehoert auf dem Telefon nach oben rechts, auf die
+     Hoehe des "Hauptseite"-Knopfes - die beiden bilden dann zusammen die
+     Kopfzeile. Im DOM steht er bei den Modus-Knoepfen, weil er auf dem
+     Desktop dorthin gehoert; hier wird er deshalb aus dem Fluss genommen.
+
+     Der Anker ist die obere rechte Ecke der Kopfzeile, also genau die Zeile
+     des Zurueck-Knopfes - keine zusammengerechnete Position. Damit beide
+     buendig stehen, ist der Knopf so hoch wie dessen `min-height`. */
+  .theme-toggle {
+    --size: 44px;
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+
+  /* Ohne den Umschalter im Fluss bekommen die Modus-Knoepfe die volle
+     Breite der Zeile. */
+  .page-head__ctl .modes { flex: 1 1 100%; }
 
   .panel { padding: 0.9rem; border-radius: var(--radius-sm); }
 

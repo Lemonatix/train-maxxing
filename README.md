@@ -404,15 +404,20 @@ schon an der Verbindungskarte und würde hier nur doppelt warnen.
 **Auf der Karte** wird die verfolgte Verbindung grün hervorgehoben — Verlauf,
 Start und Ziel. Die Zugposition selbst ist **rot**: alle Live-Züge des
 Ausschnitts sind grün, und der eigene ging darin unter, obwohl er der einzige
-ist, den man wirklich sucht. Der Zug wird auch in der Live-Zug-Ebene erkannt
-(über `jid` bzw. Zugnummer) und dort ebenfalls rot gezeichnet — sonst läge
-sein grüner Punkt genau über dem roten Positionsmarker.
+ist, den man wirklich sucht.
 
-Die Position kommt entweder aus den Live-Zügen des Kartenausschnitts
-(gemeldet, gefüllter Punkt) oder wird aus dem Fahrplan hochgerechnet
-(geschätzt, hohler Punkt). Für die Hochrechnung wird der Restfahrplan um die
-bekannte Verspätung verschoben; sonst läge ein verspäteter Zug ausserhalb
-jedes Zeitfensters und wäre gar nicht auffindbar.
+Wie der Punkt zustande kommt, hängt davon ab, ob es eine gemeldete Position
+gibt:
+
+- **Gemeldet.** Der Zug steckt in den Live-Zügen des Ausschnitts. Dann wird er
+  dort anhand von `jid` bzw. Zugnummer erkannt und rot statt grün gezeichnet —
+  ein zweiter, eigener Marker an derselben Stelle wäre nur Dopplung.
+- **Hochgerechnet.** Ist keine Position gemeldet, gibt es auch keinen
+  Live-Punkt. Dann setzt die Verfolgung einen eigenen, **hohlen** roten Marker
+  auf die aus dem Fahrplan interpolierte Stelle. Hohl, damit „geschätzt"
+  ablesbar bleibt. Für die Hochrechnung wird der Restfahrplan um die bekannte
+  Verspätung verschoben; sonst läge ein verspäteter Zug ausserhalb jedes
+  Zeitfensters und wäre gar nicht auffindbar.
 
 **Mitfahren (GPS)** schaltet `watchPosition` dazu: die Position landet auf der
 Karte, und die Route wird zugeordnet — „Zwischen Augsburg Hbf und Günzburg —
