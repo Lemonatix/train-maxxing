@@ -327,6 +327,15 @@ Preis" wählt, will eine Preisliste sehen, keine Empfehlung — und im Nerd-Modu
 auch keine Gruppierung nach Routenvarianten. Die Variantenüberschriften
 entfallen dann.
 
+Umsortiert wird sofort, ohne neue Netzabfrage — es ist dieselbe Trefferliste in
+anderer Reihenfolge, auch über nachgeladene Seiten hinweg. Dabei springt die
+**Auswahl zurück an den Listenanfang**: die Karte über der Liste zeigt immer die
+ausgewählte Verbindung, und bliebe sie an der alten hängen, änderte sich im
+halben Bild nichts, obwohl die Liste längst neu sortiert ist. Bei Modus- und
+Reglerwechseln bleibt die Auswahl dagegen an ihrer Verbindung kleben — dort hat
+man sich für eine entschieden und schraubt nur an der Reihenfolge drumherum
+(`rerank({ keepSelection })`).
+
 ### Normal-Modus
 
 Preis, Dauer und Umstiege werden je auf 0–1 normiert und gewichtet

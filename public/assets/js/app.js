@@ -347,9 +347,13 @@ function setupSort() {
     state.sort = sel.value;
     applySort();
     saveSettings();
-    // Die Auswahl bleibt an derselben Verbindung haengen, sie steht nur
-    // woanders - darum kuemmert sich rerank().
-    if (state.lastPayload) rerank();
+
+    // Zurueck an den Listenanfang. Ohne das bleibt die Auswahl an der alten
+    // Verbindung haengen - und weil die Karte ueber der Liste genau diese
+    // Auswahl zeigt, aendert sich im halben Bild nichts, obwohl die Liste
+    // laengst neu sortiert ist. Es sah dann aus, als greife die Sortierung
+    // erst bei der naechsten Suche.
+    if (state.lastPayload) rerank({ keepSelection: false });
   });
   applySort();
 }
@@ -858,14 +862,25 @@ async function runSearch() {
   }
 }
 
-/** Neu bewerten ohne neue Netzabfrage - z.B. nach Moduswechsel. */
-function rerank() {
+/**
+ * Neu bewerten ohne neue Netzabfrage - z.B. nach Moduswechsel.
+ *
+ * @param {{keepSelection?: boolean}} [opts]
+ *   keepSelection=false springt zurueck an den Listenanfang. Gedacht fuer die
+ *   ausdrueckliche Umsortierung: dort ist die Frage "was steht jetzt oben",
+ *   und die Karte ueber der Liste soll das auch zeigen. Bei Modus- und
+ *   Reglerwechseln bleibt die Auswahl dagegen an ihrer Verbindung haengen -
+ *   da hat man sich fuer eine bestimmte entschieden und schraubt nur an der
+ *   Reihenfolge drumherum.
+ */
+function rerank(opts) {
+  const { keepSelection = true } = opts || {};
   const payload = state.lastPayload;
   if (!payload) return;
 
   // Die Auswahl haengt an der Verbindung, nicht an ihrer Position: nach
   // einem Moduswechsel oder einer nachgeladenen Seite steht sie woanders.
-  const selected = state.ranked[state.selectedIndex]?.journey ?? null;
+  const selected = keepSelection ? (state.ranked[state.selectedIndex]?.journey ?? null) : null;
 
   const ranked = rank(payload.journeys, {
     mode: state.mode,
