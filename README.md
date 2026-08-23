@@ -406,18 +406,35 @@ Start und Ziel. Die Zugposition selbst ist **rot**: alle Live-Züge des
 Ausschnitts sind grün, und der eigene ging darin unter, obwohl er der einzige
 ist, den man wirklich sucht.
 
-Wie der Punkt zustande kommt, hängt davon ab, ob es eine gemeldete Position
-gibt:
+Gezeichnet wird der Zug **genau einmal**, und wer ihn zeichnet, entscheidet
+sich bei jedem Bildaufbau neu — danach, ob er gerade unter den Live-Zügen des
+Ausschnitts ist (`RouteMap.trackedLiveTrain()`):
 
-- **Gemeldet.** Der Zug steckt in den Live-Zügen des Ausschnitts. Dann wird er
-  dort anhand von `jid` bzw. Zugnummer erkannt und rot statt grün gezeichnet —
-  ein zweiter, eigener Marker an derselben Stelle wäre nur Dopplung.
-- **Hochgerechnet.** Ist keine Position gemeldet, gibt es auch keinen
-  Live-Punkt. Dann setzt die Verfolgung einen eigenen, **hohlen** roten Marker
-  auf die aus dem Fahrplan interpolierte Stelle. Hohl, damit „geschätzt"
-  ablesbar bleibt. Für die Hochrechnung wird der Restfahrplan um die bekannte
-  Verspätung verschoben; sonst läge ein verspäteter Zug ausserhalb jedes
-  Zeitfensters und wäre gar nicht auffindbar.
+- **Ist er dabei**, färbt ihn die Live-Ebene rot statt grün. Ein zweiter,
+  eigener Marker an derselben Stelle wäre nur Dopplung.
+- **Ist er nicht dabei**, setzt die Verfolgung einen eigenen roten Marker auf
+  die zuletzt bekannte Stelle — gefüllt bei gemeldeter, hohl bei aus dem
+  Fahrplan hochgerechneter Position.
+
+Der zweite Fall ist nicht der Ausnahmefall: die Positionsantwort ist auf 40
+Züge im Ausschnitt gedeckelt. Zoomt man heraus, fällt der eigene Zug regelmäßig
+heraus — dann übernimmt sofort der eigene Marker, statt dass der verfolgte Zug
+verschwindet.
+
+Dass die Entscheidung beim Zeichnen fällt und nicht in der Verfolgung, ist
+wichtig: die Live-Züge wechseln bei jedem Schwenk und Zoom, die Verfolgung
+rechnet nur alle 30 s. Aus veralteten Daten entschieden, blieb der Punkt grün
+und der eigene Marker doppelte ihn.
+
+**Wiedererkannt** wird der Zug über `sameTrain()` — Bezeichnung („ICE 516"),
+ersatzweise die blosse Nummer, wenn der Positionsmeldung die Gattung fehlt.
+Die `jid` taugt dafür nur bedingt: HAFAS baut sie pro Anfrage neu auf, die
+Kennung aus der Verbindungssuche und die aus der Positionsmeldung sind deshalb
+in aller Regel verschieden.
+
+Für die Hochrechnung wird der Restfahrplan um die bekannte Verspätung
+verschoben; sonst läge ein verspäteter Zug ausserhalb jedes Zeitfensters und
+wäre gar nicht auffindbar.
 
 **Mitfahren (GPS)** schaltet `watchPosition` dazu: die Position landet auf der
 Karte, und die Route wird zugeordnet — „Zwischen Augsburg Hbf und Günzburg —

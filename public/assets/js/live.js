@@ -26,7 +26,7 @@
  */
 
 import { api } from './api.js';
-import { geometryOf, trainLabel } from './map.js';
+import { geometryOf, trainLabel, sameTrain } from './map.js';
 
 const REFRESH_MS = 30_000;
 
@@ -406,13 +406,41 @@ export class LiveTracker {
     const lastStops = trains[trains.length - 1]?.stops || [];
     const last = [...lastStops].reverse().find((s) => s.lat != null);
 
+    // Der Abschnitt, in dem man gerade sitzt. Die Kennung geht getrennt von
+    // der Position mit: die Karte muss den Zug in ihrer Live-Ebene bei JEDEM
+    // Schwenk und Zoom wiedererkennen können, nicht nur alle 30 s, wenn hier
+    // neu gerechnet wird.
+    const current = this.currentEntry();
+
     this.map.setTrackedRoute({
       geometry,
       from: first ? [first.lat, first.lon] : null,
       to: last ? [last.lat, last.lon] : null,
       label: `${trains[0]?.from?.name || ''} → ${trains[trains.length - 1]?.to?.name || ''}`,
+      train: current ? {
+        jid: current.jid || null,
+        category: current.leg.category || '',
+        trainNumber: current.leg.trainNumber || '',
+        name: current.leg.name || '',
+      } : null,
       position: this.trainPosition(),
     });
+  }
+
+  /**
+   * Der Zugabschnitt, in dem man gerade sitzt - oder null, wenn man gerade
+   * umsteigt oder noch gar nicht losgefahren ist.
+   */
+  currentEntry() {
+    const now = Date.now();
+    for (const entry of this.legs) {
+      const dep = Date.parse(entry.leg.departureReal || entry.leg.departure || '');
+      const arr = Date.parse(entry.leg.arrivalReal || entry.leg.arrival || '');
+      if (Number.isFinite(dep) && Number.isFinite(arr) && now >= dep && now <= arr) {
+        return entry;
+      }
+    }
+    return null;
   }
 
   /**
@@ -421,44 +449,32 @@ export class LiveTracker {
    * Zwei Wege, in dieser Reihenfolge:
    *
    *   1. Eine GEMELDETE Position. Die Karte hält ohnehin die Live-Züge des
-   *      Ausschnitts vor; passt einer davon zur Zugnummer, ist das die
-   *      genaueste Auskunft, die zu haben ist.
+   *      Ausschnitts vor; passt einer davon zum Zug, ist das die genaueste
+   *      Auskunft, die zu haben ist.
    *   2. Sonst aus dem Fahrplan HOCHGERECHNET: zwischen dem letzten
    *      passierten und dem nächsten Halt linear nach Zeit interpoliert,
    *      mit Ist-Zeiten wo vorhanden. Das ist eine Schätzung und wird auch
    *      so gekennzeichnet — aber besser als gar kein Punkt, denn gemeldete
    *      Positionen gibt es nur im aktuellen Kartenausschnitt.
+   *
+   * Welcher der beiden Punkte am Ende gezeichnet wird, entscheidet die
+   * Karte - sie kennt die Live-Züge des Augenblicks, hier ist der Stand bis
+   * zu 30 s alt. Siehe RouteMap.trackedLiveTrain().
    */
   trainPosition() {
     const now = Date.now();
 
-    // Der Abschnitt, in dem man gerade sitzt.
-    let current = null;
-    for (const entry of this.legs) {
-      const dep = Date.parse(entry.leg.departureReal || entry.leg.departure || '');
-      const arr = Date.parse(entry.leg.arrivalReal || entry.leg.arrival || '');
-      if (Number.isFinite(dep) && Number.isFinite(arr) && now >= dep && now <= arr) {
-        current = entry;
-        break;
-      }
-    }
+    const current = this.currentEntry();
     if (!current) return null;
 
     const label = trainLabel(current.leg);
 
-    // Kennung des eigenen Zuges. Sie geht mit an die Karte, damit die
-    // Live-Zug-Ebene denselben Zug nicht noch einmal als gewöhnlichen
-    // grünen Punkt über den eigenen Positionsmarker zeichnet.
-    const num = String(current.leg.trainNumber || '');
-    const id = { jid: current.jid || null, trainNumber: num || null };
-
     // 1. Gemeldete Position aus den Live-Zügen der Karte.
-    const live = (this.map?.liveTrains || []).find((t) =>
-      (t.jid && t.jid === current.jid) ||
-      (num !== '' && String(t.trainNumber || '') === num)
+    const live = (this.map?.liveTrains || []).find(
+      (t) => t.lat != null && t.lon != null && sameTrain(current.leg, t)
     );
-    if (live && live.lat != null && live.lon != null) {
-      return { lat: live.lat, lon: live.lon, label, estimated: false, ...id };
+    if (live) {
+      return { lat: live.lat, lon: live.lon, label, estimated: false };
     }
 
     // 2. Aus dem Fahrplan hochrechnen.
@@ -493,7 +509,6 @@ export class LiveTracker {
         lon: stops[i].lon + (stops[i + 1].lon - stops[i].lon) * f,
         label,
         estimated: true,
-        ...id,
       };
     }
 
@@ -502,7 +517,7 @@ export class LiveTracker {
     const last = stops[stops.length - 1];
     const lastTime = timeOf(last, 'arr');
     if (Number.isFinite(lastTime) && now >= lastTime) {
-      return { lat: last.lat, lon: last.lon, label, estimated: true, ...id };
+      return { lat: last.lat, lon: last.lon, label, estimated: true };
     }
     return null;
   }

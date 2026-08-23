@@ -1137,20 +1137,28 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 /* Die Zugposition ist ROT, nicht grün wie die Linie — grün sind auf der
    Karte alle Live-Züge, der eigene ging darin unter.
 
-   Gezeichnet wird hier nur noch die HOCHGERECHNETE Position: ist der Zug
-   unter den Live-Zügen des Ausschnitts, zeigt ihn schon die Live-Ebene,
-   dort rot markiert (`.map__train.is-tracked`). Hohl statt gefüllt, damit
-   „geschätzt" auch ohne Vergleichspunkt daneben ablesbar bleibt. */
-.map__tracked-train.is-estimated .map__tracked-train-halo {
+   Dieser Marker erscheint nur, wenn der Zug NICHT unter den Live-Zügen des
+   Ausschnitts ist (siehe RouteMap.trackedLiveTrain) — sonst zeichnet ihn
+   schon die Live-Ebene, dort rot markiert (`.map__train.is-tracked`). */
+.map__tracked-train-halo {
   fill: var(--rose);
-  opacity: 0.14;
+  opacity: 0.28;
 }
 
+.map__tracked-train-dot {
+  fill: var(--rose);
+  stroke: var(--map-stop-ring);
+  stroke-width: 2;
+}
+
+/* Hochgerechnete Position: hohl statt gefüllt, damit „geschätzt" ablesbar
+   bleibt. */
 .map__tracked-train.is-estimated .map__tracked-train-dot {
   fill: var(--map-stop-fill);
   stroke: var(--rose);
-  stroke-width: 2;
 }
+
+.map__tracked-train.is-estimated .map__tracked-train-halo { opacity: 0.14; }
 
 @media (prefers-reduced-motion: no-preference) {
   .map__tracked-train-halo {

@@ -100,6 +100,36 @@ export function trainLabel(t) {
   return cat || 'Zug';
 }
 
+/**
+ * Sind das zwei Meldungen desselben Zuges?
+ *
+ * Die `jid` waere die eindeutige Antwort, taugt aber nur INNERHALB einer
+ * HAFAS-Antwort: sie wird pro Anfrage neu aufgebaut, die Kennung aus der
+ * Verbindungssuche und die aus der Positionsmeldung sind deshalb in aller
+ * Regel verschieden. Verglichen wird darum die Bezeichnung ("ICE 516") und
+ * ersatzweise die blosse Nummer - der Positionsmeldung fehlt manchmal die
+ * Gattung. Widersprechen sich die Gattungen, ist es nicht derselbe Zug.
+ *
+ * @param {?object} a Zug mit {jid, category, trainNumber, name}
+ * @param {?object} b dito
+ */
+export function sameTrain(a, b) {
+  if (!a || !b) return false;
+  if (a.jid && b.jid && a.jid === b.jid) return true;
+
+  const norm = (v) => String(v || '').replace(/\s+/g, '').toUpperCase();
+
+  const la = norm(trainLabel(a));
+  if (la !== '' && la === norm(trainLabel(b))) return true;
+
+  const ca = norm(a.category);
+  const cb = norm(b.category);
+  if (ca !== '' && cb !== '' && ca !== cb) return false;
+
+  const na = norm(a.trainNumber);
+  return na !== '' && na === norm(b.trainNumber);
+}
+
 export function geometryOf(journey) {
   const parts = [];
   for (const leg of journey.legs || []) {
@@ -537,6 +567,28 @@ export class RouteMap {
   setTrackedRoute(route) {
     this.tracked = route || null;
     if (this.built) this.render();
+  }
+
+  /**
+   * Der verfolgte Zug unter den Live-Zuegen des Ausschnitts - oder null.
+   *
+   * Null heisst nicht "faehrt nicht", sondern nur "gerade keine Position
+   * gemeldet": die Antwort ist auf 40 Zuege im Ausschnitt gedeckelt, beim
+   * Herauszoomen faellt der eigene Zug also regelmaessig heraus.
+   *
+   * Beide Zeichenebenen fragen hier - so faellt die Entscheidung "Live-Punkt
+   * einfaerben ODER eigenen Marker setzen" in EINEM Renderdurchlauf aus
+   * denselben Daten. Vorher steckte sie in der Positionsmeldung aus live.js,
+   * die nur alle 30 s neu berechnet wird: beim Schwenken und Zoomen war sie
+   * dadurch veraltet, der Punkt blieb gruen und der eigene Marker doppelte
+   * ihn - oder der Zug verschwand beim Herauszoomen ganz.
+   */
+  trackedLiveTrain() {
+    const id = this.tracked?.train;
+    if (!id) return null;
+    return this.liveTrains.find(
+      (t) => t.lat != null && t.lon != null && sameTrain(id, t)
+    ) || null;
   }
 
   /** Ausschnitt auf die verfolgte Route setzen. */
@@ -1009,19 +1061,21 @@ export class RouteMap {
       g.append(c);
     }
 
-    // Zugposition - aber NUR die hochgerechnete.
+    // Zugposition - nur, wenn die Live-Ebene den Zug nicht ohnehin zeigt.
     //
-    // Ist der eigene Zug unter den Live-Zuegen des Ausschnitts, zeichnet ihn
-    // schon die Live-Ebene, dort rot markiert (.map__train.is-tracked). Ein
-    // zweiter, groesserer Punkt an derselben Stelle waere blosse Dopplung.
+    // Ist er dort, ist er auch dort rot markiert; ein zweiter, groesserer
+    // Punkt an derselben Stelle waere blosse Dopplung. Faellt er aus der
+    // Antwort heraus - typisch beim Herauszoomen, die Antwort endet bei 40
+    // Zuegen im Ausschnitt -, uebernimmt dieser Marker sofort wieder, statt
+    // dass der verfolgte Zug bis zur naechsten Auffrischung verschwindet.
     //
-    // Bleibt der Fall, dass keine Position gemeldet ist - dann rechnet
-    // live.js sie aus dem Fahrplan hoch, es gibt keinen Live-Punkt, und
-    // dieser hohle Marker ist die einzige Anzeige.
-    if (t.position && t.position.estimated) {
+    // `estimated` heisst: aus dem Fahrplan hochgerechnet, nicht gemeldet -
+    // das sagt der Tooltip auch so, und der Punkt bleibt dabei hohl.
+    if (t.position && !this.trackedLiveTrain()) {
       const [x, y] = toPx([t.position.lat, t.position.lon]);
       const marker = document.createElementNS(NS, 'g');
-      marker.setAttribute('class', 'map__tracked-train is-estimated');
+      marker.setAttribute('class',
+        'map__tracked-train' + (t.position.estimated ? ' is-estimated' : ''));
 
       const halo = document.createElementNS(NS, 'circle');
       halo.setAttribute('cx', x.toFixed(1));
@@ -1038,8 +1092,9 @@ export class RouteMap {
       marker.append(dot);
 
       const title = document.createElementNS(NS, 'title');
-      title.textContent =
-        `${t.position.label || 'Zug'} — Position aus dem Fahrplan geschätzt`;
+      title.textContent = t.position.estimated
+        ? `${t.position.label || 'Zug'} — Position aus dem Fahrplan geschätzt`
+        : `${t.position.label || 'Zug'} — gemeldete Position`;
       marker.append(title);
 
       g.append(marker);
@@ -1077,14 +1132,11 @@ export class RouteMap {
   }
 
   renderLiveTrains(svg, w, h, toPx) {
-    // Der gerade verfolgte Zug steckt auch in dieser Liste. Er wird
-    // markiert, damit er nicht als gruener Punkt ueber seinem eigenen roten
-    // Positionsmarker landet - siehe .map__train.is-tracked im Stylesheet.
-    const tracked = this.tracked?.position || null;
-    const isTracked = (t) => !!tracked && (
-      (!!tracked.jid && t.jid === tracked.jid) ||
-      (!!tracked.trainNumber && String(t.trainNumber || '') === String(tracked.trainNumber))
-    );
+    // Der gerade verfolgte Zug steckt auch in dieser Liste - er bekommt eine
+    // eigene Farbe, damit man ihn zwischen den anderen findet. Verglichen
+    // wird die Objektidentitaet: trackedLiveTrain() liefert genau eines der
+    // Elemente aus liveTrains oder null.
+    const own = this.trackedLiveTrain();
 
     for (const t of this.liveTrains) {
       if (t.lat == null || t.lon == null) continue;
@@ -1094,7 +1146,7 @@ export class RouteMap {
       const g = document.createElementNS(NS, 'g');
       g.setAttribute('class', 'map__train'
         + (t.onRoute ? ' is-onroute' : '')
-        + (isTracked(t) ? ' is-tracked' : ''));
+        + (t === own ? ' is-tracked' : ''));
       if (t.jid) {
         g.dataset.jid = t.jid;
         g.setAttribute('tabindex', '0');
