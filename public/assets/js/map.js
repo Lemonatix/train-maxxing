@@ -130,6 +130,62 @@ export function sameTrain(a, b) {
   return na !== '' && na === norm(b.trainNumber);
 }
 
+/**
+ * Der Punkt auf einem Linienzug, der `pt` am naechsten liegt - oder null,
+ * wenn der Linienzug keine Strecke hergibt.
+ *
+ * Gebraucht fuer die aus dem Fahrplan hochgerechnete Zugposition: die wird
+ * zwischen zwei HALTEN interpoliert, also auf der Luftlinie. Wo die Strecke
+ * einen Bogen macht - Rheintal, Gotthard, jede Ausweichkurve -, liegt der
+ * Punkt dadurch sichtbar neben der gezeichneten Linie. Auf den Linienzug
+ * gezogen sitzt er immer da, wo der Zug auch faehrt.
+ *
+ * Gerechnet wird in Gradkoordinaten mit einem Breitenausgleich fuer die
+ * Laenge. Ueber die Laenge eines Streckenabschnitts ist das genau genug und
+ * spart die Projektion - fuer einen Naehe-Vergleich reicht es allemal.
+ *
+ * @param {[number, number]} pt    [lat, lon]
+ * @param {Array<Array<[number, number]>>} parts Linienzuege wie in geometryOf()
+ * @returns {?[number, number]}
+ */
+export function snapToLine(pt, parts) {
+  const [lat, lon] = pt;
+  // Laengengrade ruecken polwaerts zusammen - sonst zoege es den Punkt in
+  // noerdlichen Breiten in die falsche Richtung.
+  const kx = Math.cos((lat * Math.PI) / 180);
+
+  let best = null;
+  let bestDist = Infinity;
+
+  for (const part of parts || []) {
+    for (let i = 0; i < part.length - 1; i++) {
+      const [aLat, aLon] = part[i];
+      const [bLat, bLon] = part[i + 1];
+
+      // Segment relativ zum gesuchten Punkt, der damit im Ursprung liegt.
+      const ax = (aLon - lon) * kx;
+      const ay = aLat - lat;
+      const dx = (bLon - aLon) * kx;
+      const dy = bLat - aLat;
+
+      const len2 = dx * dx + dy * dy;
+      // Lotfusspunkt, auf das Segment begrenzt - sonst laege er auf der
+      // Verlaengerung und damit ausserhalb der Strecke.
+      const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2));
+
+      const px = ax + dx * t;
+      const py = ay + dy * t;
+      const dist = px * px + py * py;
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = [aLat + (bLat - aLat) * t, aLon + (bLon - aLon) * t];
+      }
+    }
+  }
+  return best;
+}
+
 export function geometryOf(journey) {
   const parts = [];
   for (const leg of journey.legs || []) {
@@ -388,7 +444,7 @@ export class RouteMap {
       // Züge zuerst: sie liegen über den Linien.
       const train = hit.closest?.('.map__train');
       if (train?.dataset.jid) {
-        const t = this.liveTrains.find((x) => x.jid === train.dataset.jid);
+        const t = this.trainsOnMap().trains.find((x) => x.jid === train.dataset.jid);
         if (t && this.onTrainClick) {
           this.onTrainClick(t);
           return;
@@ -589,6 +645,28 @@ export class RouteMap {
     return this.liveTrains.find(
       (t) => t.lat != null && t.lon != null && sameTrain(id, t)
     ) || null;
+  }
+
+  /**
+   * Die Zuege, die auf der Karte stehen: die Live-Zuege des Ausschnitts -
+   * und, falls der verfolgte Zug nicht darunter ist, er selbst an seiner
+   * zuletzt bekannten Stelle.
+   *
+   * Zeichnen und Antippen fragen dieselbe Liste, sonst waere der ergaenzte
+   * Punkt zwar zu sehen, aber nicht anzufassen.
+   *
+   * @returns {{trains: object[], own: ?object}} own = der verfolgte Zug
+   */
+  trainsOnMap() {
+    const trains = this.liveTrains.slice();
+    let own = this.trackedLiveTrain();
+
+    if (!own && this.tracked?.train && this.tracked?.position) {
+      const p = this.tracked.position;
+      own = { ...this.tracked.train, lat: p.lat, lon: p.lon, estimated: p.estimated };
+      trains.push(own);
+    }
+    return { trains, own };
   }
 
   /** Ausschnitt auf die verfolgte Route setzen. */
@@ -1061,45 +1139,6 @@ export class RouteMap {
       g.append(c);
     }
 
-    // Zugposition - nur, wenn die Live-Ebene den Zug nicht ohnehin zeigt.
-    //
-    // Ist er dort, ist er auch dort rot markiert; ein zweiter, groesserer
-    // Punkt an derselben Stelle waere blosse Dopplung. Faellt er aus der
-    // Antwort heraus - typisch beim Herauszoomen, die Antwort endet bei 40
-    // Zuegen im Ausschnitt -, uebernimmt dieser Marker sofort wieder, statt
-    // dass der verfolgte Zug bis zur naechsten Auffrischung verschwindet.
-    //
-    // `estimated` heisst: aus dem Fahrplan hochgerechnet, nicht gemeldet -
-    // das sagt der Tooltip auch so, und der Punkt bleibt dabei hohl.
-    if (t.position && !this.trackedLiveTrain()) {
-      const [x, y] = toPx([t.position.lat, t.position.lon]);
-      const marker = document.createElementNS(NS, 'g');
-      marker.setAttribute('class',
-        'map__tracked-train' + (t.position.estimated ? ' is-estimated' : ''));
-
-      const halo = document.createElementNS(NS, 'circle');
-      halo.setAttribute('cx', x.toFixed(1));
-      halo.setAttribute('cy', y.toFixed(1));
-      halo.setAttribute('r', '10');
-      halo.setAttribute('class', 'map__tracked-train-halo');
-      marker.append(halo);
-
-      const dot = document.createElementNS(NS, 'circle');
-      dot.setAttribute('cx', x.toFixed(1));
-      dot.setAttribute('cy', y.toFixed(1));
-      dot.setAttribute('r', '5');
-      dot.setAttribute('class', 'map__tracked-train-dot');
-      marker.append(dot);
-
-      const title = document.createElementNS(NS, 'title');
-      title.textContent = t.position.estimated
-        ? `${t.position.label || 'Zug'} — Position aus dem Fahrplan geschätzt`
-        : `${t.position.label || 'Zug'} — gemeldete Position`;
-      marker.append(title);
-
-      g.append(marker);
-    }
-
     svg.append(g);
   }
 
@@ -1132,13 +1171,15 @@ export class RouteMap {
   }
 
   renderLiveTrains(svg, w, h, toPx) {
-    // Der gerade verfolgte Zug steckt auch in dieser Liste - er bekommt eine
-    // eigene Farbe, damit man ihn zwischen den anderen findet. Verglichen
-    // wird die Objektidentitaet: trackedLiveTrain() liefert genau eines der
-    // Elemente aus liveTrains oder null.
-    const own = this.trackedLiveTrain();
+    // Der verfolgte Zug bekommt eine eigene Farbe, damit man ihn zwischen
+    // den anderen findet - und er wird IMMER gezeichnet, notfalls aus seiner
+    // zuletzt bekannten Position ergaenzt. Das ist kein Randfall: die
+    // Positionsantwort endet bei 40 Zuegen im Ausschnitt, beim Herauszoomen
+    // faellt er also regelmaessig heraus. Sonst waere ausgerechnet der Zug
+    // unsichtbar, den man verfolgt.
+    const { trains, own } = this.trainsOnMap();
 
-    for (const t of this.liveTrains) {
+    for (const t of trains) {
       if (t.lat == null || t.lon == null) continue;
       const [x, y] = toPx([t.lat, t.lon]);
       if (x < 0 || y < 0 || x > w || y > h) continue;
@@ -1146,7 +1187,10 @@ export class RouteMap {
       const g = document.createElementNS(NS, 'g');
       g.setAttribute('class', 'map__train'
         + (t.onRoute ? ' is-onroute' : '')
-        + (t === own ? ' is-tracked' : ''));
+        + (t === own ? ' is-tracked' : '')
+        // Hochgerechnete Position: derselbe Punkt, nur hohl - damit man
+        // sieht, dass die Stelle geschaetzt und nicht gemeldet ist.
+        + (t.estimated ? ' is-estimated' : ''));
       if (t.jid) {
         g.dataset.jid = t.jid;
         g.setAttribute('tabindex', '0');
@@ -1180,6 +1224,7 @@ export class RouteMap {
 
       const title = document.createElementNS(NS, 'title');
       title.textContent = `${trainLabel(t)}${t.direction ? ' → ' + t.direction : ''}`
+        + (t.estimated ? ' — Position aus dem Fahrplan geschätzt' : '')
         + (t.jid ? ' (antippen für Details)' : '');
       g.append(title);
 

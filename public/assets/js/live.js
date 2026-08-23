@@ -26,7 +26,7 @@
  */
 
 import { api } from './api.js';
-import { geometryOf, trainLabel, sameTrain } from './map.js';
+import { geometryOf, trainLabel, sameTrain, snapToLine } from './map.js';
 
 const REFRESH_MS = 30_000;
 
@@ -422,6 +422,7 @@ export class LiveTracker {
         category: current.leg.category || '',
         trainNumber: current.leg.trainNumber || '',
         name: current.leg.name || '',
+        direction: current.leg.direction || '',
       } : null,
       position: this.trainPosition(),
     });
@@ -497,19 +498,30 @@ export class LiveTracker {
       return Number.isFinite(t) ? t + shift : NaN;
     };
 
+    // Der gezeichnete Streckenverlauf des Abschnitts. Er ist der Massstab
+    // dafuer, wo der Punkt liegen darf - siehe unten.
+    const line = Array.isArray(current.leg.geometry) && current.leg.geometry.length > 1
+      ? [current.leg.geometry]
+      : [];
+
     for (let i = 0; i < stops.length - 1; i++) {
       const t0 = timeOf(stops[i], 'dep');
       const t1 = timeOf(stops[i + 1], 'arr');
       if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) continue;
       if (now < t0 || now > t1) continue;
 
+      // Zeitanteil zwischen den beiden Halten - aber auf der LUFTLINIE.
       const f = (now - t0) / (t1 - t0);
-      return {
-        lat: stops[i].lat + (stops[i + 1].lat - stops[i].lat) * f,
-        lon: stops[i].lon + (stops[i + 1].lon - stops[i].lon) * f,
-        label,
-        estimated: true,
-      };
+      const guess = [
+        stops[i].lat + (stops[i + 1].lat - stops[i].lat) * f,
+        stops[i].lon + (stops[i + 1].lon - stops[i].lon) * f,
+      ];
+
+      // Deshalb auf den Streckenverlauf ziehen: zwischen zwei Halten macht
+      // die Strecke Boegen, die Luftlinie schneidet sie ab. Ungezogen sass
+      // der Punkt sichtbar neben der Linie, auf der er fahren sollte.
+      const [lat, lon] = snapToLine(guess, line) || guess;
+      return { lat, lon, label, estimated: true };
     }
 
     // Zwischen dem letzten Halt des Laufs und der tatsächlichen Ankunft:

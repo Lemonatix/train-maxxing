@@ -406,35 +406,39 @@ Start und Ziel. Die Zugposition selbst ist **rot**: alle Live-Züge des
 Ausschnitts sind grün, und der eigene ging darin unter, obwohl er der einzige
 ist, den man wirklich sucht.
 
-Gezeichnet wird der Zug **genau einmal**, und wer ihn zeichnet, entscheidet
-sich bei jedem Bildaufbau neu — danach, ob er gerade unter den Live-Zügen des
-Ausschnitts ist (`RouteMap.trackedLiveTrain()`):
+Der Zug ist dabei **ein einziger Punkt** — derselbe kleine Punkt wie jeder
+andere Live-Zug, nur rot statt grün. Einen zweiten, größeren Marker gibt es
+nicht; er stand nur dem eigentlichen Punkt im Weg.
 
-- **Ist er dabei**, färbt ihn die Live-Ebene rot statt grün. Ein zweiter,
-  eigener Marker an derselben Stelle wäre nur Dopplung.
-- **Ist er nicht dabei**, setzt die Verfolgung einen eigenen roten Marker auf
-  die zuletzt bekannte Stelle — gefüllt bei gemeldeter, hohl bei aus dem
-  Fahrplan hochgerechneter Position.
+Er wird **immer** gezeichnet, solange verfolgt wird. Das ist nicht
+selbstverständlich, denn die Positionsantwort ist auf 40 Züge im Ausschnitt
+gedeckelt — zoomt man heraus, fällt der eigene Zug regelmäßig heraus. Steht er
+nicht in der Antwort, ergänzt ihn `RouteMap.trainsOnMap()` aus der zuletzt
+bekannten Position, mitsamt Tooltip und Antippbarkeit. Sonst wäre ausgerechnet
+der Zug unsichtbar, um den es geht.
 
-Der zweite Fall ist nicht der Ausnahmefall: die Positionsantwort ist auf 40
-Züge im Ausschnitt gedeckelt. Zoomt man heraus, fällt der eigene Zug regelmäßig
-heraus — dann übernimmt sofort der eigene Marker, statt dass der verfolgte Zug
-verschwindet.
+War die Position aus dem Fahrplan hochgerechnet statt gemeldet, bleibt der
+Punkt **hohl** und der Tooltip sagt es dazu. Für die Hochrechnung wird der
+Restfahrplan um die bekannte Verspätung verschoben; sonst läge ein verspäteter
+Zug ausserhalb jedes Zeitfensters und wäre gar nicht auffindbar.
 
-Dass die Entscheidung beim Zeichnen fällt und nicht in der Verfolgung, ist
+Hochgerechnet wird zwischen zwei **Halten**, also auf der Luftlinie — und die
+schneidet jeden Bogen ab. Der Punkt sass dadurch sichtbar neben der Linie, auf
+der er fahren sollte, im Extremfall zig Kilometer. `snapToLine()` zieht ihn
+deshalb auf den gezeichneten Streckenverlauf des Abschnitts: Lotfusspunkt auf
+das nächste Segment, auf das Segment begrenzt. Gemeldete Positionen bleiben
+unangetastet — die liegen ohnehin auf dem Gleis.
+
+Dass die Ergänzung beim Zeichnen passiert und nicht in der Verfolgung, ist
 wichtig: die Live-Züge wechseln bei jedem Schwenk und Zoom, die Verfolgung
 rechnet nur alle 30 s. Aus veralteten Daten entschieden, blieb der Punkt grün
-und der eigene Marker doppelte ihn.
+oder verschwand beim Herauszoomen.
 
 **Wiedererkannt** wird der Zug über `sameTrain()` — Bezeichnung („ICE 516"),
 ersatzweise die blosse Nummer, wenn der Positionsmeldung die Gattung fehlt.
 Die `jid` taugt dafür nur bedingt: HAFAS baut sie pro Anfrage neu auf, die
 Kennung aus der Verbindungssuche und die aus der Positionsmeldung sind deshalb
 in aller Regel verschieden.
-
-Für die Hochrechnung wird der Restfahrplan um die bekannte Verspätung
-verschoben; sonst läge ein verspäteter Zug ausserhalb jedes Zeitfensters und
-wäre gar nicht auffindbar.
 
 **Mitfahren (GPS)** schaltet `watchPosition` dazu: die Position landet auf der
 Karte, und die Route wird zugeordnet — „Zwischen Augsburg Hbf und Günzburg —
