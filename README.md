@@ -1,4 +1,4 @@
-# train-maxxing
+# train-maxxing (name to be changed)
 
 Vergleicht Zugverbindungen durch **Schweiz, Deutschland und Österreich** — nicht nur
 nach Preis und Dauer, sondern auch danach, in welchem Zug du sitzt. Mit Abo-Auswahl
