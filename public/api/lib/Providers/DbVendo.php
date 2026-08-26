@@ -335,7 +335,7 @@ final class DbVendo
             // die Live-Verfolgung.
             $remarks = [];
             foreach (($a['risNotizen'] ?? []) as $n) {
-                $txt = trim((string) ($n['value'] ?? ''));
+                $txt = Text::plain((string) ($n['value'] ?? ''));
                 if ($txt !== '' && !in_array($txt, $remarks, true)) {
                     $remarks[] = $txt;
                 }

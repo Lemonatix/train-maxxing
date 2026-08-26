@@ -1799,6 +1799,10 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   border-radius: var(--radius-xs);
   font-size: 0.76rem;
   color: var(--text-dim);
+  /* Die Meldungen sind meist dreiteilig ("Was ist los", "Grund", "Was heisst
+     das"). Text.php erhält die Absätze als Umbrüche — ohne pre-line würden
+     sie hier wieder zu einem Klumpen zusammenfallen. */
+  white-space: pre-line;
 }
 
 .live__msg-text { color: var(--text-muted); }
@@ -2079,6 +2083,38 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .badge--score { background: var(--purple-soft); color: var(--purple); }
 .badge--variant { background: var(--surface-inset); color: var(--text-dim); }
 .badge--rerouted { background: var(--amber-soft); color: var(--amber); }
+
+/* Die Kennzeichnung ist zugleich der Weg zurueck. */
+.badge--undo {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  border: 1px solid transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.badge--undo:hover { border-color: var(--amber); }
+
+.badge__undo-hint {
+  padding-left: 0.35rem;
+  border-left: 1px solid currentColor;
+  opacity: 0.75;
+}
+
+.live__undo {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.live__undo:hover { background: var(--amber-soft); }
 .badge--dticket { background: var(--db-red-soft); color: var(--db-red); }
 .badge--risky { background: var(--rose-soft); color: var(--rose); }
 .badge--tight { background: var(--amber-soft); color: var(--amber); }
@@ -2302,12 +2338,19 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .xfer__plat-line {
   fill: none;
   stroke: var(--text-muted);
-  stroke-width: 5;
+  stroke-width: 7;
   stroke-linecap: round;
-  opacity: 0.35;
+  opacity: 0.3;
 }
 
 .xfer__plat circle { fill: var(--text-muted); opacity: 0.45; }
+
+/* Gleisnummer auf einem Schild, wie auf einem Bahnhofsplan. */
+.xfer__plat-tag {
+  fill: var(--surface-card);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
 
 .xfer__plat text {
   font-family: var(--font-mono);
@@ -2319,26 +2362,62 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .xfer__plat.is-to   .xfer__plat-line { stroke: var(--green);  opacity: 1; }
 .xfer__plat.is-from circle { fill: var(--accent); opacity: 1; }
 .xfer__plat.is-to circle { fill: var(--green); opacity: 1; }
+
+.xfer__plat.is-from .xfer__plat-tag { stroke: var(--accent); }
+.xfer__plat.is-to .xfer__plat-tag { stroke: var(--green); }
 .xfer__plat.is-from text { fill: var(--accent); font-weight: 600; }
 .xfer__plat.is-to text { fill: var(--green); font-weight: 600; }
 
-/* Der Laufweg. Heller Untergrund darunter, damit er auch über einem
-   Bahnsteigbalken lesbar bleibt. */
+/* Der Laufweg: durchgezogen mit hellem Untergrund, damit er auch über einem
+   Bahnsteigbalken lesbar bleibt. Die Richtung sagen die Pfeilspitzen — eine
+   gestrichelte Linie allein lässt offen, wo der Weg anfängt. */
 .xfer__walk-casing {
   fill: none;
-  stroke: var(--surface-inset);
-  stroke-width: 5;
+  stroke: var(--map-casing);
+  stroke-width: 8;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .xfer__walk {
   fill: none;
-  stroke: var(--amber);
-  stroke-width: 2.5;
-  stroke-dasharray: 5 3;
+  stroke: var(--accent);
+  stroke-width: 4;
   stroke-linecap: round;
   stroke-linejoin: round;
+  opacity: 0.85;
+}
+
+.xfer__walk-arrow { fill: var(--surface-card); }
+
+.xfer__walk-end {
+  fill: var(--surface-card);
+  stroke-width: 3;
+}
+
+.xfer__walk-end.is-start { stroke: var(--accent); }
+.xfer__walk-end.is-end { stroke: var(--green); fill: var(--green); }
+
+/* Hinweis auf Treppe oder Aufzug, dort wo er liegt. */
+.xfer__mark-bg {
+  fill: var(--surface-card);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.xfer__mark-icon {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.xfer__mark-text {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  fill: var(--text);
 }
 
 .leg__alt-take {
@@ -2659,8 +2738,47 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 }
 
 /* Drei Spalten: Abschnitt, Meldung, Restdauer. Die Restdauer ist die Zahl,
-   die entscheidet, ob einen das noch betrifft — deshalb rechts und farbig. */
-.works__list .mvg-ticker__item { grid-template-columns: auto 1fr auto; }
+   die entscheidet, ob einen das noch betrifft — deshalb rechts und farbig.
+
+   `minmax(0, …)` bei den ersten beiden: ohne die Null als Untergrenze ist die
+   Spaltenbreite die INHALTSBREITE, und ein 300 Zeichen langer Meldungstext
+   zog die Zeile weit über den Rand der Seite hinaus. Mit ihr bleibt das
+   Raster in seinen Grenzen und der Text bricht um. */
+.works__list .mvg-ticker__item {
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: baseline;
+}
+
+/* Der Meldungstext füllt höchstens zwei Zeilen. Was nicht hineinpasst, endet
+   mit "…" — der vollständige Text steht als Tooltip an der Zeile. */
+.works__title {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  /* Lange Bahnhofs- und Streckennamen ohne Leerzeichen notfalls trennen,
+     statt sie aus dem Kasten laufen zu lassen. */
+  overflow-wrap: anywhere;
+}
+
+/* --- Die Baustellenkarte --------------------------------------------
+   Flacher als die Routenkarte: sie ist ein Überblick, keine Arbeitsfläche,
+   und sitzt in einem aufklappbaren Kasten, der nicht den halben Bildschirm
+   einnehmen soll.
+   ------------------------------------------------------------------- */
+.works__map {
+  margin: 0.6rem 0 0.2rem;
+  padding: 0.3rem;
+  box-shadow: none;
+}
+
+.works__map .map__viewport { height: 300px; }
+
+@media (max-width: 640px) {
+  .works__map .map__viewport { height: 220px; }
+}
 
 /* Der Abschnitt ist anklickbar und springt auf der Karte dorthin. */
 .works__jump {
@@ -2680,7 +2798,23 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .works__section {
   font-family: var(--font-mono);
   font-size: 0.72rem;
+  /* Auf breiten Schirmen in einer Zeile, auf schmalen lieber umbrechen als
+     die Nachbarspalte wegdrücken. */
   white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .works__section { white-space: normal; }
+
+  /* Auf dem Telefon untereinander statt in drei Spalten: nebeneinander
+     blieben für den Abschnitt keine dreissig Pixel. */
+  .works__list .mvg-ticker__item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+
+  .works__jump { justify-self: start; }
 }
 
 .mvg-ticker__until {
@@ -2773,13 +2907,24 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
      bei grösserer Schrift oder ausgefallener Systemschrift schoben sich
      Beschriftung und Nachbarfeld dadurch ineinander. Feste Spalten können
      das nicht, egal wie lang der Text wird. */
+  /*
+   * Datum und Uhrzeit nebeneinander — das Datum etwas breiter.
+   *
+   * Sie gehören zusammen und werden zusammen gelesen ("Montag um acht"),
+   * deshalb stehen sie in einer Zeile. Gleich breit dürfen sie dabei nicht
+   * sein: ein natives Datumsfeld will bei 16 px Schrift rund 165 px,
+   * die Uhrzeit kommt mit 127 aus. Zwei gleiche Spalten geben beiden 154 px
+   * — das Datum lief über, die Uhrzeit stand halb leer da.
+   *
+   * Die Spalten sind ausdrücklich als `minmax(0, …)` geschrieben. Ein blosses
+   * `1.3fr` heisst in Wahrheit `minmax(auto, 1.3fr)`, und dieses `auto` ist
+   * die INHALTSBREITE: ein Systemsteuerelement, das breiter sein will, zieht
+   * seine Spalte auf und schiebt das Raster über den Panelrand. Mit der
+   * Null als Untergrenze kann das nicht passieren.
+   */
   .row--options {
-    /* Auf dem Telefon fest zwei Spalten: auto-fit käme bei 320 px Innenbreite
-       auf zwei gleich breite: Datum braucht aber mehr Platz als die Uhrzeit
-       ("22.08.2026" gegen "12:31"), sonst wirkt das Zeitfeld halb leer —
-       Chrome zentriert den Inhalt nativer Datums- und Zeitfelder. */
-    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-    gap: 0.7rem 0.55rem;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    gap: 0.7rem 0.5rem;
   }
 
   /* Etwas flacher und links ausgerichtet — die Felder wirkten sonst wie
@@ -2788,46 +2933,29 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   .row--options input[type="time"],
   .row--options select {
     min-height: 44px;
-    padding: 0.5rem 0.6rem;
+    padding: 0.5rem 0.55rem;
     text-align: left;
   }
 
   /* iOS zeichnet Datums- und Zeitfelder als Systemsteuerelement und gibt
-     ihnen dabei die Breite ihres INHALTS — `width: 100%` wird schlicht
-     ignoriert. Im zweispaltigen Raster lief das Datumsfeld deshalb über
-     das Uhrzeitfeld, und die Uhrzeit stand rechts aus dem Panel heraus.
-     Ohne Systemaussehen gilt wieder die Rasterbreite.
+     ihnen dabei die Breite ihres INHALTS.
 
-     `-webkit-touch-callout` gibt es nur unter iOS — Android und Desktop
-     behalten damit ihre native Darstellung samt Kalendersymbol, das
-     `appearance: none` sonst mit abräumen würde. */
-  @supports (-webkit-touch-callout: none) {
-    .row--options input[type="date"],
-    .row--options input[type="time"] {
-      -webkit-appearance: none;
-      appearance: none;
-      display: block;
-      width: 100%;
-    }
+     Der naheliegende Griff dagegen ist `appearance: none`. Der behebt zwar
+     die Breite, nimmt dem Feld aber das Systemaussehen: der Wert sitzt dann
+     oben links statt mittig, das Kalendersymbol fehlt, und das Feld wirkt
+     leer, bis man es antippt. Genau das war die Rückmeldung.
 
-    /* Der angezeigte Wert steckt in einem eigenen Schattenknoten, der seine
-       Inhaltsbreite ebenfalls behält. Ohne die Regel rutscht er weiterhin
-       über den rechten Feldrand. */
-    .row--options input[type="date"]::-webkit-date-and-time-value,
-    .row--options input[type="time"]::-webkit-date-and-time-value {
-      display: block;
-      width: 100%;
-      min-width: 0;
-      margin: 0;
-      text-align: left;
-    }
-  }
-
-  /* Sicherheitsnetz, falls sich doch etwas breit macht: lieber am Feldrand
-     abschneiden als über das Nachbarfeld laufen. */
+     Deshalb hier nur die Breite begrenzen und dem Feld erlauben, schmaler
+     als sein Inhalt zu werden — `min-width: 0` ist der eigentliche Hebel,
+     weil ein Feld sonst nicht unter seine Inhaltsbreite schrumpft. Das
+     native Aussehen bleibt vollständig erhalten. */
   .row--options input[type="date"],
   .row--options input[type="time"] {
+    min-width: 0;
     max-width: 100%;
+    box-sizing: border-box;
+    /* Sicherheitsnetz: lieber am Feldrand abschneiden als über das
+       Nachbarfeld laufen. */
     overflow: hidden;
   }
 
@@ -2839,10 +2967,11 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
      würde sie hier nach unten verschieben. */
   .row--options .field--check { padding-bottom: 0; }
 
-  /* In einer halben Spalte hat "als Ankunftszeit" nicht immer Platz. Umbruch
-     erlauben statt über den Nachbarn hinauszulaufen. */
-  .row--options .check { white-space: normal; align-items: flex-start; }
-  .row--options .check input { margin-top: 0.15rem; }
+  /* "als Ankunftszeit" bekommt ebenfalls die ganze Breite: als Kästchen mit
+     Beschriftung braucht es keine Spalte für sich, und in der halben lief
+     der Text je nach Schrift um. */
+  .row--options .field--check { grid-column: 1 / -1; }
+  .row--options .check { white-space: normal; align-items: center; }
 
   input[type="text"], input[type="date"], input[type="time"],
   input[type="number"], select {
@@ -2983,6 +3112,22 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   .journey__time { font-size: 1.05rem; }
   .journey__times { gap: 0.35rem; }
   .badge { font-size: 0.64rem; }
+}
+
+/* --- Sehr schmale Telefone ------------------------------------------
+   Ab hier ist für Datum und Uhrzeit nebeneinander kein Platz mehr: das
+   Panel ist innen keine 300 px breit, und schon das Datumsfeld allein
+   braucht bei 16 px Schrift rund 165 davon. Es bekommt deshalb eine eigene
+   Zeile — dort kann es nicht überlaufen, egal wie gross die Systemschrift
+   eingestellt ist. Uhrzeit und Klasse rücken zusammen.
+
+   360 px und nicht 380: die verbreiteten Telefongrössen liegen bei 375 und
+   390 px, und dort passen beide Felder nebeneinander noch bequem. Bei 380
+   als Grenze hätte ausgerechnet das iPhone die Ausnahme bekommen.
+   ------------------------------------------------------------------- */
+@media (max-width: 360px) {
+  .row--options { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .row--options .field--date { grid-column: 1 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

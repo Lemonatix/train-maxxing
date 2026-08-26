@@ -60,7 +60,6 @@ const state = {
   // getrennt von state.products: auf der Karte will man oft nur den
   // Fernverkehr sehen, ohne die Verbindungssuche einzuschraenken.
   liveProducts: [],
-  showWorks: false,    // Bauarbeiten-Ebene auf der Karte
   // Laufzeit
   lastPayload: null,
   ranked: [],
@@ -118,7 +117,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // MVG-Stoerungsticker Muenchen einblenden, wenn der Endpoint Meldungen hat.
   initMvgTicker(document.getElementById('mvg-ticker'));
   // Bauarbeiten im Netz: Liste plus Kartenebene.
-  initWorks(document.getElementById('works'), map);
+  // Die Baustellen bringen ihre eigene Karte mit - sie gehoeren nicht auf
+  // die Routenkarte, siehe works.js.
+  initWorks(document.getElementById('works'));
 
   // Eine laufende Verfolgung ueberlebt Neuladen und neue Suchen.
   restoreTracked();
@@ -141,7 +142,7 @@ function loadSettings() {
     for (const key of [
       'mode', 'from', 'to', 'via', 'arrival', 'travelClass',
       'minChange', 'discounts', 'products',
-      'modelPrefs', 'routePrefs', 'speedWeight', 'liveTrains', 'liveProducts', 'showWorks',
+      'modelPrefs', 'routePrefs', 'speedWeight', 'liveTrains', 'liveProducts',
     ]) {
       if (saved[key] !== undefined) state[key] = saved[key];
     }
@@ -168,7 +169,7 @@ function saveSettings() {
         discounts: state.discounts, products: state.products,
         modelPrefs: state.modelPrefs, routePrefs: state.routePrefs,
         speedWeight: state.speedWeight, liveTrains: state.liveTrains,
-        liveProducts: state.liveProducts, showWorks: state.showWorks,
+        liveProducts: state.liveProducts,
       })
     );
   } catch {
@@ -244,17 +245,6 @@ function setupLiveToggle() {
     }
   });
   $('#live-filter')?.toggleAttribute('hidden', !state.liveTrains);
-
-  const works = $('#show-works');
-  if (works) {
-    works.checked = state.showWorks;
-    map.toggleWorks(state.showWorks);
-    works.addEventListener('change', (e) => {
-      state.showWorks = e.target.checked;
-      map.toggleWorks(state.showWorks);
-      saveSettings();
-    });
-  }
 }
 
 /**
@@ -930,6 +920,7 @@ function draw() {
     trackable: (journey) => LiveTracker.trackableLegs(journey).length > 0,
     tracked: () => live.journey,
     takeAlternative,
+    undoAlternative,
     loadPlatforms,
   });
   // Die Karte zeigt genau die Routen, die auch in der Liste stehen. Die
@@ -1061,6 +1052,37 @@ async function ensureFallbacks() {
 }
 
 /**
+ * Eine übernommene Alternative wieder zurücknehmen.
+ *
+ * Umdisponieren ist eine Entscheidung unter Zeitdruck — sie muss ohne
+ * Neusuche rückgängig zu machen sein. `spliceJourney()` hängt die
+ * ursprüngliche Verbindung an die neue, hier wird sie zurückgetauscht.
+ */
+function undoAlternative(journey) {
+  const back = journey?.original;
+  if (!back || !state.lastPayload) return;
+
+  const list = state.lastPayload.journeys;
+  const at = list.indexOf(journey);
+  if (at >= 0) list[at] = back;
+  else list.push(back);
+
+  rerank();
+
+  const idx = state.ranked.findIndex((e) => e.journey === back);
+  if (idx >= 0) {
+    state.selectedIndex = idx;
+    if (idx >= state.visible) {
+      state.visible = Math.min(
+        Math.ceil((idx + 1) / PAGE_SIZE) * PAGE_SIZE,
+        state.ranked.length
+      );
+    }
+  }
+  draw();
+}
+
+/**
  * Bahnsteige eines Bahnhofs holen, für den Umstiegsplan.
  *
  * BEWUSST ERST AUF ANFORDERUNG: die Daten kommen von Overpass, einem
@@ -1077,9 +1099,19 @@ async function loadPlatforms(lat, lon, from, to) {
   if (platformCache.has(key)) return platformCache.get(key);
 
   const promise = api.platforms(lat, lon, from, to)
-    .catch(() => ({ platforms: [], route: null }));
+    // Den Grund mitgeben: die Anzeige unterscheidet "Dienst gerade nicht
+    // erreichbar" von "Bahnhof nicht kartiert" - zweierlei für den Leser.
+    .catch(() => ({ platforms: [], route: null, error: 'Netzwerkfehler' }));
 
   platformCache.set(key, promise);
+
+  // Ein leeres Ergebnis nicht für die Sitzung festhalten: Overpass antwortet
+  // unter Last mit Zeitüberschreitungen, und ein einmaliger Aussetzer soll
+  // den Plan nicht bis zum Neuladen der Seite blockieren.
+  promise.then((res) => {
+    if (!res?.platforms?.length) platformCache.delete(key);
+  });
+
   return promise;
 }
 

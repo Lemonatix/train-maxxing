@@ -704,7 +704,23 @@ export class LiveTracker {
     const trains = this.journey.legs?.filter((l) => l.mode === 'train') || [];
     const to = trains[trains.length - 1]?.to?.name;
     if (from && to) title.append(el('span', 'live__route', `${from} → ${to}`));
-    if (this.journey.rerouted) title.append(el('span', 'live__rerouted', 'umdisponiert'));
+    if (this.journey.rerouted) {
+      const tag = el('span', 'live__rerouted', 'umdisponiert');
+      title.append(tag);
+      // Zurueck zur urspruenglichen Verbindung - im Zug will man eine
+      // Fehlentscheidung ohne Neusuche korrigieren koennen.
+      if (this.journey.original) {
+        const undo = el('button', 'live__undo', 'zurück');
+        undo.type = 'button';
+        undo.title = 'Wieder die ursprüngliche Verbindung verfolgen';
+        undo.addEventListener('click', () => {
+          const wasGps = this.gps;
+          this.start(this.journey.original);
+          if (wasGps) this.startGps();
+        });
+        title.append(undo);
+      }
+    }
     head.append(title);
 
     const ctl = el('div', 'live__ctl');
@@ -803,8 +819,11 @@ export class LiveTracker {
       ? `${(prog.metres / 1000).toFixed(1)} km`
       : `${Math.round(prog.metres)} m`;
 
+    // "in Zuerich HB", nicht "an Zuerich HB": Bahnhofsnamen tragen die
+    // Praeposition nicht mit, und "in" passt sowohl auf den Bahnhof als auch
+    // auf den Ort. "an" klingt nur bei Halten ohne Ortsnamen richtig.
     box.textContent = prog.atStop
-      ? `Du bist an ${prog.from.name}.`
+      ? `Du bist in ${prog.from.name}.`
       : prog.to
         ? `Zwischen ${prog.from.name} und ${prog.to.name} — ${km} hinter ${prog.from.name}.`
         : `${km} von ${prog.from.name}.`;
@@ -858,8 +877,12 @@ export class LiveTracker {
    */
   renderStops(leg, all) {
     const idOf = (s) => String(s.id || '');
-    let from = all.findIndex((s) => idOf(s) === String(leg.from?.id || ' '));
-    let to = all.findIndex((s) => idOf(s) === String(leg.to?.id || ' '));
+    let from = leg.from?.id
+      ? all.findIndex((s) => idOf(s) === String(leg.from.id))
+      : -1;
+    let to = leg.to?.id
+      ? all.findIndex((s) => idOf(s) === String(leg.to.id))
+      : -1;
     // Ohne ID-Treffer über den Namen versuchen, sonst den ganzen Lauf zeigen.
     if (from < 0) from = all.findIndex((s) => s.name === leg.from?.name);
     if (to < 0) to = all.findIndex((s) => s.name === leg.to?.name);

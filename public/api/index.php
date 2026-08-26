@@ -47,6 +47,7 @@ if (!function_exists('mb_strtolower')) {
 
 require __DIR__ . '/lib/Http.php';
 require __DIR__ . '/lib/Cache.php';
+require __DIR__ . '/lib/Text.php';
 require __DIR__ . '/lib/Fares.php';
 require __DIR__ . '/lib/Products.php';
 require __DIR__ . '/lib/Shops.php';
@@ -590,6 +591,10 @@ function handleFxRate(Http $http, array $config, Cache $cache): void
  * Beantwortet "wo wird gerade gebaut und wie lange noch" - auf der Karte als
  * markierter Streckenabschnitt zwischen zwei Bahnhoefen.
  *
+ * Gezeigt werden die GROSSEN Baustellen im deutschsprachigen Raum, und
+ * Fernverkehrsstrecken zuerst - die Auswahl trifft OebbHafas::works(), die
+ * Reihenfolge diese Funktion.
+ *
  * Quelle ist der HAFAS Information Manager der OeBB. Der Schwerpunkt liegt
  * damit auf Oesterreich; deutsche Meldungen sind nur vereinzelt dabei. Eine
  * deutschlandweite Quelle (DB InfraGO / strecken.info) braucht einen eigenen
@@ -613,10 +618,22 @@ function handleWorks(Http $http, array $config, Cache $cache): void
         ok(['works' => [], 'error' => $res['error']]);
     }
 
-    // Die groessten zuerst, und "gross" heisst hier: dauert am laengsten.
-    // Die HAFAS-Prioritaet taugt dafuer nicht, sie steht bei allen auf 100.
+    // Die wichtigsten zuerst. "Wichtig" heisst hier zweierlei, in dieser
+    // Reihenfolge: faehrt dort Fernverkehr, und wie lange dauert es noch.
+    //
+    // Die Reihenfolge zaehlt, weil die Liste nur die ersten Eintraege zeigt.
+    // Nach Dauer allein standen dort die Nebenbahnen mit den laengsten
+    // Sperrungen - richtig sortiert, aber nicht das, was jemand sucht, der
+    // wissen will, wo im Netz gerade gebaut wird.
+    //
+    // Die HAFAS-Prioritaet taugt als Kriterium nicht: sie steht bei allen
+    // Meldungen auf 100.
     $works = $res['data'];
     usort($works, static function ($a, $b) {
+        $fern = (int) ($b['longDistance'] ?? false) <=> (int) ($a['longDistance'] ?? false);
+        if ($fern !== 0) {
+            return $fern;
+        }
         $da = strtotime((string) $a['end']) - strtotime((string) $a['start']);
         $db = strtotime((string) $b['end']) - strtotime((string) $b['start']);
         return $db <=> $da;
@@ -694,10 +711,21 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
  */
 function stationData(Http $http, array $config, Cache $cache, float $lat, float $lon, ?string &$error = null): ?array
 {
-    $key    = sprintf('station:%.3f,%.3f', $lat, $lon);
-    $cached = $cache->get($key, (int) ($config['cache_ttl']['platforms'] ?? 604800));
+    $key  = sprintf('station:%.3f,%.3f', $lat, $lon);
+    $long = (int) ($config['cache_ttl']['platforms'] ?? 604800);
+
+    $cached = $cache->get($key, $long);
     if ($cached !== null) {
-        return $cached;
+        // Ein LEERES Ergebnis darf nicht eine Woche lang gelten. Overpass
+        // antwortet unter Last mit Zeitueberschreitungen; die Antwort ist dann
+        // formal in Ordnung, aber leer. Ohne diese Unterscheidung merkt sich
+        // der Cache einen einmaligen Aussetzer als "Bahnhof nicht kartiert" -
+        // und der Umstiegsplan bleibt tagelang weg.
+        $leer = ($cached['platforms'] ?? []) === [];
+        $alter = time() - (int) ($cached['ts'] ?? 0);
+        if (!$leer || $alter < 900) {
+            return $cached;
+        }
     }
 
     $op  = new Overpass($http, $config['providers']['overpass']);
@@ -707,7 +735,7 @@ function stationData(Http $http, array $config, Cache $cache, float $lat, float 
         return null;
     }
 
-    $cache->set($key, $res['data']);
+    $cache->set($key, $res['data'] + ['ts' => time()]);
     return $res['data'];
 }
 

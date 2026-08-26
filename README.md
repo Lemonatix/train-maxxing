@@ -260,27 +260,73 @@ liefert Länge, geschätzte Gehzeit und ob Treppen dabei sind. Gezeichnet wird
 eine massstäbliche Skizze: alle Bahnsteige als Balken in ihrer echten Lage,
 Ankunfts- und Abfahrtsgleis farbig, der Laufweg als gestrichelte Linie darüber.
 
-Für München Hbf, Gleis 8 → 14: *„Rund 315 m Fussweg, etwa 5 min."*
+Für München Hbf, Gleis 8 → 14: *„Rund 645 m Fussweg, etwa 9 min."* Gemessen
+wird von Bahnsteigmitte zu Bahnsteigmitte — siehe unten. Zum Vergleich: die DB
+setzt für München Hbf 10 Minuten Mindestumsteigezeit an, die SBB für Zürich HB
+Gleis 7 → 31 rund vier; die Rechnung kommt dort auf 3,7.
 
-Zwei Dinge, die dabei zu beachten waren:
+Sechs Dinge, die dabei zu beachten waren:
 
 - **Treppen werden vierfach gewichtet**, Aufzüge fünffach. Für die Frage
   „schaffe ich den Umstieg" zählt Zeit, nicht Entfernung.
 - **Zugänge, die zu beiden Bahnsteigen gehören, dürfen kein Ziel sein.** Sonst
   endet die Suche sofort beim Startknoten und meldet null Meter — bei
   benachbarten Bahnsteigen in einer Halle passiert genau das.
+- **Der Weg beginnt in der Bahnsteigmitte, nicht am nächsten Zugang.** Ein
+  Zugang liegt irgendwo auf einem 400 m langen Bahnsteig, und bis dorthin ist
+  man schon gelaufen. Ohne diesen Anteil meldete Ulm Hbf für Gleis 8 → 2
+  „rund 40 m" — gemessen zwischen den Nordenden zweier Bahnsteige, während der
+  Weg in Wirklichkeit durch die Unterführung führt. Mit Anfahrt und Abgang:
+  214 m.
+- **Der Bahnsteig selbst ist begehbar.** In OSM ist er eine *Fläche*, kein Weg;
+  Treppen enden darauf und hängen deshalb im Wegenetz in der Luft. Zürich HB
+  zerfiel so in 179 unverbundene Inseln, und von 276 Gleispaaren waren 60
+  berechenbar. Die Zugänge eines Bahnsteigs werden deshalb der Länge nach
+  aufgereiht und verbunden — eine Kette, keine Verbindung jeder mit jedem,
+  sonst kürzte der Weg quer über die Gleise ab. Danach: 276 von 276.
+- **Ebenen zählen, bevor Entfernungen zählen.** In der Draufsicht liegt ein
+  Tiefbahnsteig genau unter dem oberirdischen. Rein nach Entfernung gemessen
+  sind die Treppen der Ebene −4 also „direkt an Gleis 7", und die Suche startete
+  dort, wo sie ankommen sollte: Zürich HB meldete für Gleis 7 → 31 drei Minuten
+  *ebenen* Weges über vier Ebenen hinweg.
+- **Ein einzelner gemeinsamer Zugang heisst nichts.** Zugänge, die zu beiden
+  Bahnsteigen gehören, flogen früher pauschal aus der Zielmenge — sonst hätte
+  die Suche null Meter gemeldet. Seit die Anfahrt zur Bahnsteigmitte
+  mitzählt, ist das nicht mehr nötig und war sogar schädlich: an einem
+  Kopfbahnhof münden alle Bahnsteige in dieselbe Querhalle. „Nebenan" gilt
+  deshalb nur noch, wenn die Bahnsteige *sämtliche* Zugänge teilen.
+- **Bahnsteigabschnitte auf die nackte Nummer abbilden.** Ulm Hbf führt in OSM
+  „4 Nord", „4 Süd", „5a", „5b" — und kein einziges nacktes „4". Der Fahrplan
+  sagt aber „Gleis 4". Die blosse Nummer kommt als Zweitname dazu, nachrangig:
+  wo es ein echtes „4" gibt, gewinnt das.
 
-**Die Abdeckung ist sehr unterschiedlich.** Nachgemessen:
+**Die Abdeckung ist sehr unterschiedlich** — und war lange schlechter, als sie
+sein musste. Zwei Fehler steckten dahinter:
 
-| Bahnhof | nummerierte Bahnsteige in OSM |
-|---|---|
-| München Hbf | 14 — Plan funktioniert |
-| Stuttgart Hbf | 1 |
-| Würzburg Hbf, Frankfurt Hbf | 0 |
-| Zürich HB | 1 (Schweizer Bahnsteige tragen meist keinen `ref`) |
+1. Die Overpass-Abfrage entstand per `sprintf` in einem **doppelt gequoteten**
+   PHP-String. Dort liest PHP `%1$d` als `%1` gefolgt von der Variablen `$d`;
+   die war nie gesetzt, `sprintf` bekam `%1,` zu sehen und warf *Unknown format
+   specifier*. Die Abfrage kam gar nicht erst zustande — **jeder** Bahnhof ohne
+   Cache-Eintrag meldete „keine Bahnsteige erfasst".
+2. An Haltepunkten trägt `ref` die Nummer des **Bahnhofs**, nicht die des
+   Gleises. Zürich HB lieferte darüber „Gleis 13030". Die Gleisnummer steht
+   dort in `local_ref`.
 
-Deshalb erscheint der Plan nur, wenn **beide** Gleise gefunden werden; sonst
-sagt die Anzeige, was fehlt.
+Nach der Korrektur, nachgemessen:
+
+| Bahnhof | Bahnsteige mit Nummer | berechenbare Gleispaare |
+|---|---|---|
+| Zürich HB | 24 (Gleis 3–18, 31–34, 41–44) | 276 / 276 |
+| München Hbf | 17 | 136 / 136 |
+| Bern | 16 | 120 / 120 |
+| Ulm Hbf | 18 (Abschnitte) | — |
+| Winterthur | 10 | 45 / 45 |
+| Olten | 14 | 78 / 91 (der Rest sind Bussteige) |
+
+Der Plan erscheint nur, wenn **beide** Gleise gefunden werden; sonst sagt die
+Anzeige, was fehlt — und unterscheidet dabei „Dienst gerade überlastet" von
+„Bahnhof nicht kartiert". Vorher stand in beiden Fällen dieselbe Zeile, und in
+einem davon war sie falsch.
 
 Ein Fallstrick, der beim Bauen aufgefallen ist: Würzburg Hbf liefert vierzehn
 Objekte mit den Nummern 1–14 — das ist aber der **Busbahnhof davor**
@@ -295,29 +341,57 @@ betriebener Gemeinschaftsdienst, ungefragte Abfragen für jeden sichtbaren
 Umstieg wären unfair. Bahnsteige und Wege kommen in **einer** Abfrage und
 werden sieben Tage gecacht (rund 70 KB je Bahnhof).
 
-### Bauarbeiten im Netz
+### Grosse Baustellen im Netz
 
 `?action=works` liefert Bauarbeiten mit **betroffenem Abschnitt** (von Bahnhof
-A bis Bahnhof B), Zeitraum und Koordinaten. Die Liste steht unter der Karte,
-jeder Eintrag springt per Klick auf den Abschnitt; die Kartenebene lässt sich
-über „Bauarbeiten" in der Kartenleiste zuschalten und zeichnet die betroffenen
-Abschnitte gestrichelt.
+A bis Bahnhof B), Zeitraum und Koordinaten.
 
-Quelle ist der **HAFAS Information Manager der ÖBB** (`HimSearch`). Zwei
-Dinge, die dabei nötig waren:
+**Eine eigene Karte, nicht die Routenkarte.** Baustellen und Suchergebnisse
+beantworten verschiedene Fragen und stehen einander im Weg: über einer
+gefundenen Verbindung liegen ein Dutzend gestrichelter Abschnitte, die mit ihr
+nichts zu tun haben, und der Ausschnitt kann nicht beiden gerecht werden — die
+Route will Zürich–Wien zeigen, die Baustellenkarte das ganze Netz. Der Kasten
+unter der Trefferliste bringt deshalb seine eigene Karte mit; gebaut wird sie
+erst beim Aufklappen, denn eine Karte lädt Kacheln.
+
+Quelle ist der **HAFAS Information Manager der ÖBB** (`HimSearch`). Was dabei
+nötig war, damit aus 500 Meldungen eine lesbare Übersicht wird:
 
 - **Nach Kategorie filtern.** HAFAS liefert Betriebsmeldungen (Kategorie 1–3)
-  und reine Reisehinweise (4) gemischt. Ohne Filter standen 115 Meldungen
+  und reine Reisehinweise (4) gemischt. Ohne Filter standen 117 Meldungen
   „ACHTUNG: Starker Reisetag" in der Baustellenliste.
-- **Richtungsunabhängig entdoppeln.** Dieselbe Sperrung kommt je Linie und je
-  Richtung erneut; Hartberg–Fehring und Fehring–Hartberg sind eine Baustelle.
+- **Nach Land filtern.** Die Instanz kennt auch Ungarn, Slowenien und Italien.
+- **Nach Dauer filtern.** Was in wenigen Tagen vorbei ist, ist eine Störung und
+  keine Baustelle. Die Grenze liegt bei einer Woche.
+- **Richtungs- und zeitraumunabhängig entdoppeln.** Dieselbe Sperrung kommt je
+  Linie, je Richtung und je Zeitabschnitt erneut: Wampersdorf–Ebenfurth stand
+  viermal in der Liste, wortgleich, nur mit anderen Datumsgrenzen. Der
+  zusammengefasste Eintrag bekommt den weitesten Zeitraum.
+- **Fernverkehr zuerst.** Die Liste zeigt nur die ersten acht Einträge. Nach
+  Dauer allein standen dort die Nebenbahnen mit den längsten Sperrungen —
+  richtig sortiert, aber nicht das, wonach jemand sucht. Ob Fernverkehr fährt,
+  sagt die Produktklasse der Meldung; sie fehlt bei vier von fünf Meldungen,
+  dann entscheiden die Produktklassen der beiden Endbahnhöfe.
+- **Den Meldungstext kürzen.** Die HAFAS-Texte sind 280–340 Zeichen und zu vier
+  Fünfteln Formelware („Bitte beachten Sie, dass in den Bussen des
+  Schienenersatzverkehres keine Fahrradmitnahme möglich ist …"). In der Liste
+  lief das über den Rand und verdrängte genau die Angaben, wegen derer man
+  hinschaut. Die Zeile zeigt jetzt Abschnitt, Thema und Restdauer; der volle
+  Text steht als Tooltip.
 
-**Die Abdeckung ist österreichlastig.** Nachgemessen über 200 Meldungen: 178
-Österreich, 6 Deutschland. Das steht auch in der Anzeige. Für eine
-deutschlandweite Quelle wäre `strecken.info` (DB InfraGO) das Naheliegende —
-das war aus der Entwicklungsumgebung heraus nicht erreichbar und ist deshalb
-ungetestet. Ein zweiter Provider nach dem Muster von `OebbHafas::works()`
-würde reichen; das Frontend nimmt beliebig viele Einträge entgegen.
+**Die Abdeckung ist österreichlastig.** Nachgemessen über 500 Meldungen: 452
+mit österreichischem, 17 mit deutschem und 9 mit schweizerischem
+Anfangsbahnhof; nach Kategorie, Dauer und Entdopplung bleibt praktisch nur
+Österreich übrig. Das steht auch in der Anzeige.
+
+**Eine deutschlandweite Quelle fehlt weiterhin.** Geprüft und aus der
+Entwicklungsumgebung heraus *nicht erreichbar*: `strecken.info` (DB InfraGO),
+`v6.db.transport.rest` (db-rest), `reiseauskunft.bahn.de/bin/mgate.exe`. Die
+Web-APIs unter `int.bahn.de` antworten zwar, kennen aber keinen Endpunkt für
+Bauarbeiten (403 auf alle geprüften Pfade), und `dbstreckenagent.de` ist ein
+Abodienst mit Anmeldung. Ein zweiter Provider nach dem Muster von
+`OebbHafas::works()` würde reichen, sobald eine Quelle erreichbar ist; das
+Frontend nimmt beliebig viele Einträge entgegen.
 
 ### Leistung auf schwacher Hardware
 

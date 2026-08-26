@@ -64,31 +64,59 @@ final class Overpass
      */
     public function stationData(float $lat, float $lon): array
     {
-        // out center: fuer Wege reicht der Mittelpunkt, die volle Geometrie
-        // waere ein Vielfaches an Daten ohne Mehrwert fuer einen Lageplan.
+        // Drei Erfassungsarten, weil OSM uneinheitlich taggt und jede
+        // einzelne fuer sich ganze Bahnhoefe verschluckt:
         //
-        // train!=no schliesst Bahnsteige aus, die ausdruecklich keinen
-        // Eisenbahnverkehr haben - reine Bus- und Tramkanten also.
+        //   railway=platform / public_transport=platform als NODE oder WAY
+        //       Muenchen Hbf fuehrt seine Bahnsteige so.
         //
-        // Beide Erfassungsarten abfragen, und zwar OHNE auf ein train-Tag zu
-        // bestehen. OSM taggt uneinheitlich: Muenchen Hbf fuehrt seine
-        // Bahnsteige als railway=platform, Wuerzburg Hbf als
-        // public_transport=platform mit ref - dort aber ganz ohne train-Tag.
-        // Mit der Bedingung train=yes lieferte Wuerzburg null statt vierzehn
-        // Bahnsteige. Aussortiert wird deshalb erst unten, anhand der Tags,
-        // die Tram- und Busk anten tatsaechlich tragen.
+        //   dieselben Tags als RELATION (multipolygon)
+        //       Frankfurt Hbf, Wuerzburg Hbf, Stuttgart Hbf und Zuerich HB
+        //       kartieren ihre Bahnsteige ausschliesslich so. Ohne diese
+        //       Zeile lieferte Frankfurt null und Zuerich einen einzigen
+        //       nummerierten Bahnsteig - der Lageplan entfiel deshalb dort
+        //       immer, obwohl die Daten laengst in OSM stehen.
+        //
+        //   public_transport=stop_position mit local_ref
+        //       Die Rueckfallebene fuer Bahnhoefe, deren Bahnsteigflaechen
+        //       gar keine Nummer tragen. Zuerich HB hat 26 solcher Punkte
+        //       (Gleis 3-18, 31-34, 41-44). ACHTUNG: bei diesen Knoten steht
+        //       in `ref` die Nummer des BAHNHOFS (Zuerich: 13030), die
+        //       Gleisnummer nur in `local_ref` - siehe unten.
+        //
+        // Kein train=yes als Bedingung: OSM taggt es bei Bahnsteigen oft gar
+        // nicht (Wuerzburg Hbf lieferte damit null statt vierzehn). Tram-,
+        // Bus- und U-Bahnsteige fliegen weiter unten raus, anhand der Tags,
+        // die sie tatsaechlich tragen.
+        //
         // out geom statt out center: fuer den Wegeplan brauchen wir den
         // Verlauf der Bahnsteige und Fusswege, nicht nur ihre Mittelpunkte.
+        // Und `out geom` statt `out geom tags`, weil Overpass im Tag-Modus
+        // bei Relationen NUR die Bounding-Box liefert, nicht die Mitglieder -
+        // die Bahnsteigflaechen kaemen dann ohne Umriss an. Der Aufschlag
+        // liegt bei etwa 15 % Antwortgroesse (Muenchen Hbf: 357 statt
+        // 408 KB), und gecacht wird ohnehin sieben Tage.
+        //
+        // EINFACHE ANFUEHRUNGSZEICHEN, und zwar zwingend: in einem
+        // doppelt gequoteten String liest PHP `%1$d` als "%1" gefolgt von der
+        // Variablen $d. Die war nie gesetzt, sprintf bekam "%1," zu sehen und
+        // warf "Unknown format specifier". Die Abfrage kam damit gar nicht
+        // erst zustande - jeder Bahnhof ohne Cache-Eintrag meldete "keine
+        // Bahnsteige erfasst", obwohl die Daten in OSM stehen.
         $r = self::RADIUS_M;
         $query = sprintf(
-            "[out:json][timeout:25];("
-            . "node(around:%1\$d,%2\$.6f,%3\$.6f)[\"railway\"=\"platform\"];"
-            . "way(around:%1\$d,%2\$.6f,%3\$.6f)[\"railway\"=\"platform\"];"
-            . "node(around:%1\$d,%2\$.6f,%3\$.6f)[\"public_transport\"=\"platform\"];"
-            . "way(around:%1\$d,%2\$.6f,%3\$.6f)[\"public_transport\"=\"platform\"];"
-            . "way(around:%1\$d,%2\$.6f,%3\$.6f)"
-            . "[\"highway\"~\"^(footway|steps|corridor|pedestrian|elevator)$\"];"
-            . ");out geom tags;",
+            '[out:json][timeout:25];('
+            . 'node(around:%1$d,%2$.6f,%3$.6f)["railway"="platform"];'
+            . 'way(around:%1$d,%2$.6f,%3$.6f)["railway"="platform"];'
+            . 'relation(around:%1$d,%2$.6f,%3$.6f)["railway"="platform"];'
+            . 'node(around:%1$d,%2$.6f,%3$.6f)["public_transport"="platform"];'
+            . 'way(around:%1$d,%2$.6f,%3$.6f)["public_transport"="platform"];'
+            . 'relation(around:%1$d,%2$.6f,%3$.6f)["public_transport"="platform"];'
+            . 'node(around:%1$d,%2$.6f,%3$.6f)["public_transport"="stop_position"];'
+            . 'node(around:%1$d,%2$.6f,%3$.6f)["railway"="stop"];'
+            . 'way(around:%1$d,%2$.6f,%3$.6f)'
+            . '["highway"~"^(footway|steps|corridor|pedestrian|elevator)$"];'
+            . ');out geom;',
             $r, $lat, $lon
         );
 
@@ -139,7 +167,14 @@ final class Overpass
                     $pts[] = [round((float) $g['lat'], 6), round((float) $g['lon'], 6)];
                 }
                 if (count($pts) >= 2) {
-                    $ways[] = ['kind' => $hw, 'points' => $pts];
+                    $ways[] = [
+                        'kind'   => $hw,
+                        'points' => $pts,
+                        // "level=-1;0" heisst: dieses Treppenstueck verbindet
+                        // die Ebenen -1 und 0. Damit kann die Anzeige spaeter
+                        // sagen, WOHIN es geht, nicht nur dass es Stufen gibt.
+                        'level'  => isset($tags['level']) ? (string) $tags['level'] : null,
+                    ];
                 }
                 continue;
             }
@@ -167,15 +202,55 @@ final class Overpass
                 continue;
             }
 
+            // Handelt es sich um eine Bahnsteigflaeche oder nur um einen
+            // Haltepunkt auf dem Gleis? Davon haengt ab, in welchem Tag die
+            // Gleisnummer steht - und wie brauchbar die Lage ist.
+            $isStopNode = ($tags['public_transport'] ?? '') === 'stop_position'
+                || ($tags['railway'] ?? '') === 'stop';
+
             // Ein Bahnsteig bedient oft zwei Gleise ("24;25"). Beide sollen
             // sich spaeter ueber ihre Nummer wiederfinden lassen.
-            $ref = trim((string) ($tags['ref'] ?? $tags['local_ref'] ?? ''));
+            //
+            // ERST local_ref, DANN ref: an Haltepunkten traegt `ref` die
+            // Nummer des BAHNHOFS im Netz des Betreibers, nicht die des
+            // Gleises. Zuerich HB lieferte darueber "Gleis 13030" - und weil
+            // sich unter dieser Nummer natuerlich kein Zug wiederfand, blieb
+            // der Lageplan dort aus. An Bahnsteigflaechen meinen beide Tags
+            // dasselbe, die Reihenfolge schadet dort also nicht.
+            $ref = trim((string) ($tags['local_ref'] ?? ''));
+            if ($ref === '' && !$isStopNode) {
+                $ref = trim((string) ($tags['ref'] ?? ''));
+            }
             $tracks = $ref === ''
                 ? []
                 : array_values(array_filter(array_map('trim', preg_split('/[;,]/', $ref))));
 
+            // Vierstellige "Gleisnummern" gibt es nicht. Was so aussieht, ist
+            // eine Betriebsstellen- oder DS100-Nummer, die jemand ins falsche
+            // Feld geschrieben hat - sie wuerde nur eine Zuordnung vortaeuschen.
+            $tracks = array_values(array_filter(
+                $tracks,
+                static fn(string $t): bool => !preg_match('/^\d{4,}$/', $t)
+            ));
+
             if ($tracks === []) {
                 continue; // ohne Gleisnummer nicht zuzuordnen
+            }
+
+            // ABSCHNITTE: Manche Bahnhoefe sind in OSM je Bahnsteigabschnitt
+            // erfasst - Ulm Hbf fuehrt "4 Nord", "4 Sued", "5a", "5b" und
+            // kein einziges nacktes "4". Der Fahrplan sagt aber "Gleis 4",
+            // und die Suche nach dieser Nummer ging deshalb an einem
+            // vollstaendig kartierten Bahnhof leer aus.
+            //
+            // Die blosse Nummer kommt als ZWEITNAME dazu, nicht als
+            // gleichwertige. Wo es ein echtes "4" gibt, soll das gewinnen -
+            // siehe preferBestSource().
+            $alt = [];
+            foreach ($tracks as $t) {
+                if (preg_match('/^(\d+)[ ]?[\p{L}]+$/u', $t, $m) && !in_array($m[1], $tracks, true)) {
+                    $alt[$m[1]] = true;
+                }
             }
 
             // Tram, U-Bahn und Bus haben eigene, unabhaengige Gleis- bzw.
@@ -203,6 +278,12 @@ final class Overpass
             }
             $seen[$dedupe] = true;
 
+            // Guete der Quelle, fuer die Auswahl weiter unten. Eine Flaeche
+            // mit Umriss ergibt einen massstaeblichen Bahnsteig; ein Punkt
+            // auf dem Gleis nur eine Markierung ungefaehr an der richtigen
+            // Stelle. Beides ist besser als nichts, aber nicht gleich gut.
+            $rank = $shape !== [] ? 0 : ($isStopNode ? 2 : 1);
+
             $out[] = [
                 'tracks' => $tracks,
                 'name'   => trim((string) ($tags['name'] ?? '')),
@@ -214,13 +295,75 @@ final class Overpass
                 'level'  => isset($tags['level']) && is_numeric($tags['level'])
                     ? (float) $tags['level']
                     : null,
+                '_rank'  => $rank,
+                '_alt'   => array_keys($alt),
             ];
         }
 
         return [
             'ok'    => true,
             'error' => null,
-            'data'  => ['platforms' => $out, 'ways' => $ways],
+            'data'  => ['platforms' => self::preferBestSource($out), 'ways' => $ways],
         ];
+    }
+
+    /**
+     * Je Gleisnummer nur die beste Quelle behalten.
+     *
+     * Grosse Bahnhoefe sind in OSM oft doppelt erfasst: die Bahnsteigflaeche
+     * als Weg oder Relation UND ein Haltepunkt auf dem Gleis, beide mit
+     * derselben Nummer. Blieben beide stehen, fiele die Wahl beim Zeichnen
+     * willkuerlich - mal die massstaebliche Flaeche, mal der Punkt daneben,
+     * je nachdem, was Overpass zuerst ausgibt.
+     *
+     * Deshalb: ein Eintrag faellt weg, sobald ALLE seine Gleise schon von
+     * einer besseren Quelle abgedeckt sind. Deckt er auch nur ein Gleis ab,
+     * das sonst fehlen wuerde, bleibt er - lieber ein grober Punkt als eine
+     * Luecke im Plan.
+     *
+     * @param array<int,array> $platforms
+     * @return array<int,array>
+     */
+    private static function preferBestSource(array $platforms): array
+    {
+        usort($platforms, static fn(array $a, array $b): int => $a['_rank'] <=> $b['_rank']);
+
+        $covered = [];
+        $out = [];
+        foreach ($platforms as $p) {
+            $neu = false;
+            foreach ($p['tracks'] as $t) {
+                if (!isset($covered[$t])) {
+                    $neu = true;
+                }
+            }
+            if (!$neu) {
+                continue;
+            }
+            foreach ($p['tracks'] as $t) {
+                $covered[$t] = true;
+            }
+            $out[] = $p;
+        }
+
+        // Erst jetzt die Abschnittsnamen auf ihre nackte Nummer abbilden -
+        // nach allen echten Nummern, damit ein vorhandenes "4" immer gewinnt
+        // und "4 Nord" nur einspringt, wo keins existiert.
+        foreach ($out as $i => $p) {
+            foreach ($p['_alt'] as $t) {
+                if (!isset($covered[$t])) {
+                    $covered[$t] = true;
+                    // Als Zeichenkette: PHP macht aus dem Array-Schluessel "4"
+                    // eine Zahl, und in der Liste stuenden dann Text und Zahl
+                    // gemischt.
+                    $out[$i]['tracks'][] = (string) $t;
+                }
+            }
+        }
+
+        foreach ($out as $i => $p) {
+            unset($out[$i]['_rank'], $out[$i]['_alt']);
+        }
+        return array_values($out);
     }
 }

@@ -22,6 +22,24 @@ final class OebbHafas
     /** Stuetzpunkte je Abschnitt fuer die Karte - haelt die Antwort klein. */
     private const MAX_GEOMETRY_POINTS = 60;
 
+    /** Laender, deren Baustellen hier interessieren. */
+    private const DACH = ['de', 'at', 'ch'];
+
+    /** Die ersten beiden Ziffern einer UIC-Stationsnummer als Laendercode. */
+    private const UIC_COUNTRY = ['80' => 'de', '81' => 'at', '85' => 'ch'];
+
+    /**
+     * Ab wie vielen Tagen eine Meldung als Baustelle gilt.
+     *
+     * Darunter ist es eine Stoerung: eine Weichenstoerung am Dienstag gehoert
+     * nicht in eine Uebersicht, die zeigen soll, wo im Netz gerade gross
+     * gebaut wird. Eine Woche trennt beides sauber.
+     */
+    private const MIN_DAYS = 7;
+
+    /** Zeichen, nach denen der Meldungstext in der Liste abgeschnitten wird. */
+    private const MAX_TEXT = 130;
+
     /**
      * HAFAS-Produktklassen auf die Gattungsnamen der DB abbilden.
      * Nur so lassen sich Treffer beider Quellen gleich bewerten - sonst
@@ -63,27 +81,44 @@ final class OebbHafas
     }
 
     /**
-     * Bauarbeiten und Stoerungen im Netz (HAFAS Information Manager).
+     * Grosse Bauarbeiten und Stoerungen im Netz (HAFAS Information Manager).
      *
      * Liefert Meldungen mit betroffenem ABSCHNITT (von-Ort, bis-Ort),
      * Gueltigkeitszeitraum und Koordinaten - also genau das, was sich auf
      * einer Karte darstellen laesst: welche Strecke ist wie lange betroffen.
      *
-     * ABDECKUNG: Diese Instanz gehoert der OeBB, entsprechend liegt der
-     * Schwerpunkt auf Oesterreich. Deutsche Meldungen sind nur vereinzelt
-     * dabei. Eine deutschlandweite Quelle braucht einen eigenen Provider -
-     * siehe README.
+     * WAS HIER RAUSFAELLT, und warum: HimSearch liefert alles, was im
+     * Betrieb gerade Bestand hat - vom mehrmonatigen Streckenumbau bis zum
+     * nicht barrierefreien Bahnsteig. Fuer eine Uebersicht "wo wird gerade
+     * gross gebaut" ist das zu fein. Deshalb drei Siebe:
+     *
+     *   1. KATEGORIE. HAFAS trennt Betriebsmeldungen (1-3: Stoerung,
+     *      Bauarbeiten, Ausfall) von Reisehinweisen (4). Ohne diesen Filter
+     *      stehen 117 "ACHTUNG: Starker Reisetag"-Hinweise in der Liste.
+     *   2. LAND. Diese Instanz gehoert der OeBB und kennt auch Meldungen aus
+     *      Ungarn, Slowenien und Italien. Hier interessiert der
+     *      deutschsprachige Raum.
+     *   3. DAUER. Was in wenigen Tagen vorbei ist, ist keine Baustelle,
+     *      sondern eine Stoerung. Siehe MIN_DAYS.
+     *
+     * ABDECKUNG: Der Schwerpunkt liegt bei Oesterreich - nachgemessen ueber
+     * 500 Meldungen: 452 mit oesterreichischem, 17 mit deutschem und 9 mit
+     * schweizerischem Anfangsbahnhof. Eine deutschlandweite Quelle braucht
+     * einen eigenen Provider; im README steht, was dafuer noetig waere.
      *
      * @param int $days Vorausschau in Tagen
      * @return array{ok:bool,error:?string,data:array}
      */
-    public function works(int $days = 30, int $max = 200): array
+    public function works(int $days = 30, int $max = 500): array
     {
         $res = $this->call('HimSearch', [
             'dateB'  => date('Ymd'),
             'dateE'  => date('Ymd', strtotime('+' . max(1, $days) . ' days')),
             'timeB'  => '000000',
             'timeE'  => '235900',
+            // Hoch angesetzt, weil die Auswahl weiter unten stattfindet: von
+            // 500 Meldungen bleiben nach Kategorie, Land, Dauer und
+            // Entdoppelung rund drei Dutzend uebrig.
             'maxNum' => max(1, min(500, $max)),
         ]);
         if (!$res['ok']) {
@@ -94,13 +129,8 @@ final class OebbHafas
         $locL = $body['common']['locL'] ?? [];
         $catL = $body['common']['himMsgCatL'] ?? [];
         $out  = [];
-        $seen = [];
 
         foreach (($body['msgL'] ?? []) as $m) {
-            // Nur Betriebsmeldungen, keine Reisehinweise. HAFAS trennt das
-            // ueber die Kategorie: 1-3 sind Stoerung, Bauarbeiten und Ausfall,
-            // 4 ist reine Information. Ohne diesen Filter stehen 115
-            // "ACHTUNG: Starker Reisetag"-Hinweise in der Baustellenliste.
             $catId = null;
             foreach ($m['catRefL'] ?? [] as $ci) {
                 $catId = $catL[$ci]['id'] ?? null;
@@ -118,38 +148,191 @@ final class OebbHafas
                 continue;
             }
 
-            $head = trim((string) ($m['head'] ?? ''));
+            // Bei grenzueberschreitenden Abschnitten zaehlt die Seite, die
+            // hierher gehoert: Villach-Jesenice ist fuer uns eine
+            // oesterreichische Baustelle, keine slowenische.
+            $land = self::country($from);
+            if (!in_array($land, self::DACH, true)) {
+                $land = self::country($to);
+            }
+            if (!in_array($land, self::DACH, true)) {
+                continue;
+            }
+
+            $head = Text::plain((string) ($m['head'] ?? ''));
             if ($head === '') {
                 continue;
             }
 
-            // Dieselbe Baustelle kommt je Linie und je Richtung erneut. Der
-            // Schluessel ignoriert die Richtung: Hartberg-Fehring und
-            // Fehring-Hartberg sind ein und dieselbe Sperrung.
-            $ends = [(string) ($from['extId'] ?? $from['name'] ?? ''), (string) ($to['extId'] ?? $to['name'] ?? '')];
-            sort($ends);
-            $key = $head . '|' . implode('|', $ends) . '|' . ($m['sDate'] ?? '') . ($m['eDate'] ?? '');
-            if (isset($seen[$key])) {
+            $start = self::himDate($m['sDate'] ?? null);
+            $end   = self::himDate($m['eDate'] ?? null);
+            if (!self::longEnough($start, $end)) {
                 continue;
             }
-            $seen[$key] = true;
 
             $out[] = [
-                'id'    => (string) ($m['hid'] ?? $key),
+                'id'    => (string) ($m['hid'] ?? ($head . $land)),
                 'title' => $head,
                 // HAFAS liefert den Text mit HTML-Fragmenten; die Anzeige
-                // setzt alles per textContent, also hier schon bereinigen.
-                'text'  => trim(strip_tags((string) ($m['text'] ?? ''))),
+                // setzt alles per textContent, also hier schon bereinigen -
+                // und kuerzen, siehe summarise().
+                'text'  => self::summarise(Text::plain((string) ($m['text'] ?? '')), $head),
                 'from'  => self::worksPlace($from),
                 'to'    => self::worksPlace($to),
-                'start' => self::himDate($m['sDate'] ?? null),
-                'end'   => self::himDate($m['eDate'] ?? null),
+                'start' => $start,
+                'end'   => $end,
+                'country'  => $land,
                 'category' => (int) $catId,
                 'products' => self::productsFromCls((int) ($m['prod'] ?? 0)),
+                // Faehrt hier Fernverkehr? Zwei Wege dorthin, weil HAFAS die
+                // Produktklasse der MELDUNG in vier von fuenf Faellen auf
+                // null laesst: dann entscheiden die beiden Endbahnhoefe.
+                'longDistance' => self::isLongDistance($m, $from, $to),
             ];
         }
 
-        return ['ok' => true, 'error' => null, 'data' => $out];
+        return ['ok' => true, 'error' => null, 'data' => self::mergeDuplicates($out)];
+    }
+
+    /** Laendercode einer HAFAS-Station, klein geschrieben. */
+    private static function country(array $loc): string
+    {
+        $code = strtolower((string) (($loc['countryCodeL'] ?? [])[0] ?? ''));
+        if ($code !== '') {
+            return $code;
+        }
+        // Rueckfallebene: die ersten beiden Ziffern der UIC-Nummer sind der
+        // Laendercode - 80 Deutschland, 81 Oesterreich, 85 Schweiz.
+        return self::UIC_COUNTRY[substr((string) ($loc['extId'] ?? ''), 0, 2)] ?? '';
+    }
+
+    /**
+     * Faehrt auf dem betroffenen Abschnitt Fernverkehr?
+     *
+     * Erst die Produktklasse der Meldung selbst - die ist eindeutig, steht
+     * aber nur bei rund einem Fuenftel der Meldungen. Sonst entscheiden die
+     * Endbahnhoefe: sind BEIDE Fernverkehrshalte, liegt der Abschnitt auf
+     * einer Fernverkehrsstrecke. Nur einer reicht nicht, sonst zaehlt jede
+     * Nebenbahn mit, die irgendwo in einen Hauptbahnhof muendet.
+     */
+    private static function isLongDistance(array $msg, array $from, array $to): bool
+    {
+        $prod = (int) ($msg['prod'] ?? 0);
+        if ($prod !== 0) {
+            return ($prod & self::CLS_LONG_DISTANCE) !== 0;
+        }
+        return ((int) ($from['pCls'] ?? 0) & self::CLS_LONG_DISTANCE) !== 0
+            && ((int) ($to['pCls'] ?? 0) & self::CLS_LONG_DISTANCE) !== 0;
+    }
+
+    /** Dauert die Meldung lange genug, um eine Baustelle zu sein? */
+    private static function longEnough(?string $start, ?string $end): bool
+    {
+        if ($end === null) {
+            return true; // ohne Enddatum: im Zweifel behalten
+        }
+        $von = strtotime($start ?? 'today') ?: time();
+        $bis = strtotime($end);
+        if ($bis === false) {
+            return true;
+        }
+        return ($bis - $von) >= self::MIN_DAYS * 86400;
+    }
+
+    /**
+     * Dieselbe Baustelle, mehrfach gemeldet, zu einem Eintrag.
+     *
+     * HAFAS meldet je Linie, je Richtung und je Zeitabschnitt neu:
+     * Wampersdorf-Ebenfurth stand viermal in der Liste, wortgleich, nur mit
+     * anderen Datumsgrenzen. Der Schluessel ignoriert deshalb sowohl die
+     * Richtung (Hartberg-Fehring ist dieselbe Sperrung wie
+     * Fehring-Hartberg) als auch den Zeitraum - und der zusammengefasste
+     * Eintrag bekommt den weitesten Zeitraum aller Einzelmeldungen.
+     *
+     * Auch der Titel geht nur bis zum Schraegstrich in den Schluessel ein:
+     * "Bauarbeiten - Schienenersatzverkehr/geaenderte Fahrzeiten" und
+     * ".../vorverlegte Abfahrtszeit" beschreiben dieselbe Baustelle.
+     *
+     * @param array<int,array> $works
+     * @return array<int,array>
+     */
+    private static function mergeDuplicates(array $works): array
+    {
+        $byKey = [];
+        foreach ($works as $w) {
+            $ends = [$w['from']['id'] ?: $w['from']['name'], $w['to']['id'] ?: $w['to']['name']];
+            sort($ends);
+            $thema = trim(explode('/', $w['title'])[0]);
+            $key = mb_strtolower($thema . '|' . implode('|', $ends));
+
+            if (!isset($byKey[$key])) {
+                $byKey[$key] = $w;
+                continue;
+            }
+
+            $vorhanden = &$byKey[$key];
+            if ($w['start'] !== null && ($vorhanden['start'] === null || $w['start'] < $vorhanden['start'])) {
+                $vorhanden['start'] = $w['start'];
+            }
+            if ($vorhanden['end'] !== null && ($w['end'] === null || $w['end'] > $vorhanden['end'])) {
+                $vorhanden['end'] = $w['end'];
+            }
+            // Fernverkehr aus irgendeiner der Teilmeldungen zaehlt.
+            $vorhanden['longDistance'] = $vorhanden['longDistance'] || $w['longDistance'];
+            unset($vorhanden);
+        }
+
+        return array_values($byKey);
+    }
+
+    /**
+     * Aus dem Meldungstext einen Satz machen, der in eine Zeile passt.
+     *
+     * Die HAFAS-Texte sind 280 bis 340 Zeichen lang und zu vier Fuenfteln
+     * Formelware: "Wir haben fuer Sie einen Schienenersatzverkehr
+     * eingerichtet. Bitte beachten Sie, dass in den Bussen des
+     * Schienenersatzverkehres keine Fahrradmitnahme moeglich ist ...". In
+     * der Liste lief das ueber den Rand hinaus und verdraengte genau die
+     * Angaben, wegen derer man hinschaut: Abschnitt und Zeitraum.
+     *
+     * Behalten wird der erste Satz - er nennt die Sache. Wiederholt er nur
+     * den Titel, bleibt das Feld leer.
+     */
+    private static function summarise(string $text, string $head): string
+    {
+        $text = trim(preg_replace('/\\s+/u', ' ', $text) ?? $text);
+        if ($text === '') {
+            return '';
+        }
+
+        // In Saetze zerlegen. Das Satzende ist ein Punkt gefolgt von
+        // Leerzeichen und Grossbuchstabe - "z.B." und "ca." beenden so
+        // keinen Satz.
+        $saetze = preg_split('/(?<=[.!?])\\s+(?=\\p{Lu})/u', $text) ?: [$text];
+
+        // Saetze, die nichts hinzufuegen. Der erste wiederholt den Abschnitt,
+        // der ohnehin danebensteht; die uebrigen sind Formelware, die in
+        // jeder zweiten Meldung wortgleich vorkommt.
+        $leer = '/(kann dieser Zug .* nicht fahren'
+            . '|^Bitte beachten Sie'
+            . '|^Wir bitten um'
+            . '|um Verständnis'
+            . '|Fahrradmitnahme)/ui';
+
+        foreach ($saetze as $satz) {
+            $satz = trim($satz);
+            if ($satz !== '' && !preg_match($leer, $satz)) {
+                $text = $satz;
+                break;
+            }
+        }
+
+        if (mb_strlen($text) > self::MAX_TEXT) {
+            $text = mb_substr($text, 0, self::MAX_TEXT - 1) . '…';
+        }
+
+        // Sagt der Text nichts, was der Titel nicht schon sagt, ist er weg.
+        return mb_strtolower($text) === mb_strtolower($head) ? '' : $text;
     }
 
     /** @param array<string,mixed> $loc */
@@ -462,7 +645,7 @@ final class OebbHafas
         foreach (($jny['msgL'] ?? []) as $m) {
             $rem = ($common['remL'] ?? [])[$m['remX'] ?? -1] ?? null;
             $him = ($common['himL'] ?? [])[$m['himX'] ?? -1] ?? null;
-            $txt = trim((string) ($him['head'] ?? $rem['txtN'] ?? ''));
+            $txt = Text::plain((string) ($him['head'] ?? $rem['txtN'] ?? ''));
             if ($txt !== '' && !in_array($txt, $messages, true)) {
                 $messages[] = $txt;
             }

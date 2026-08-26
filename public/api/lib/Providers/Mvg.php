@@ -168,8 +168,11 @@ final class Mvg
             $out[] = [
                 'id'          => (string) ($m['id'] ?? ($m['title'] ?? '')),
                 'type'        => (string) ($m['type'] ?? ''),
-                'title'       => (string) ($m['title'] ?? ''),
-                'description' => (string) ($m['description'] ?? ''),
+                // Die MVG liefert Absaetze und Fettungen als HTML mit; das
+                // Frontend setzt alles per textContent und wuerde die Tags
+                // sonst woertlich anzeigen.
+                'title'       => Text::plain((string) ($m['title'] ?? '')),
+                'description' => Text::plain((string) ($m['description'] ?? '')),
                 'validFrom'   => self::toIsoTime($m['validFrom'] ?? null),
                 'validTo'     => self::toIsoTime($m['validTo'] ?? null),
                 'lines'       => $lines,

@@ -223,7 +223,22 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
 
   // Selbst zusammengestellt, nicht so im Fahrplan: das gehoert kenntlich
   // gemacht, sonst sucht man diese Verbindung im Ticketshop vergeblich.
-  if (j.rerouted) add('umdisponiert', 'badge--rerouted');
+  // Anklickbar, weil eine Entscheidung unter Zeitdruck zuruecknehmbar sein muss.
+  if (j.rerouted) {
+    if (j.original && liveCtl?.undoAlternative) {
+      const undo = el('button', 'badge badge--rerouted badge--undo', 'umdisponiert');
+      undo.type = 'button';
+      undo.append(el('span', 'badge__undo-hint', 'zurück'));
+      undo.title = 'Zurück zur ursprünglichen Verbindung';
+      undo.addEventListener('click', (e) => {
+        e.stopPropagation();
+        liveCtl.undoAlternative(j);
+      });
+      badges.append(undo);
+    } else {
+      add('umdisponiert', 'badge--rerouted');
+    }
+  }
 
   if (marks.cheapest === entry) add('günstigste', 'badge--price');
   if (marks.fastest === entry) add('schnellste', 'badge--fast');
@@ -487,15 +502,25 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
   }
 
   if (!a || !b) {
-    // Häufiger Fall: OSM kennt die Bahnsteige des Bahnhofs, aber ohne
-    // Gleisnummern. Ohne die lässt sich Gleis 7 nicht auf der Karte finden.
     const p = el('p', 'xfer__note');
-    p.textContent = platforms.length === 0
-      ? `Für ${stationName || 'diesen Bahnhof'} sind in OpenStreetMap keine `
-        + 'nummerierten Bahnsteige erfasst — die Lage lässt sich daher nicht bestimmen.'
-      : `In OpenStreetMap fehlen für ${stationName || 'diesen Bahnhof'} die Nummern `
+
+    // Drei verschiedene Gründe, aus denen hier nichts steht — und sie
+    // verlangen Verschiedenes vom Leser. Der Dienst war überlastet: gleich
+    // nochmal aufklappen. Der Bahnhof ist nicht kartiert: gar nichts zu
+    // machen. Die Gleisnummern fehlen: dann hilft der Blick darauf, welche
+    // OSM kennt. Vorher stand in allen drei Fällen dieselbe Zeile, und die
+    // war in zweien davon schlicht falsch.
+    if (res?.error) {
+      p.textContent = 'Der Bahnhofsplan lässt sich gerade nicht laden — der '
+        + 'OpenStreetMap-Dienst antwortet nicht. Später noch einmal aufklappen.';
+    } else if (platforms.length === 0) {
+      p.textContent = `Für ${stationName || 'diesen Bahnhof'} sind in OpenStreetMap keine `
+        + 'nummerierten Bahnsteige erfasst — die Lage lässt sich daher nicht bestimmen.';
+    } else {
+      p.textContent = `In OpenStreetMap fehlen für ${stationName || 'diesen Bahnhof'} die Nummern `
         + `von Gleis ${fromTrack} bzw. ${toTrack}. Bekannt sind nur: `
         + platforms.map((x) => x.tracks.join('/')).slice(0, 8).join(', ') + '.';
+    }
     return [p];
   }
 
@@ -524,27 +549,27 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
 
   out.push(transferSvg(platforms, a, b, route));
   out.push(el('p', 'xfer__source',
-    'Bahnhofsplan aus OpenStreetMap. Der Weg folgt den dort erfassten '
-    + 'Fusswegen und Treppen; Wartezeiten am Aufzug sind nicht enthalten.'));
+    'Bahnhofsplan aus OpenStreetMap. Gemessen wird von Bahnsteigmitte zu '
+    + 'Bahnsteigmitte — wo genau der Wagen hält, weiss der Fahrplan nicht. '
+    + 'Der Weg folgt den dort erfassten Fusswegen und Treppen; Wartezeiten am '
+    + 'Aufzug sind nicht enthalten.'));
   return out;
 }
 
 /**
- * Bahnhofsskizze mit Umsteigeweg.
+ * Bahnhofsskizze mit Umsteigeweg — nach dem Vorbild der SBB-App.
  *
- * Zeichnet die Bahnsteige als Balken in ihrer echten Lage und den berechneten
- * Fussweg als Linie darüber — das Gegenstück zum kleinen Bahnhofsplan in der
- * SBB-App. Alles ist massstäblich; gedreht wird nur auf die Längsachse des
- * Bahnhofs, sonst läge ein Nord-Süd-Bahnhof hochkant im Kasten.
+ * Alles ist massstäblich und gedreht auf die Längsachse des Bahnhofs, sonst
+ * läge ein Nord-Süd-Bahnhof hochkant im Kasten. Als Achse dienen die beiden
+ * am weitesten auseinanderliegenden Punkte; bei einem länglichen Gebilde wie
+ * einem Bahnhof ist das genau die Richtung der Gleise.
  *
- * Als Achse dienen die beiden am weitesten auseinanderliegenden Punkte. Bei
- * einem länglichen Gebilde wie einem Bahnhof ist das genau die Richtung der
- * Gleise.
+ * Gezeichnet wird in dieser Reihenfolge, damit nichts Wichtiges verdeckt wird:
+ * Bahnsteige, dann der Weg, dann Start/Ziel und die Hinweise auf Treppen.
  */
 function transferSvg(platforms, a, b, route) {
   const NS = 'http://www.w3.org/2000/svg';
 
-  // Alle Punkte einsammeln: Bahnsteigumrisse und der Weg.
   const all = [];
   for (const p of platforms) {
     if (p.shape?.length) all.push(...p.shape);
@@ -559,11 +584,10 @@ function transferSvg(platforms, a, b, route) {
     (lo - lon0) * 111320 * Math.cos((lat0 * Math.PI) / 180),
     (la - lat0) * 110540,
   ];
-
   const pts = all.map(toM);
 
   // Längsachse über das am weitesten entfernte Punktepaar. Bei vielen Punkten
-  // reicht eine Stichprobe — quadratisch über 2000 Punkte wäre verschwendet.
+  // reicht eine Stichprobe — quadratisch über tausende Punkte wäre verschwendet.
   const sample = pts.length > 120
     ? pts.filter((_, i) => i % Math.ceil(pts.length / 120) === 0)
     : pts;
@@ -584,18 +608,18 @@ function transferSvg(platforms, a, b, route) {
   const vMin = Math.min(...proj.map((p) => p[1]));
   const vMax = Math.max(...proj.map((p) => p[1]));
 
-  const W = 320, H = 150, pad = 14;
+  const W = 340, H = 190, pad = 22;
   // Gleicher Massstab in beide Richtungen, sonst stimmen die Proportionen nicht.
   const scale = Math.min(
     (uMax - uMin) > 1 ? (W - 2 * pad) / (uMax - uMin) : Infinity,
     (vMax - vMin) > 1 ? (H - 2 * pad) / (vMax - vMin) : Infinity
   );
-  const s = Number.isFinite(scale) ? scale : 1;
-  const offU = (W - (uMax - uMin) * s) / 2;
-  const offV = (H - (vMax - vMin) * s) / 2;
+  const sc = Number.isFinite(scale) ? scale : 1;
+  const offU = (W - (uMax - uMin) * sc) / 2;
+  const offV = (H - (vMax - vMin) * sc) / 2;
   const px = (ll) => {
     const [u, v] = project(toM(ll));
-    return [offU + (u - uMin) * s, offV + (v - vMin) * s];
+    return [offU + (u - uMin) * sc, offV + (v - vMin) * sc];
   };
 
   const svg = document.createElementNS(NS, 'svg');
@@ -605,55 +629,153 @@ function transferSvg(platforms, a, b, route) {
   svg.setAttribute('aria-label',
     `Bahnhofsplan: Weg von Gleis ${a.tracks.join('/')} zu Gleis ${b.tracks.join('/')}`);
 
-  // --- Bahnsteige ---
+  const node = (name, attrs, cls) => {
+    const n = document.createElementNS(NS, name);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    if (cls) n.setAttribute('class', cls);
+    return n;
+  };
+
+  // --- Bahnsteige -----------------------------------------------------
   for (const p of platforms) {
     const role = p === a ? ' is-from' : p === b ? ' is-to' : '';
-    const g = document.createElementNS(NS, 'g');
-    g.setAttribute('class', 'xfer__plat' + role);
+    const g = node('g', {}, 'xfer__plat' + role);
 
     if (p.shape?.length > 1) {
-      const d = p.shape.map((ll, k) => `${k === 0 ? 'M' : 'L'}${px(ll).map((v) => v.toFixed(1)).join(' ')}`).join(' ');
-      const path = document.createElementNS(NS, 'path');
-      path.setAttribute('d', d);
-      path.setAttribute('class', 'xfer__plat-line');
-      g.append(path);
+      const d = p.shape
+        .map((ll, k) => `${k === 0 ? 'M' : 'L'}${px(ll).map((v) => v.toFixed(1)).join(' ')}`)
+        .join(' ');
+      g.append(node('path', { d }, 'xfer__plat-line'));
     } else {
       const [x, y] = px([p.lat, p.lon]);
-      const dot = document.createElementNS(NS, 'circle');
-      dot.setAttribute('cx', x.toFixed(1));
-      dot.setAttribute('cy', y.toFixed(1));
-      dot.setAttribute('r', '3');
-      g.append(dot);
+      g.append(node('circle', { cx: x.toFixed(1), cy: y.toFixed(1), r: 3 }));
     }
 
-    // Beschriftung an den Anfang des Bahnsteigs.
+    // Gleisnummer als Schild am Bahnsteiganfang — wie auf einem Bahnhofsplan.
     const anchor = p.shape?.length ? p.shape[0] : [p.lat, p.lon];
     const [lx, ly] = px(anchor);
-    const label = document.createElementNS(NS, 'text');
-    label.setAttribute('x', lx.toFixed(1));
-    label.setAttribute('y', (ly - 4).toFixed(1));
-    label.setAttribute('text-anchor', 'middle');
-    label.textContent = p.tracks.join('/');
-    g.append(label);
+    const text = p.tracks.join('/');
+    const w = 9 + text.length * 5.2;
+    g.append(node('rect', {
+      x: (lx - w / 2).toFixed(1), y: (ly - 15).toFixed(1),
+      width: w.toFixed(1), height: 12, rx: 3,
+    }, 'xfer__plat-tag'));
+    const t = node('text', { x: lx.toFixed(1), y: (ly - 6).toFixed(1), 'text-anchor': 'middle' });
+    t.textContent = text;
+    g.append(t);
 
     svg.append(g);
   }
 
-  // --- Laufweg obenauf ---
-  if (route?.path?.length > 1) {
-    const d = route.path.map((ll, k) => `${k === 0 ? 'M' : 'L'}${px(ll).map((v) => v.toFixed(1)).join(' ')}`).join(' ');
-    const casing = document.createElementNS(NS, 'path');
-    casing.setAttribute('d', d);
-    casing.setAttribute('class', 'xfer__walk-casing');
-    svg.append(casing);
+  // --- Weg ------------------------------------------------------------
+  const path = route?.path || [];
+  if (path.length > 1) {
+    const screen = path.map(px);
+    const d = screen
+      .map(([x, y], k) => `${k === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`)
+      .join(' ');
 
-    const walk = document.createElementNS(NS, 'path');
-    walk.setAttribute('d', d);
-    walk.setAttribute('class', 'xfer__walk');
-    svg.append(walk);
+    svg.append(node('path', { d }, 'xfer__walk-casing'));
+    svg.append(node('path', { d }, 'xfer__walk'));
+
+    // Laufrichtung: Pfeilspitzen in gleichmässigen Abständen auf der Linie.
+    // Ohne sie sieht man den Weg, aber nicht, wo er anfängt.
+    for (const [x, y, angle] of arrowsAlong(screen, 26)) {
+      svg.append(node('path', {
+        d: 'M-3.4,-2.6 L3,0 L-3.4,2.6 Z',
+        transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${angle.toFixed(0)})`,
+      }, 'xfer__walk-arrow'));
+    }
+
+    // Start und Ziel als Punkte, wie in der SBB-App.
+    for (const [i, cls] of [[0, 'is-start'], [screen.length - 1, 'is-end']]) {
+      const [x, y] = screen[i];
+      svg.append(node('circle', {
+        cx: x.toFixed(1), cy: y.toFixed(1), r: 4.5,
+      }, 'xfer__walk-end ' + cls));
+    }
+
+    // Hinweise auf Treppen und Aufzüge dort, wo sie liegen.
+    for (const m of route.marks || []) {
+      const p0 = screen[Math.min(m.at, screen.length - 1)];
+      if (!p0) continue;
+      svg.append(levelBadge(node, p0, m));
+    }
   }
 
   return svg;
+}
+
+/**
+ * Pfeilspitzen entlang eines Linienzugs, etwa alle `step` Pixel.
+ *
+ * @returns {Array<[number, number, number]>} x, y und Winkel in Grad
+ */
+function arrowsAlong(points, step) {
+  // Gesamtlänge zuerst: ein kurzer Weg soll trotzdem eine Pfeilspitze
+  // bekommen, sonst fehlt gerade bei "einmal über den Bahnsteig" die
+  // Richtungsangabe. Bei kurzen Wegen wird der Abstand entsprechend gestaucht.
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    total += Math.hypot(points[i + 1][0] - points[i][0], points[i + 1][1] - points[i][1]);
+  }
+  if (total < 6) return [];
+
+  const gap = Math.min(step, total / 2);
+
+  const out = [];
+  let carry = gap / 2;   // nicht direkt am Startpunkt beginnen
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const [x1, y1] = points[i];
+    const [x2, y2] = points[i + 1];
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 0.01) continue;
+
+    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+    for (let d = carry; d < len; d += gap) {
+      out.push([x1 + (dx * d) / len, y1 + (dy * d) / len, angle]);
+    }
+    // Rest über die Segmentgrenze hinweg mitnehmen, damit der Abstand stimmt.
+    carry = ((carry - len) % gap + gap) % gap;
+  }
+  return out;
+}
+
+/** Schild an einer Treppe oder einem Aufzug: Symbol plus Ebene. */
+function levelBadge(node, [x, y], mark) {
+  const g = node('g', { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)})` }, 'xfer__mark');
+
+  // Ebene aus dem OSM-Tag: "-1;0" heisst, hier wird zwischen -1 und 0
+  // gewechselt. Steht nichts drin, bleibt es beim Symbol allein.
+  const level = String(mark.level || '').split(/[;,]/).filter(Boolean).pop() || '';
+  const w = level ? 34 : 20;
+
+  g.append(node('rect', { x: -w / 2, y: -9, width: w, height: 18, rx: 9 }, 'xfer__mark-bg'));
+
+  // Treppe als Stufenlinie, Aufzug als Pfeil nach oben und unten. Bewusst
+  // gezeichnet statt als Zeichen: Symbolschriften sind je nach System
+  // unterschiedlich breit oder fehlen ganz.
+  const icon = mark.kind === 'elevator'
+    ? 'M0,-5 L0,5 M-3,-2 L0,-5 L3,-2 M-3,2 L0,5 L3,2'
+    : 'M-6,4 L-3,4 L-3,1 L0,1 L0,-2 L3,-2 L3,-5 L6,-5';
+  g.append(node('path', {
+    d: icon,
+    transform: `translate(${level ? -w / 2 + 9 : 0} 0)`,
+  }, 'xfer__mark-icon'));
+
+  if (level) {
+    const t = node('text', { x: w / 2 - 9, y: 4, 'text-anchor': 'middle' }, 'xfer__mark-text');
+    t.textContent = level;
+    g.append(t);
+  }
+
+  const title = node('title', {});
+  title.textContent = mark.kind === 'elevator' ? 'Aufzug' : 'Treppe';
+  g.append(title);
+  return g;
 }
 
 /** Differenz zweier ISO-Zeitpunkte in Minuten, null wenn unbekannt. */

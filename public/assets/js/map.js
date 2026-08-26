@@ -228,8 +228,17 @@ function stopsOf(journey) {
 // ---------------------------------------------------------------------------
 
 export class RouteMap {
-  constructor(container) {
+  /**
+   * @param {HTMLElement} container
+   * @param {{mode?: 'routes'|'works'}} [opts]
+   *   `works` macht daraus eine reine Baustellenkarte: keine Routen, keine
+   *   Live-Züge, eigene Beschriftung. Sonst ist alles gleich — dieselbe
+   *   Kachelquelle, dasselbe Zoomen und Ziehen, dieselbe Maßstabsleiste.
+   *   Eine zweite Karte zu bauen hätte all das doppelt bedeutet.
+   */
+  constructor(container, opts = {}) {
     this.el = container;
+    this.mode = opts.mode === 'works' ? 'works' : 'routes';
     this.zoom = 7;
     this.center = { lat: 47.8, lon: 10.5 };
     this.ranked = [];
@@ -271,7 +280,9 @@ export class RouteMap {
     this.svg = document.createElementNS(NS, 'svg');
     this.svg.setAttribute('class', 'map__svg');
     this.svg.setAttribute('role', 'img');
-    this.svg.setAttribute('aria-label', 'Karte der gefundenen Zugverbindungen');
+    this.svg.setAttribute('aria-label', this.mode === 'works'
+      ? 'Karte der Baustellen im Netz'
+      : 'Karte der gefundenen Zugverbindungen');
 
     this.viewport.append(this.tileLayer, this.svg);
 
@@ -291,7 +302,8 @@ export class RouteMap {
     controls.append(
       btn('+', 'Hineinzoomen', () => this.zoomBy(1)),
       btn('−', 'Herauszoomen', () => this.zoomBy(-1)),
-      btn('⤢', 'Ganze Route zeigen', () => { this.fit(); this.render(); }),
+      btn('⤢', this.mode === 'works' ? 'Alle Baustellen zeigen' : 'Ganze Route zeigen',
+        () => { this.fit(); this.render(); }),
       // Kleine Lücke vor dem Standort-Button, damit er als eigene Gruppe wirkt.
       btn('◎', 'Meinen Standort zeigen', (b) => this.locate(b), 'map__btn--locate'),
     );
@@ -324,7 +336,7 @@ export class RouteMap {
 
     this.hint = document.createElement('p');
     this.hint.className = 'map__hint';
-    this.hint.textContent = 'Ziehen zum Verschieben, Scrollen zum Zoomen. Auf eine Linie tippen wählt die Verbindung.';
+    this.hint.textContent = this.hintText();
     this.el.append(this.hint);
 
     this.bindGestures();
@@ -549,9 +561,22 @@ export class RouteMap {
     this.onViewChange && this.onViewChange();
   }
 
-  /** Setzt Ausschnitt und Zoom so, dass alle Routen hineinpassen. */
+  /** Setzt Ausschnitt und Zoom so, dass alles Gezeigte hineinpasst. */
   fit() {
     const pts = [];
+
+    // Auf der Baustellenkarte gibt es keine Routen — dort sind die
+    // Abschnitte selbst der Inhalt.
+    if (this.mode === 'works') {
+      for (const w of this.works) {
+        for (const p of [w.from, w.to]) {
+          if (p && p.lat != null && p.lon != null) pts.push([p.lat, p.lon]);
+        }
+      }
+      this.fitPoints(pts);
+      return;
+    }
+
     for (const e of this.ranked) {
       for (const part of geometryOf(e.journey)) pts.push(...part);
     }
@@ -604,7 +629,17 @@ export class RouteMap {
   updateHint() {
     if (!this.hint) return;
     this.hint.classList.remove('is-error');
-    this.hint.textContent = this.ranked.length === 0
+    this.hint.textContent = this.hintText();
+  }
+
+  /** Die Zeile unter der Karte — sie sagt, was hier zu sehen und zu tun ist. */
+  hintText() {
+    if (this.mode === 'works') {
+      return this.works.length === 0
+        ? 'Zurzeit sind keine grösseren Baustellen gemeldet.'
+        : 'Gestrichelt: der gesperrte oder eingeschränkte Abschnitt — nicht der Verlauf der Strecke.';
+    }
+    return this.ranked.length === 0
       ? 'Start und Ziel wählen — die Routen erscheinen hier.'
       : 'Ziehen zum Verschieben, Scrollen zum Zoomen. Auf eine Linie tippen wählt die Verbindung.';
   }
@@ -629,10 +664,21 @@ export class RouteMap {
     if (this.built) this.render();
   }
 
-  /** Bauarbeiten setzen. Gezeichnet wird nur, wenn die Ebene aktiv ist. */
+  /**
+   * Bauarbeiten setzen. Gezeichnet wird nur, wenn die Ebene aktiv ist.
+   *
+   * Auf der Baustellenkarte wird der Ausschnitt beim ERSTEN Datensatz
+   * einmal passend gesetzt und danach nicht mehr angefasst: wer
+   * hineingezoomt hat, will nach der stündlichen Aktualisierung nicht wieder
+   * bei der Übersicht landen.
+   */
   setWorks(works) {
+    const warLeer = this.works.length === 0;
     this.works = works || [];
-    if (this.built && this.showWorks) this.render();
+    if (!this.built) return;
+    if (this.mode === 'works' && warLeer && this.works.length > 0) this.fit();
+    if (this.showWorks) this.render();
+    this.updateHint();
   }
 
   /** Ebene ein-/ausschalten. */
@@ -1216,6 +1262,46 @@ export class RouteMap {
     g.append(title);
 
     svg.append(g);
+  }
+
+  /**
+   * Die Zuege, die auf der Karte erscheinen sollen — plus der verfolgte.
+   *
+   * Der verfolgte Zug MUSS immer dabei sein. Die Positionsantwort endet bei
+   * 40 Zuegen im Ausschnitt; beim Herauszoomen faellt ausgerechnet er
+   * regelmaessig heraus, und dann waere der eine Zug unsichtbar, auf den es
+   * ankommt. Steht er nicht in der Live-Liste, wird er aus seiner zuletzt
+   * bekannten Position ergaenzt.
+   *
+   * Zugeordnet wird ueber sameTrain(): die jid taugt dafuer nicht, sie wird
+   * je HAFAS-Antwort neu vergeben.
+   *
+   * @returns {{trains: Array, own: ?object}}
+   */
+  trainsOnMap() {
+    const trains = this.liveTrains.slice();
+    const pos = this.tracked?.position;
+    if (!pos || pos.lat == null || pos.lon == null) {
+      return { trains, own: null };
+    }
+
+    // Schon gemeldet? Dann ist das die genauere Position.
+    const ident = this.tracked.train;
+    const found = ident ? trains.find((t) => sameTrain(ident, t)) : null;
+    if (found) {
+      return { trains, own: found };
+    }
+
+    const own = {
+      ...(ident || {}),
+      lat: pos.lat,
+      lon: pos.lon,
+      onRoute: true,
+      // Ohne ausdrueckliches Gegenteil ist die Position hochgerechnet.
+      estimated: pos.estimated !== false,
+    };
+    trains.push(own);
+    return { trains, own };
   }
 
   renderLiveTrains(svg, w, h, toPx) {

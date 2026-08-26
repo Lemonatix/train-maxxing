@@ -343,6 +343,10 @@ export function spliceJourney(journey, cutIndex, option) {
     transferRisk: firstNew?.transferRisk ?? journey.transferRisk,
     minTransferLive: null,
     rerouted: true,
+    // Der Weg zurueck. Immer die URSPRUENGLICHE Verbindung, nicht die
+    // vorherige Zwischenstufe: sonst entstuende beim mehrfachen Umdisponieren
+    // eine Kette, die sich in den localStorage fortpflanzt.
+    original: journey.original || journey,
   };
 }
 
