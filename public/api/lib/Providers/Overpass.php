@@ -37,12 +37,69 @@ final class Overpass
 
     public function __construct(Http $http, array $cfg)
     {
-        // Siehe 'timeout' in der Konfiguration: Overpass braucht laenger als
-        // die Fahrplanquellen, und ein Abbruch sieht hier aus wie ein
-        // unkartierter Bahnhof.
-        $timeout = (int) ($cfg['timeout'] ?? 0);
-        $this->http = $timeout > 0 ? new Http($timeout) : $http;
+        $this->http = $http;
         $this->cfg  = $cfg;
+    }
+
+    /**
+     * Eine Abfrage an die erste Instanz, die antwortet.
+     *
+     * Jede bekommt nur einen Teil des Gesamtbudgets: eine tote Instanz soll
+     * nicht die ganze Zeit fressen. Vorher wartete eine Anfrage zweimal
+     * fuenfzig Sekunden und gab dann auf - der Umstiegsplan blieb weg,
+     * obwohl eine dritte Instanz sofort geantwortet haette.
+     *
+     * Als Erfolg zaehlt nur eine Antwort, die sich als JSON lesen laesst.
+     * Ueberlastete Instanzen schicken eine HTML-Fehlerseite mit Status 200;
+     * ohne diese Pruefung waere das ein Bahnhof ohne Bahnsteige.
+     *
+     * @return ?array Overpass-Antwort als Array, oder null
+     */
+    private function ask(string $query, ?string &$error = null): ?array
+    {
+        $endpoints = self::endpoints($this->cfg);
+        if ($endpoints === []) {
+            $error = 'Overpass: keine Instanz konfiguriert';
+            return null;
+        }
+
+        $budget = max(20, (int) ($this->cfg['timeout'] ?? 60));
+        $jeInstanz = max(12, (int) floor($budget / count($endpoints)));
+
+        $letzter = 0;
+        foreach ($endpoints as $url) {
+            $res = (new Http($jeInstanz))->request(
+                'POST',
+                rtrim($url, '/'),
+                [
+                    'Content-Type' => 'application/x-www-form-urlencoded',
+                    'User-Agent'   => (string) ($this->cfg['user_agent'] ?? 'train-maxxing'),
+                ],
+                'data=' . rawurlencode($query)
+            );
+            if ($res['ok'] && is_array($res['json'])) {
+                return $res['json'];
+            }
+            $letzter = (int) $res['status'];
+        }
+
+        $error = 'Overpass: HTTP ' . $letzter;
+        return null;
+    }
+
+    /**
+     * Die konfigurierten Instanzen, in der Reihenfolge des Versuchs.
+     *
+     * @return string[]
+     */
+    public static function endpoints(array $cfg): array
+    {
+        $liste = $cfg['endpoints'] ?? null;
+        if (!is_array($liste)) {
+            // Aeltere Konfiguration mit einzelnem Endpunkt und Fallback.
+            $liste = [$cfg['endpoint'] ?? '', $cfg['fallback'] ?? ''];
+        }
+        return array_values(array_filter(array_map('strval', $liste)));
     }
 
     /**
@@ -124,39 +181,12 @@ final class Overpass
             $r, $lat, $lon
         );
 
-        // Die oeffentliche Overpass-Instanz antwortet bei Last mit 504. Ein
-        // Ausweichserver kostet nichts und rettet die Anfrage - schlaegt auch
-        // der fehl, gibt es eben keinen Lageplan.
-        $endpoints = array_values(array_filter([
-            (string) ($this->cfg['endpoint'] ?? ''),
-            (string) ($this->cfg['fallback'] ?? ''),
-        ]));
-
-        $res = null;
-        foreach ($endpoints as $url) {
-            $res = $this->http->request(
-                'POST',
-                rtrim($url, '/'),
-                [
-                    'Content-Type' => 'application/x-www-form-urlencoded',
-                    'User-Agent'   => (string) ($this->cfg['user_agent'] ?? 'train-maxxing'),
-                ],
-                'data=' . rawurlencode($query)
-            );
-            if ($res['ok'] && is_array($res['json'])) {
-                break;
-            }
+        $antwort = $this->ask($query, $fehler);
+        if ($antwort === null) {
+            return ['ok' => false, 'error' => $fehler, 'data' => []];
         }
 
-        if ($res === null || !$res['ok'] || !is_array($res['json'])) {
-            return [
-                'ok'    => false,
-                'error' => 'Overpass: HTTP ' . ($res['status'] ?? 0),
-                'data'  => [],
-            ];
-        }
-
-        $elements = $res['json']['elements'] ?? [];
+        $elements = $antwort['elements'] ?? [];
 
         $out  = [];
         $ways = [];

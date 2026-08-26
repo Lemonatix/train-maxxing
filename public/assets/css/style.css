@@ -1101,14 +1101,25 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .map__tiles { position: absolute; inset: 0; }
 .map__tiles.is-off { display: none; }
 
-/* Dunkles Layout aus hellen Kacheln.
-   `invert` dreht Hell und Dunkel um, `hue-rotate(180deg)` dreht die dabei
-   verdrehten Farbtöne zurück — Wasser bleibt so blau statt orange zu werden.
-   Der Rest nimmt der Karte etwas Härte, damit die Routen darüber noch
-   deutlich abstechen. Gilt nur für die Kacheln; das SVG mit Routen, Zügen
-   und Baustellen liegt daneben und bleibt unangetastet. */
+/* --- Die Karte ist schwarzweiss ------------------------------------
+   Der Hintergrund ist Hintergrund. Farbe gehört den Routen, den Zügen und
+   den Baustellen darüber; eine Karte mit grünen Wäldern, gelben Strassen
+   und blauen Flüssen nimmt ihnen die Aufmerksamkeit und macht das Bild
+   unruhig. Entsättigt bleibt die Orientierung erhalten — Siedlung, Wasser
+   und Wald unterscheiden sich weiter in der Helligkeit — und die farbigen
+   Linien stechen wieder heraus.
+
+   Der Filter liegt nur auf den Kacheln. Das SVG mit Routen, Zügen und
+   Baustellen liegt daneben und behält seine Farben. */
+.map__tiles {
+  filter: grayscale(1) contrast(0.92) brightness(1.06);
+}
+
+/* Dunkles Layout aus denselben Kacheln: `invert` dreht Hell und Dunkel um.
+   Einen `hue-rotate` braucht es hier nicht mehr — es ist ohnehin nichts
+   Farbiges mehr da, das sich verdrehen könnte. */
 .map__tiles.is-dark {
-  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.75);
+  filter: grayscale(1) invert(1) brightness(0.9) contrast(0.9);
 }
 
 .map__tile {

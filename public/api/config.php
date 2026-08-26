@@ -123,17 +123,28 @@ return [
         // eintragen oder den Provider abschalten.
         'overpass' => [
             'enabled'    => true,
-            'endpoint'   => 'https://overpass-api.de/api/interpreter',
-            // Ausweichserver: die Hauptinstanz antwortet bei Last mit 504.
-            'fallback'   => 'https://overpass.kumi.systems/api/interpreter',
+            // Der Reihe nach, bis eine antwortet. Die oeffentlichen Instanzen
+            // sind unterschiedlich gut gelaunt: die Hauptinstanz stellt
+            // Anfragen bei Last in eine Warteschlange (gemessen: elf Sekunden
+            // fuer eine triviale Abfrage), und die Ausweichserver sind
+            // zeitweise ganz weg (HTTP 502). Mit nur einem Ausweichserver
+            // hiess das im Betrieb regelmaessig "Dienst antwortet nicht".
+            //
+            // NUR WELTWEITE INSTANZEN. Regionale Auszuege wie overpass.osm.ch
+            // antworten fuer einen deutschen Bahnhof mit HTTP 200 und einer
+            // LEEREN Liste - nicht von "nicht kartiert" zu unterscheiden.
+            'endpoints'  => [
+                'https://overpass-api.de/api/interpreter',
+                'https://overpass.kumi.systems/api/interpreter',
+                'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+                'https://overpass.private.coffee/api/interpreter',
+            ],
             'user_agent' => 'train-maxxing (+https://github.com/)',
-            // Eigener, laengerer Timeout als die uebrigen Quellen. Overpass
-            // stellt Anfragen bei Last in eine Warteschlange und braucht dann
-            // 30 bis 40 Sekunden; mit den 25 aus 'http_timeout' brach die
-            // Anfrage genau dann ab, und der Bahnhof galt als nicht kartiert.
-            // Vertretbar, weil das Ergebnis eine Woche gilt und nur beim
-            // Aufklappen eines Umstiegs geholt wird.
-            'timeout'    => 50,
+            // Gesamtbudget fuer alle Versuche zusammen. Je Instanz wird ein
+            // Teil davon angesetzt, damit eine tote Instanz nicht die ganze
+            // Zeit frisst - vorher wartete die Anfrage zweimal fuenfzig
+            // Sekunden und gab dann auf.
+            'timeout'    => 60,
         ],
 
         // --- Wagenreihung: liefert die Baureihe (ICE 4 = BR 412 usw.). ---

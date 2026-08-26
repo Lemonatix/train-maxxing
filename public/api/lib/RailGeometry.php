@@ -174,13 +174,20 @@ final class RailGeometry
 
         $query = '[out:json][timeout:60];(' . implode('', $teile) . ');out geom;';
 
-        $endpoints = array_values(array_filter([
-            (string) ($this->cfg['endpoint'] ?? ''),
-            (string) ($this->cfg['fallback'] ?? ''),
-        ]));
+        // IN UMGEKEHRTER REIHENFOLGE: Der Streckenverlauf ist Beiwerk, der
+        // Umstiegsplan nicht. Beide holen ihre Daten von Overpass, und die
+        // Instanzen setzen Grenzen je Aufrufer - fragt das Beiwerk zuerst die
+        // Hauptinstanz, verbraucht es genau das Kontingent, das gleich der
+        // Bahnhofsplan braucht. Deshalb hier hinten anfangen.
+        $endpoints = array_reverse(Overpass::endpoints($this->cfg));
+        if ($endpoints === []) {
+            return [];
+        }
+
+        $jeInstanz = max(15, (int) floor(max(30, (int) ($this->cfg['timeout'] ?? 60)) / count($endpoints)));
 
         foreach ($endpoints as $url) {
-            $res = $this->http->request(
+            $res = (new Http($jeInstanz))->request(
                 'POST',
                 rtrim($url, '/'),
                 [

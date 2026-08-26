@@ -1104,20 +1104,27 @@ async function loadPlatforms(lat, lon, from, to) {
   const key = `${lat.toFixed(4)},${lon.toFixed(4)}|${from}|${to}`;
   if (platformCache.has(key)) return platformCache.get(key);
 
-  const promise = api.platforms(lat, lon, from, to)
-    // Den Grund mitgeben: die Anzeige unterscheidet "Dienst gerade nicht
-    // erreichbar" von "Bahnhof nicht kartiert" - zweierlei für den Leser.
-    .catch(() => ({ platforms: [], route: null, error: 'Netzwerkfehler' }));
+  // Ein leeres Ergebnis kommt gar nicht erst in den Zwischenspeicher: Overpass
+  // antwortet unter Last mit Zeitüberschreitungen, und ein einmaliger
+  // Aussetzer soll den Plan nicht bis zum Neuladen der Seite blockieren.
+  //
+  // Aufgeräumt wird VOR dem Zurückgeben, nicht in einem angehängten `then` —
+  // sonst hängt es vom Zeitpunkt ab, ob der nächste Versuch die verworfene
+  // Antwort noch einmal bekommt.
+  const promise = (async () => {
+    let res;
+    try {
+      res = await api.platforms(lat, lon, from, to);
+    } catch {
+      // Den Grund mitgeben: die Anzeige unterscheidet "Dienst gerade nicht
+      // erreichbar" von "Bahnhof nicht kartiert" - zweierlei für den Leser.
+      res = { platforms: [], route: null, error: 'Netzwerkfehler' };
+    }
+    if (!res?.platforms?.length) platformCache.delete(key);
+    return res;
+  })();
 
   platformCache.set(key, promise);
-
-  // Ein leeres Ergebnis nicht für die Sitzung festhalten: Overpass antwortet
-  // unter Last mit Zeitüberschreitungen, und ein einmaliger Aussetzer soll
-  // den Plan nicht bis zum Neuladen der Seite blockieren.
-  promise.then((res) => {
-    if (!res?.platforms?.length) platformCache.delete(key);
-  });
-
   return promise;
 }
 

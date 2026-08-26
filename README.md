@@ -323,6 +323,8 @@ Nach der Korrektur, nachgemessen:
 |---|---|---|
 | Zürich HB | 24 (Gleis 3–18, 31–34, 41–44) | 276 / 276 |
 | Mannheim Hbf | 12 (vorher 1) | — |
+| Frankfurt Hbf | 28 (vorher 0) | — |
+| Stuttgart Hbf | 17 (vorher 1) | nur benachbarte — die Fusswege fehlen dort in OSM |
 | München Hbf | 17 | 136 / 136 |
 | Bern | 16 | 120 / 120 |
 | Ulm Hbf | 18 (Abschnitte) | — |
@@ -343,11 +345,31 @@ weiterhin gezeichnet, als Orientierung; was nicht in den Ausschnitt passt,
 schneidet das SVG ab, und die Gleisnummer steht dort, wo der Bahnsteig ins
 Bild kommt, statt an seinem Anfang ausserhalb.
 
-**Overpass bekommt mehr Zeit als die übrigen Quellen** (50 s statt 25, und
-`[timeout:40]` in der Abfrage selbst). Der Dienst stellt Anfragen bei Last in
-eine Warteschlange; mit dem allgemeinen Timeout brach die Anfrage genau dann
-ab, und der Bahnhof galt als nicht kartiert. Vertretbar, weil das Ergebnis
-eine Woche gilt und nur beim Aufklappen eines Umstiegs geholt wird.
+**Overpass ist der wunde Punkt.** Der Dienst stellt Anfragen bei Last in eine
+Warteschlange — gemessen: elf Sekunden für eine *triviale* Abfrage —, und die
+Ausweichserver sind zeitweise ganz weg (HTTP 502). Drei Dinge dagegen:
+
+- **Vier Instanzen statt zwei**, der Reihe nach, und jede bekommt nur einen
+  Teil des Zeitbudgets. Vorher wartete eine Anfrage zweimal fünfzig Sekunden
+  und gab dann auf, obwohl eine dritte Instanz sofort geantwortet hätte.
+  Nachgemessen über fünf Bahnhöfe: 2,4 s bis 35,7 s, alle mit Ergebnis.
+- **Nur weltweite Instanzen.** Regionale Auszüge wie `overpass.osm.ch`
+  antworten für einen deutschen Bahnhof mit HTTP 200 und einer *leeren*
+  Liste — von „nicht kartiert" nicht zu unterscheiden. Aus demselben Grund
+  gilt eine Antwort nur dann als Erfolg, wenn sie sich als JSON lesen lässt:
+  überlastete Instanzen schicken eine HTML-Fehlerseite mit Status 200.
+- **Es wird wiederholt.** Vorher setzte die Anzeige ihr `geladen`-Flag,
+  *bevor* die Antwort da war — schlug sie fehl, tat erneutes Aufklappen
+  nichts mehr, und der Rat „später noch einmal aufklappen" ging ins Leere.
+  Jetzt gilt ein Versuch erst als erledigt, wenn er etwas geliefert hat, und
+  zwei Wiederholungen mit wachsendem Abstand laufen von selbst; der
+  Zwischenstand steht im Kasten, statt dass minutenlang „Lade Bahnsteige …"
+  stehen bleibt.
+
+Der **Streckenverlauf der Baustellen** fragt dieselben Instanzen in
+*umgekehrter* Reihenfolge ab. Er ist Beiwerk, der Umstiegsplan nicht — fragt
+das Beiwerk zuerst die Hauptinstanz, verbraucht es genau das Kontingent, das
+gleich der Bahnhofsplan braucht.
 
 Ein Fallstrick, der beim Bauen aufgefallen ist: Würzburg Hbf liefert vierzehn
 Objekte mit den Nummern 1–14 — das ist aber der **Busbahnhof davor**
@@ -801,12 +823,18 @@ OSM braucht keinen Schlüssel. Die Nutzungsbedingungen verlangen die
 Namensnennung — sie steht unten rechts im Bild und darf nicht entfernt werden —
 und keine Massenabfragen; eine Handvoll Kacheln je Seitenaufruf erfüllt das.
 
-**Dunkles Layout ohne zweite Quelle:** OSM hat keine dunklen Kacheln. Statt
-dafür wieder einen Anbieter mit Schlüsselpflicht zu holen, werden dieselben
-Kacheln per CSS-Filter umgefärbt: `invert(1)` dreht Hell und Dunkel, und
-`hue-rotate(180deg)` dreht die dabei verdrehten Farbtöne zurück, damit Wasser
-blau bleibt statt orange zu werden. Der Filter liegt nur auf den Kacheln; das
-SVG mit Routen und Zügen darüber bleibt unangetastet.
+**Die Karte ist schwarzweiss.** Der Hintergrund ist Hintergrund; Farbe gehört
+den Routen, den Zügen und den Baustellen darüber. Die OSM-Standardkacheln sind
+bunt — grüne Wälder, gelbe Strassen, blaue Flüsse —, und darüber gingen die
+farbigen Linien unter. Entsättigt bleibt die Orientierung erhalten (Siedlung,
+Wasser und Wald unterscheiden sich weiter in der Helligkeit), und die Linien
+stechen wieder heraus.
+
+**Dunkles Layout ohne zweite Quelle:** OSM hat keine dunklen Kacheln. Derselbe
+Filter erledigt das mit — `invert(1)` dreht Hell und Dunkel um. Einen
+`hue-rotate` braucht es nicht: nach dem Entsättigen ist nichts Farbiges mehr
+da, das sich verdrehen könnte. Der Filter liegt nur auf den Kacheln; das SVG
+mit Routen und Zügen darüber bleibt unangetastet.
 
 Damit sieht ein fremder Server die IP-Adressen deiner Besucher — das ist der
 Preis für den Hintergrund. Wer das nicht will, setzt `TILES.url` auf `null`;

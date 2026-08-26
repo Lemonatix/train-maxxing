@@ -473,14 +473,53 @@ function renderTransferPlan(journey, leg, actions) {
   const body = el('div', 'xfer__body', 'Lade Bahnsteige …');
   box.append(body);
 
-  let loaded = false;
-  box.addEventListener('toggle', async () => {
-    if (!box.open || loaded) return;
-    loaded = true;
-    const res = await actions.loadPlatforms(lat, lon, String(from), String(to));
-    body.replaceChildren();
-    body.append(...transferPlanBody(res, from, to, leg.from?.name));
-  });
+  // WIEDERHOLEN, statt den Fehler stehen zu lassen.
+  //
+  // Overpass ist ein Gemeinschaftsdienst und stellt Anfragen bei Last in eine
+  // Warteschlange; eine einzelne Abfrage geht dabei regelmässig verloren.
+  // Vorher wurde `geladen` gesetzt, BEVOR die Antwort da war — schlug sie
+  // fehl, tat erneutes Aufklappen nichts mehr, und der Rat „später noch
+  // einmal aufklappen" ging ins Leere. Jetzt gilt ein Versuch erst als
+  // erledigt, wenn er etwas geliefert hat, und zwei Wiederholungen mit
+  // wachsendem Abstand laufen von selbst.
+  const VERSUCHE = 3;
+  let geladen = false;
+  let laeuft = false;
+
+  const laden = async () => {
+    if (geladen || laeuft) return;
+    laeuft = true;
+    try {
+      for (let versuch = 1; versuch <= VERSUCHE; versuch++) {
+        const res = await actions.loadPlatforms(lat, lon, String(from), String(to));
+
+        // Wiederholt wird nur, wenn der DIENST gepatzt hat. Eine gültige
+        // Antwort ohne Bahnsteige heisst "dieser Bahnhof ist in OSM nicht
+        // erfasst" — die wird beim zweiten Fragen nicht anders, und Overpass
+        // ist ein Gemeinschaftsdienst.
+        const nochmal = !!res?.error;
+        if (!nochmal || versuch === VERSUCHE) {
+          geladen = !nochmal;
+          body.replaceChildren();
+          body.append(...transferPlanBody(res, from, to, leg.from?.name));
+          return;
+        }
+
+        // Zwischenstand, damit nicht minutenlang „Lade Bahnsteige …" steht,
+        // ohne dass sich etwas rührt.
+        body.replaceChildren(el('p', 'xfer__note',
+          `Der OpenStreetMap-Dienst antwortet gerade nicht — Versuch ${versuch + 1} von ${VERSUCHE} …`));
+        await new Promise((r) => setTimeout(r, versuch * 4000));
+
+        // Zwischendurch zugeklappt: dann nicht weiter im Hintergrund fragen.
+        if (!box.open) return;
+      }
+    } finally {
+      laeuft = false;
+    }
+  };
+
+  box.addEventListener('toggle', () => { if (box.open) laden(); });
 
   return box;
 }
@@ -512,7 +551,8 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
     // war in zweien davon schlicht falsch.
     if (res?.error) {
       p.textContent = 'Der Bahnhofsplan lässt sich gerade nicht laden — der '
-        + 'OpenStreetMap-Dienst antwortet nicht. Später noch einmal aufklappen.';
+        + 'OpenStreetMap-Dienst ist überlastet. Zuklappen und wieder aufklappen '
+        + 'versucht es erneut.';
     } else if (platforms.length === 0) {
       p.textContent = `Für ${stationName || 'diesen Bahnhof'} sind in OpenStreetMap keine `
         + 'nummerierten Bahnsteige erfasst — die Lage lässt sich daher nicht bestimmen.';

@@ -29,11 +29,15 @@ const NS = 'http://www.w3.org/2000/svg';
  * Namensnennung (steht unten im Bild) und keine Massenabfragen; für eine
  * Handvoll Kacheln je Seitenaufruf ist das erfüllt.
  *
- * DUNKLES LAYOUT: OSM hat keine dunklen Kacheln. Statt dafür wieder einen
- * Anbieter mit Schlüsselpflicht zu holen, werden dieselben Kacheln per
- * CSS-Filter umgefärbt (siehe `.map__tiles.is-dark` im Stylesheet). Das
- * Ergebnis ist nicht so fein wie eine eigens gezeichnete dunkle Karte, aber
- * es funktioniert ohne Anmeldung und ohne zweite Quelle.
+ * SCHWARZWEISS, und im dunklen Layout zusätzlich invertiert — beides per
+ * CSS-Filter auf dem Kachel-Layer (siehe `.map__tiles` im Stylesheet). Die
+ * OSM-Standardkacheln sind bunt; als Hintergrund für farbige Routen, Züge
+ * und Baustellen ist das zu unruhig. Entsättigt bleibt die Orientierung, und
+ * die Linien darüber stechen wieder heraus.
+ *
+ * Nebenbei löst derselbe Filter das fehlende dunkle Kachelset: OSM hat keins,
+ * und statt dafür wieder einen Anbieter mit Schlüsselpflicht zu holen, wird
+ * einfach invertiert.
  *
  * Wer lieber CARTO möchte und einen Schlüssel hat, ändert nur diesen Block:
  * 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
