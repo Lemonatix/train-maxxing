@@ -247,6 +247,78 @@ Entscheidung unter `train-maxxing:theme` ab. Die hellen Werte stehen in
 `:root`, die dunklen in `[data-theme="dark"]` — alle Komponenten leiten ihre
 Farben davon ab.
 
+### Umstiegsplan: Bahnhofsskizze mit Laufweg
+
+Bei vier Minuten Umsteigezeit ist die Gleisnummer allein wertlos: entscheidend
+ist, ob man zwanzig Meter weiter oder ans andere Hallenende muss. Die
+Fahrplanquellen wissen das nicht, OpenStreetMap teilweise schon.
+
+Grosse Bahnhöfe sind dort oft **innen kartiert** — München Hbf mit über 600
+Fusswegen und Treppen samt Ebenenangabe. `?action=platforms&from=8&to=14` baut
+daraus ein Wegenetz, sucht mit Dijkstra den Weg zwischen den beiden Gleisen und
+liefert Länge, geschätzte Gehzeit und ob Treppen dabei sind. Gezeichnet wird
+eine massstäbliche Skizze: alle Bahnsteige als Balken in ihrer echten Lage,
+Ankunfts- und Abfahrtsgleis farbig, der Laufweg als gestrichelte Linie darüber.
+
+Für München Hbf, Gleis 8 → 14: *„Rund 315 m Fussweg, etwa 5 min."*
+
+Zwei Dinge, die dabei zu beachten waren:
+
+- **Treppen werden vierfach gewichtet**, Aufzüge fünffach. Für die Frage
+  „schaffe ich den Umstieg" zählt Zeit, nicht Entfernung.
+- **Zugänge, die zu beiden Bahnsteigen gehören, dürfen kein Ziel sein.** Sonst
+  endet die Suche sofort beim Startknoten und meldet null Meter — bei
+  benachbarten Bahnsteigen in einer Halle passiert genau das.
+
+**Die Abdeckung ist sehr unterschiedlich.** Nachgemessen:
+
+| Bahnhof | nummerierte Bahnsteige in OSM |
+|---|---|
+| München Hbf | 14 — Plan funktioniert |
+| Stuttgart Hbf | 1 |
+| Würzburg Hbf, Frankfurt Hbf | 0 |
+| Zürich HB | 1 (Schweizer Bahnsteige tragen meist keinen `ref`) |
+
+Deshalb erscheint der Plan nur, wenn **beide** Gleise gefunden werden; sonst
+sagt die Anzeige, was fehlt.
+
+Ein Fallstrick, der beim Bauen aufgefallen ist: Würzburg Hbf liefert vierzehn
+Objekte mit den Nummern 1–14 — das ist aber der **Busbahnhof davor**
+(`bus=yes`, `highway=platform`). Ohne den Filter in `Overpass.php` hätte die
+App Bussteige als Zuggleise angezeigt. Ausgeschlossen wird nur, was sich
+ausdrücklich als Nicht-Bahn ausweist; ein fehlendes `train`-Tag heisst bei
+Bahnsteigen meist nur, dass es niemand eingetragen hat.
+
+Wo die Fusswege fehlen, bleibt es bei der Lage ohne Weg — die Anzeige sagt das
+dann auch. Geladen wird erst beim Aufklappen: Overpass ist ein kostenlos
+betriebener Gemeinschaftsdienst, ungefragte Abfragen für jeden sichtbaren
+Umstieg wären unfair. Bahnsteige und Wege kommen in **einer** Abfrage und
+werden sieben Tage gecacht (rund 70 KB je Bahnhof).
+
+### Bauarbeiten im Netz
+
+`?action=works` liefert Bauarbeiten mit **betroffenem Abschnitt** (von Bahnhof
+A bis Bahnhof B), Zeitraum und Koordinaten. Die Liste steht unter der Karte,
+jeder Eintrag springt per Klick auf den Abschnitt; die Kartenebene lässt sich
+über „Bauarbeiten" in der Kartenleiste zuschalten und zeichnet die betroffenen
+Abschnitte gestrichelt.
+
+Quelle ist der **HAFAS Information Manager der ÖBB** (`HimSearch`). Zwei
+Dinge, die dabei nötig waren:
+
+- **Nach Kategorie filtern.** HAFAS liefert Betriebsmeldungen (Kategorie 1–3)
+  und reine Reisehinweise (4) gemischt. Ohne Filter standen 115 Meldungen
+  „ACHTUNG: Starker Reisetag" in der Baustellenliste.
+- **Richtungsunabhängig entdoppeln.** Dieselbe Sperrung kommt je Linie und je
+  Richtung erneut; Hartberg–Fehring und Fehring–Hartberg sind eine Baustelle.
+
+**Die Abdeckung ist österreichlastig.** Nachgemessen über 200 Meldungen: 178
+Österreich, 6 Deutschland. Das steht auch in der Anzeige. Für eine
+deutschlandweite Quelle wäre `strecken.info` (DB InfraGO) das Naheliegende —
+das war aus der Entwicklungsumgebung heraus nicht erreichbar und ist deshalb
+ungetestet. Ein zweiter Provider nach dem Muster von `OebbHafas::works()`
+würde reichen; das Frontend nimmt beliebig viele Einträge entgegen.
+
 ### Leistung auf schwacher Hardware
 
 Vier Posten, die auf einem älteren Laptop ohne GPU-Beschleunigung spürbar sind
@@ -412,6 +484,14 @@ Die Verfolgung **überlebt Neuladen und neue Suchen**: die Verbindung liegt unte
 solange die Fahrt noch läuft. Taucht sie in der aktuellen Trefferliste nicht auf
 — nach einer anderen Suche oder nach dem Umdisponieren — steht oben eine Zeile
 „Du verfolgst …", damit sie nicht unsichtbar weiterläuft.
+
+**Alternativen sind auswählbar, nicht nur Information.** Schon in der
+Trefferliste steht unter jedem Umstieg von 1–4 Minuten, was die nächsten
+Verbindungen ab dem Umsteigebahnhof wären — jede davon per „übernehmen"
+anzunehmen. Die Verbindung wird dann an Ort und Stelle durch die
+umdisponierte Variante ersetzt und als solche gekennzeichnet; die Abschnitte
+davor bleiben stehen. Dieselbe Mechanik (`spliceJourney`) benutzt die
+Live-Verfolgung, wenn ein Anschluss unterwegs platzt.
 
 **Anschlusswache.** Aus den Ist-Zeiten wird je Umstieg gerechnet, ob er noch zu
 schaffen ist: der Zubringer kommt um X an, der Anschluss fährt um Y ab. Liegt Y
@@ -962,6 +1042,8 @@ Alles per GET auf `api/`:
 | `?action=bestprices&from=…&to=…&date=…` | Günstigste Zeitfenster am Tag |
 | `?action=nextconnection&from=…&to=…&date=…&time=…` | Nächster Anschluss nach einem knappen Umstieg |
 | `?action=fxrate` | EZB-Tageskurse, für den Gegenwert in Franken |
+| `?action=platforms&lat=…&lon=…&from=…&to=…` | Bahnsteige und Umsteigeweg aus OpenStreetMap |
+| `?action=works` | Bauarbeiten im Netz, mit Abschnitt und Zeitraum |
 | `?action=disruptions` | Aktive Störungsmeldungen der MVG München |
 
 `journeys` versteht zusätzlich `discounts` (kommagetrennt), `products`

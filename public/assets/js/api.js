@@ -78,6 +78,22 @@ export const api = {
   /** EZB-Tageskurse, um Preise auch in Franken zu zeigen. */
   fxRate: (opts) => call('fxrate', {}, opts),
 
+  /** Bauarbeiten im Netz, mit Abschnitt und Zeitraum. */
+  works: (opts) => call('works', { days: 30 }, opts),
+
+  /**
+   * Bahnsteige und Umsteigeweg aus OpenStreetMap.
+   *
+   * Mit from/to wird zusaetzlich der Fussweg zwischen den beiden Gleisen
+   * berechnet - serverseitig, damit nicht das ganze Wegenetz des Bahnhofs
+   * durch die Leitung muss.
+   */
+  platforms: (lat, lon, from, to, opts) =>
+    call('platforms', {
+      lat: lat.toFixed(5), lon: lon.toFixed(5),
+      from: from || '', to: to || '',
+    }, opts),
+
   bestPrices: (params, opts) =>
     call('bestprices', {
       from: params.from, to: params.to, date: params.date,

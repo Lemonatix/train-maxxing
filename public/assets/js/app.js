@@ -7,12 +7,13 @@
  */
 
 import { api } from './api.js';
-import { rank, highlights, setFxRates } from './scoring.js';
+import { rank, highlights, setFxRates, spliceJourney } from './scoring.js';
 import { renderResults, renderNotices } from './render.js';
 import { RouteMap, setMapTheme, trainLabel } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
 import { ROUTES, ratingsBySpeed } from './data/routes.js';
 import { initMvgTicker } from './mvgTicker.js';
+import { initWorks } from './works.js';
 import { LiveTracker } from './live.js';
 
 // v2: Zugnummern-Regeln wurden durch Modellbewertungen ersetzt.
@@ -59,9 +60,7 @@ const state = {
   // getrennt von state.products: auf der Karte will man oft nur den
   // Fernverkehr sehen, ohne die Verbindungssuche einzuschraenken.
   liveProducts: [],
-  // Sortierung der Trefferliste: 'smart' = das Bewertungsmodell des Modus,
-  // 'price' = guenstigste zuerst, 'departure' = chronologisch.
-  sort: 'smart',
+  showWorks: false,    // Bauarbeiten-Ebene auf der Karte
   // Laufzeit
   lastPayload: null,
   ranked: [],
@@ -118,6 +117,8 @@ document.addEventListener('DOMContentLoaded', () => {
   applyStateToForm();
   // MVG-Stoerungsticker Muenchen einblenden, wenn der Endpoint Meldungen hat.
   initMvgTicker(document.getElementById('mvg-ticker'));
+  // Bauarbeiten im Netz: Liste plus Kartenebene.
+  initWorks(document.getElementById('works'), map);
 
   // Eine laufende Verfolgung ueberlebt Neuladen und neue Suchen.
   restoreTracked();
@@ -140,8 +141,7 @@ function loadSettings() {
     for (const key of [
       'mode', 'from', 'to', 'via', 'arrival', 'travelClass',
       'minChange', 'discounts', 'products',
-      'modelPrefs', 'routePrefs', 'speedWeight', 'liveTrains', 'liveProducts',
-      'sort',
+      'modelPrefs', 'routePrefs', 'speedWeight', 'liveTrains', 'liveProducts', 'showWorks',
     ]) {
       if (saved[key] !== undefined) state[key] = saved[key];
     }
@@ -168,7 +168,7 @@ function saveSettings() {
         discounts: state.discounts, products: state.products,
         modelPrefs: state.modelPrefs, routePrefs: state.routePrefs,
         speedWeight: state.speedWeight, liveTrains: state.liveTrains,
-        liveProducts: state.liveProducts, sort: state.sort,
+        liveProducts: state.liveProducts, showWorks: state.showWorks,
       })
     );
   } catch {
@@ -244,6 +244,17 @@ function setupLiveToggle() {
     }
   });
   $('#live-filter')?.toggleAttribute('hidden', !state.liveTrains);
+
+  const works = $('#show-works');
+  if (works) {
+    works.checked = state.showWorks;
+    map.toggleWorks(state.showWorks);
+    works.addEventListener('change', (e) => {
+      state.showWorks = e.target.checked;
+      map.toggleWorks(state.showWorks);
+      saveSettings();
+    });
+  }
 }
 
 /**
@@ -918,6 +929,8 @@ function draw() {
     isTracking: (journey) => live.isTracking(journey),
     trackable: (journey) => LiveTracker.trackableLegs(journey).length > 0,
     tracked: () => live.journey,
+    takeAlternative,
+    loadPlatforms,
   });
   // Die Karte zeigt genau die Routen, die auch in der Liste stehen. Die
   // Indizes bleiben dabei gueltig, weil von vorne geschnitten wird.
@@ -1022,14 +1035,19 @@ async function ensureFallbacks() {
           time: at.time,
           travelClass: state.travelClass,
           exclude: leg.trainNumber || '',
+          discounts: state.discounts,
           products: state.products,
+          // Drei zur Auswahl: bei einem Vier-Minuten-Umstieg will man nicht
+          // nur wissen, was sonst passiert, sondern auch gleich umsteigen
+          // koennen, ohne neu zu suchen.
+          limit: 3,
         })
           .then((res) => {
-            leg.fallback = (res.connections || [])[0] || null;
+            leg.fallbacks = res.connections || [];
             leg.fallbackState = 'done';
           })
           .catch(() => {
-            leg.fallback = null;
+            leg.fallbacks = [];
             leg.fallbackState = 'error';
           })
       );
@@ -1040,6 +1058,65 @@ async function ensureFallbacks() {
   await Promise.all(jobs);
   // Zweiter Durchlauf findet nur noch 'done'/'error' und startet nichts Neues.
   draw();
+}
+
+/**
+ * Bahnsteige eines Bahnhofs holen, für den Umstiegsplan.
+ *
+ * BEWUSST ERST AUF ANFORDERUNG: die Daten kommen von Overpass, einem
+ * kostenlos betriebenen Gemeinschaftsdienst. Für jeden sichtbaren Umstieg
+ * ungefragt eine Abfrage abzusetzen wäre unfair — deshalb passiert das erst,
+ * wenn jemand den Umstiegsplan aufklappt. Ergebnisse werden je Sitzung
+ * gemerkt und serverseitig eine Woche gecacht.
+ */
+const platformCache = new Map();
+
+async function loadPlatforms(lat, lon, from, to) {
+  // Der Weg haengt am Gleispaar, deshalb gehoert es in den Schluessel.
+  const key = `${lat.toFixed(4)},${lon.toFixed(4)}|${from}|${to}`;
+  if (platformCache.has(key)) return platformCache.get(key);
+
+  const promise = api.platforms(lat, lon, from, to)
+    .catch(() => ({ platforms: [], route: null }));
+
+  platformCache.set(key, promise);
+  return promise;
+}
+
+/**
+ * Eine angebotene Alternative in der Trefferliste übernehmen.
+ *
+ * Die Verbindung wird an Ort und Stelle durch die umdisponierte Variante
+ * ersetzt und ausgewählt — nicht zusätzlich eingefügt. Sonst stünden zwei
+ * Karten mit demselben ersten Zugabschnitt nebeneinander, und man müsste
+ * raten, welche die eigene ist.
+ */
+function takeAlternative(journey, leg, option) {
+  const legs = journey.legs || [];
+  const cut = legs.indexOf(leg);
+  if (cut < 0 || !state.lastPayload) return;
+
+  const merged = spliceJourney(journey, cut, option);
+
+  const list = state.lastPayload.journeys;
+  const at = list.indexOf(journey);
+  if (at >= 0) list[at] = merged;
+  else list.push(merged);
+
+  rerank();
+
+  // Auf die neue Variante springen, damit die Karte sie zeigt.
+  const idx = state.ranked.findIndex((e) => e.journey === merged);
+  if (idx >= 0) {
+    state.selectedIndex = idx;
+    if (idx >= state.visible) {
+      state.visible = Math.min(
+        Math.ceil((idx + 1) / PAGE_SIZE) * PAGE_SIZE,
+        state.ranked.length
+      );
+    }
+    draw();
+  }
 }
 
 /**

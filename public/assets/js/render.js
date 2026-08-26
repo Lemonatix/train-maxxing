@@ -221,6 +221,10 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   const badges = el('div', 'badges');
   const add = (text, cls) => badges.append(el('span', `badge ${cls}`, text));
 
+  // Selbst zusammengestellt, nicht so im Fahrplan: das gehoert kenntlich
+  // gemacht, sonst sucht man diese Verbindung im Ticketshop vergeblich.
+  if (j.rerouted) add('umdisponiert', 'badge--rerouted');
+
   if (marks.cheapest === entry) add('günstigste', 'badge--price');
   if (marks.fastest === entry) add('schnellste', 'badge--fast');
   if (marks.comfiest === entry) add('bequemste', 'badge--comfort');
@@ -330,7 +334,7 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   // --- Detailbereich ---
   const details = el('details', 'journey__details');
   details.append(el('summary', null, 'Streckenverlauf und Details'));
-  details.append(renderLegs(j, entry, state));
+  details.append(renderLegs(j, entry, state, liveCtl));
   card.append(details);
 
   // --- Buchen: Shops der berührten Länder, Startland zuerst ---
@@ -362,40 +366,294 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
 }
 
 /**
- * "Wenn du den Anschluss nicht kriegst": naechste Verbindung ab dem
- * Umsteigebahnhof. Wird von app.js nachgeladen, deshalb hier drei Zustaende.
+ * "Wenn du den Anschluss nicht kriegst": die naechsten Verbindungen ab dem
+ * Umsteigebahnhof, jede davon uebernehmbar.
+ *
+ * Wird von app.js nachgeladen, deshalb hier drei Zustaende. Anklickbar sind
+ * die Vorschlaege, weil ein knapper Umstieg zwei Fragen aufwirft: was
+ * passiert, wenn ich ihn verpasse — und will ich das Risiko ueberhaupt
+ * eingehen. Die zweite beantwortet man nur, wenn man die Alternative auch
+ * nehmen kann, ohne neu zu suchen.
  */
-function renderFallback(leg) {
+function renderFallback(journey, leg, actions) {
   if (!leg.fallbackState) return null;
 
   if (leg.fallbackState === 'loading') {
-    return el('div', 'leg__fallback leg__fallback--pending', 'Suche den nächsten Anschluss …');
+    return el('div', 'leg__fallback leg__fallback--pending', 'Suche spätere Anschlüsse …');
   }
-  if (!leg.fallback) {
+
+  const options = leg.fallbacks || [];
+  if (options.length === 0) {
     return el('div', 'leg__fallback leg__fallback--none',
       'Kein späterer Anschluss gefunden — diese Verbindung hängt am Umstieg.');
   }
 
-  const f = leg.fallback;
   const box = el('div', 'leg__fallback');
-  box.append(el('span', 'leg__fallback-label', 'Verpasst?'));
+  box.append(el('span', 'leg__fallback-label', 'Stattdessen'));
 
-  const line = el('span', 'leg__fallback-text');
-  const parts = [`${formatTime(f.departure)} → ${formatTime(f.arrival)}`];
-  if (f.trains?.length) parts.push(f.trains.join(' · '));
-  if (typeof f.durationMin === 'number') parts.push(formatDuration(f.durationMin));
-  if (typeof f.changes === 'number') {
-    parts.push(f.changes === 0 ? 'direkt' : `${f.changes} Umstieg${f.changes > 1 ? 'e' : ''}`);
-  }
-  line.textContent = parts.join(' · ');
-  box.append(line);
+  const list = el('div', 'leg__fallback-list');
+  for (const f of options) {
+    const parts = [];
+    if (f.trains?.length) parts.push(f.trains.join(' · '));
+    if (typeof f.changes === 'number') {
+      parts.push(f.changes === 0 ? 'direkt' : `${f.changes} Umstieg${f.changes > 1 ? 'e' : ''}`);
+    }
 
-  // Wie viel später man ankommt, ist die eigentlich interessante Zahl.
-  const lost = lateBy(leg.journeyArrival, f.arrival);
-  if (lost != null && lost > 0) {
-    box.append(el('span', 'leg__fallback-lost', `+${formatDuration(lost)} später am Ziel`));
+    const btn = el('button', 'leg__alt');
+    btn.type = 'button';
+    btn.append(el('span', 'leg__alt-times',
+      `${formatTime(f.departure)} → ${formatTime(f.arrival)}`));
+    btn.append(el('span', 'leg__alt-meta', parts.join(' · ')));
+
+    // Wie viel später man ankommt, ist die eigentlich interessante Zahl.
+    const lost = lateBy(leg.journeyArrival, f.arrival);
+    if (lost != null && lost > 0) {
+      btn.append(el('span', 'leg__alt-lost', `+${formatDuration(lost)}`));
+    }
+    btn.append(el('span', 'leg__alt-take', 'übernehmen'));
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();  // nicht zugleich die Karte auswaehlen
+      actions?.takeAlternative?.(journey, leg, f);
+    });
+    list.append(btn);
   }
+
+  box.append(list);
   return box;
+}
+
+// ---------------------------------------------------------------------
+// Umstiegsplan
+// ---------------------------------------------------------------------
+
+/**
+ * "Wie weit ist es zum Anschlussgleis?"
+ *
+ * Bei einem Vier-Minuten-Umstieg ist das die eigentliche Frage — die
+ * Gleisnummer allein sagt nichts darüber, ob man zwanzig Meter weiter oder
+ * ans andere Ende der Halle muss.
+ *
+ * Die Bahnsteiglage kommt aus OpenStreetMap und wird erst geladen, wenn
+ * jemand aufklappt. Wo OSM keine Gleisnummern führt — in der Schweiz häufig —
+ * entfällt der Plan; angezeigt wird er nur, wenn BEIDE Gleise gefunden werden.
+ */
+function renderTransferPlan(journey, leg, actions) {
+  const legs = journey.legs || [];
+  const at = legs.indexOf(leg);
+  const prev = [...legs.slice(0, at)].reverse().find((l) => l.mode === 'train');
+
+  const from = prev?.to?.platform;
+  const to = leg.from?.platform;
+  const lat = leg.from?.lat;
+  const lon = leg.from?.lon;
+  if (!from || !to || lat == null || lon == null || !actions?.loadPlatforms) return null;
+
+  const box = el('details', 'xfer');
+  const sum = el('summary', 'xfer__summary');
+  sum.append(el('span', 'xfer__tracks', `Gleis ${from} → Gleis ${to}`));
+  sum.append(el('span', 'xfer__hint', 'Lageplan'));
+  box.append(sum);
+
+  const body = el('div', 'xfer__body', 'Lade Bahnsteige …');
+  box.append(body);
+
+  let loaded = false;
+  box.addEventListener('toggle', async () => {
+    if (!box.open || loaded) return;
+    loaded = true;
+    const res = await actions.loadPlatforms(lat, lon, String(from), String(to));
+    body.replaceChildren();
+    body.append(...transferPlanBody(res, from, to, leg.from?.name));
+  });
+
+  return box;
+}
+
+/** Inhalt des Umstiegsplans: Bahnhofsskizze mit Laufweg, oder eine Erklärung. */
+function transferPlanBody(res, fromTrack, toTrack, stationName) {
+  const platforms = res?.platforms || [];
+  const route = res?.route || null;
+
+  const find = (track) => platforms.find((p) =>
+    (p.tracks || []).some((t) => String(t) === String(track)));
+
+  const a = find(fromTrack);
+  const b = find(toTrack);
+
+  if (res?.samePlatform) {
+    return [el('p', 'xfer__note',
+      'Gleis gegenüber am selben Bahnsteig — nur die Seite wechseln.')];
+  }
+
+  if (!a || !b) {
+    // Häufiger Fall: OSM kennt die Bahnsteige des Bahnhofs, aber ohne
+    // Gleisnummern. Ohne die lässt sich Gleis 7 nicht auf der Karte finden.
+    const p = el('p', 'xfer__note');
+    p.textContent = platforms.length === 0
+      ? `Für ${stationName || 'diesen Bahnhof'} sind in OpenStreetMap keine `
+        + 'nummerierten Bahnsteige erfasst — die Lage lässt sich daher nicht bestimmen.'
+      : `In OpenStreetMap fehlen für ${stationName || 'diesen Bahnhof'} die Nummern `
+        + `von Gleis ${fromTrack} bzw. ${toTrack}. Bekannt sind nur: `
+        + platforms.map((x) => x.tracks.join('/')).slice(0, 8).join(', ') + '.';
+    return [p];
+  }
+
+  const out = [];
+  const line = el('p', 'xfer__note');
+
+  if (route?.found && route.metres != null) {
+    const mins = route.minutes;
+    line.textContent = route.adjacent
+      ? `Bahnsteig nebenan — rund ${Math.round(route.metres)} m.`
+      : `Rund ${Math.round(route.metres)} m Fussweg`
+        + (mins ? `, etwa ${mins < 1 ? 'unter einer Minute' : mins.toFixed(0) + ' min'}.` : '.');
+    if (route.steps) {
+      line.append(el('span', 'xfer__level', ' Über Treppen — mit Gepäck länger.'));
+    }
+  } else {
+    line.textContent = 'Der Weg zwischen den Bahnsteigen ist in OpenStreetMap '
+      + 'nicht durchgehend erfasst — gezeigt ist nur die Lage.';
+  }
+
+  // Ein Ebenenwechsel kostet mehr Zeit, als die Entfernung vermuten lässt.
+  if (a.level != null && b.level != null && a.level !== b.level) {
+    line.append(el('span', 'xfer__level', ' Dazu ein Ebenenwechsel.'));
+  }
+  out.push(line);
+
+  out.push(transferSvg(platforms, a, b, route));
+  out.push(el('p', 'xfer__source',
+    'Bahnhofsplan aus OpenStreetMap. Der Weg folgt den dort erfassten '
+    + 'Fusswegen und Treppen; Wartezeiten am Aufzug sind nicht enthalten.'));
+  return out;
+}
+
+/**
+ * Bahnhofsskizze mit Umsteigeweg.
+ *
+ * Zeichnet die Bahnsteige als Balken in ihrer echten Lage und den berechneten
+ * Fussweg als Linie darüber — das Gegenstück zum kleinen Bahnhofsplan in der
+ * SBB-App. Alles ist massstäblich; gedreht wird nur auf die Längsachse des
+ * Bahnhofs, sonst läge ein Nord-Süd-Bahnhof hochkant im Kasten.
+ *
+ * Als Achse dienen die beiden am weitesten auseinanderliegenden Punkte. Bei
+ * einem länglichen Gebilde wie einem Bahnhof ist das genau die Richtung der
+ * Gleise.
+ */
+function transferSvg(platforms, a, b, route) {
+  const NS = 'http://www.w3.org/2000/svg';
+
+  // Alle Punkte einsammeln: Bahnsteigumrisse und der Weg.
+  const all = [];
+  for (const p of platforms) {
+    if (p.shape?.length) all.push(...p.shape);
+    else all.push([p.lat, p.lon]);
+  }
+  if (route?.path?.length) all.push(...route.path);
+  if (all.length < 2) return el('p', 'xfer__note', 'Zu wenig Geodaten für eine Skizze.');
+
+  const lat0 = all[0][0];
+  const lon0 = all[0][1];
+  const toM = ([la, lo]) => [
+    (lo - lon0) * 111320 * Math.cos((lat0 * Math.PI) / 180),
+    (la - lat0) * 110540,
+  ];
+
+  const pts = all.map(toM);
+
+  // Längsachse über das am weitesten entfernte Punktepaar. Bei vielen Punkten
+  // reicht eine Stichprobe — quadratisch über 2000 Punkte wäre verschwendet.
+  const sample = pts.length > 120
+    ? pts.filter((_, i) => i % Math.ceil(pts.length / 120) === 0)
+    : pts;
+  let ax = 1, ay = 0, best = -1;
+  for (let i = 0; i < sample.length; i++) {
+    for (let j = i + 1; j < sample.length; j++) {
+      const dx = sample[j][0] - sample[i][0];
+      const dy = sample[j][1] - sample[i][1];
+      const d = dx * dx + dy * dy;
+      if (d > best) { best = d; const len = Math.sqrt(d) || 1; ax = dx / len; ay = dy / len; }
+    }
+  }
+
+  const project = ([x, y]) => [x * ax + y * ay, -x * ay + y * ax];
+  const proj = pts.map(project);
+  const uMin = Math.min(...proj.map((p) => p[0]));
+  const uMax = Math.max(...proj.map((p) => p[0]));
+  const vMin = Math.min(...proj.map((p) => p[1]));
+  const vMax = Math.max(...proj.map((p) => p[1]));
+
+  const W = 320, H = 150, pad = 14;
+  // Gleicher Massstab in beide Richtungen, sonst stimmen die Proportionen nicht.
+  const scale = Math.min(
+    (uMax - uMin) > 1 ? (W - 2 * pad) / (uMax - uMin) : Infinity,
+    (vMax - vMin) > 1 ? (H - 2 * pad) / (vMax - vMin) : Infinity
+  );
+  const s = Number.isFinite(scale) ? scale : 1;
+  const offU = (W - (uMax - uMin) * s) / 2;
+  const offV = (H - (vMax - vMin) * s) / 2;
+  const px = (ll) => {
+    const [u, v] = project(toM(ll));
+    return [offU + (u - uMin) * s, offV + (v - vMin) * s];
+  };
+
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('class', 'xfer__svg');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label',
+    `Bahnhofsplan: Weg von Gleis ${a.tracks.join('/')} zu Gleis ${b.tracks.join('/')}`);
+
+  // --- Bahnsteige ---
+  for (const p of platforms) {
+    const role = p === a ? ' is-from' : p === b ? ' is-to' : '';
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', 'xfer__plat' + role);
+
+    if (p.shape?.length > 1) {
+      const d = p.shape.map((ll, k) => `${k === 0 ? 'M' : 'L'}${px(ll).map((v) => v.toFixed(1)).join(' ')}`).join(' ');
+      const path = document.createElementNS(NS, 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('class', 'xfer__plat-line');
+      g.append(path);
+    } else {
+      const [x, y] = px([p.lat, p.lon]);
+      const dot = document.createElementNS(NS, 'circle');
+      dot.setAttribute('cx', x.toFixed(1));
+      dot.setAttribute('cy', y.toFixed(1));
+      dot.setAttribute('r', '3');
+      g.append(dot);
+    }
+
+    // Beschriftung an den Anfang des Bahnsteigs.
+    const anchor = p.shape?.length ? p.shape[0] : [p.lat, p.lon];
+    const [lx, ly] = px(anchor);
+    const label = document.createElementNS(NS, 'text');
+    label.setAttribute('x', lx.toFixed(1));
+    label.setAttribute('y', (ly - 4).toFixed(1));
+    label.setAttribute('text-anchor', 'middle');
+    label.textContent = p.tracks.join('/');
+    g.append(label);
+
+    svg.append(g);
+  }
+
+  // --- Laufweg obenauf ---
+  if (route?.path?.length > 1) {
+    const d = route.path.map((ll, k) => `${k === 0 ? 'M' : 'L'}${px(ll).map((v) => v.toFixed(1)).join(' ')}`).join(' ');
+    const casing = document.createElementNS(NS, 'path');
+    casing.setAttribute('d', d);
+    casing.setAttribute('class', 'xfer__walk-casing');
+    svg.append(casing);
+
+    const walk = document.createElementNS(NS, 'path');
+    walk.setAttribute('d', d);
+    walk.setAttribute('class', 'xfer__walk');
+    svg.append(walk);
+  }
+
+  return svg;
 }
 
 /** Differenz zweier ISO-Zeitpunkte in Minuten, null wenn unbekannt. */
@@ -418,7 +676,7 @@ function appendLegTime(line, plan, real) {
   line.append(el('span', 'leg__time leg__time--real', r));
 }
 
-function renderLegs(journey, entry, state) {
+function renderLegs(journey, entry, state, actions) {
   const wrap = el('div', 'legs');
 
   for (const leg of journey.legs) {
@@ -452,10 +710,15 @@ function renderLegs(journey, entry, state) {
           : `${leg.transferMin} min zum Umsteigen — knapp`);
       row.append(t);
 
-      // Bei sehr knappen Umstiegen die Rueckfallebene gleich mitliefern:
-      // die Frage ist nicht, ob man es schafft, sondern was sonst passiert.
-      const fb = renderFallback(leg);
+      // Bei sehr knappen Umstiegen die Alternativen gleich mitliefern:
+      // die Frage ist nicht nur, ob man es schafft, sondern auch, ob man
+      // lieber gleich anders faehrt.
+      const fb = renderFallback(journey, leg, actions);
       if (fb) row.append(fb);
+
+      // Lageplan des Umsteigebahnhofs, wenn beide Gleisnummern bekannt sind.
+      const plan = renderTransferPlan(journey, leg, actions);
+      if (plan) row.append(plan);
     }
 
     const line1 = el('div', 'leg__line');

@@ -26,7 +26,8 @@
  */
 
 import { api } from './api.js';
-import { geometryOf, trainLabel, sameTrain, snapToLine } from './map.js';
+import { geometryOf } from './map.js';
+import { spliceJourney } from './scoring.js';
 
 const REFRESH_MS = 30_000;
 
@@ -363,24 +364,7 @@ export class LiveTracker {
     const cut = (this.journey.legs || []).indexOf(missed);
     if (cut < 0) return;
 
-    const kept = (this.journey.legs || []).slice(0, cut);
-    const legs = [...kept, ...(option.legs || [])];
-    const trains = legs.filter((l) => l.mode === 'train');
-
-    const merged = {
-      ...this.journey,
-      id: this.journey.id + '+' + (option.id || 'alt'),
-      legs,
-      arrival: option.arrival,
-      changes: Math.max(0, trains.length - 1),
-      durationMin: Math.round(
-        (Date.parse(option.arrival || '') - Date.parse(this.journey.departure || '')) / 60000
-      ) || this.journey.durationMin,
-      price: option.price ?? this.journey.price,
-      // Damit die Liste sichtbar macht, dass hier umdisponiert wurde.
-      rerouted: true,
-    };
-
+    const merged = spliceJourney(this.journey, cut, option);
     const wasGps = this.gps;
     this.start(merged);
     if (wasGps) this.startGps();

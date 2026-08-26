@@ -239,6 +239,10 @@ export class RouteMap {
     // Die gerade live verfolgte Verbindung. Wird über allen Suchergebnissen
     // gezeichnet und bleibt stehen, auch wenn die Liste etwas anderes zeigt.
     this.tracked = null;
+    // Bauarbeiten im Netz als eigene Ebene: sie gehoeren zu keiner Route und
+    // sollen auch ohne Suchergebnis sichtbar sein.
+    this.works = [];
+    this.showWorks = false;
     this.built = false;
     // Maßstabsleiste unten links; wird bei jedem render() aktualisiert.
     this.scaleEl = null;
@@ -625,48 +629,37 @@ export class RouteMap {
     if (this.built) this.render();
   }
 
-  /**
-   * Der verfolgte Zug unter den Live-Zuegen des Ausschnitts - oder null.
-   *
-   * Null heisst nicht "faehrt nicht", sondern nur "gerade keine Position
-   * gemeldet": die Antwort ist auf 40 Zuege im Ausschnitt gedeckelt, beim
-   * Herauszoomen faellt der eigene Zug also regelmaessig heraus.
-   *
-   * Beide Zeichenebenen fragen hier - so faellt die Entscheidung "Live-Punkt
-   * einfaerben ODER eigenen Marker setzen" in EINEM Renderdurchlauf aus
-   * denselben Daten. Vorher steckte sie in der Positionsmeldung aus live.js,
-   * die nur alle 30 s neu berechnet wird: beim Schwenken und Zoomen war sie
-   * dadurch veraltet, der Punkt blieb gruen und der eigene Marker doppelte
-   * ihn - oder der Zug verschwand beim Herauszoomen ganz.
-   */
-  trackedLiveTrain() {
-    const id = this.tracked?.train;
-    if (!id) return null;
-    return this.liveTrains.find(
-      (t) => t.lat != null && t.lon != null && sameTrain(id, t)
-    ) || null;
+  /** Bauarbeiten setzen. Gezeichnet wird nur, wenn die Ebene aktiv ist. */
+  setWorks(works) {
+    this.works = works || [];
+    if (this.built && this.showWorks) this.render();
   }
 
-  /**
-   * Die Zuege, die auf der Karte stehen: die Live-Zuege des Ausschnitts -
-   * und, falls der verfolgte Zug nicht darunter ist, er selbst an seiner
-   * zuletzt bekannten Stelle.
-   *
-   * Zeichnen und Antippen fragen dieselbe Liste, sonst waere der ergaenzte
-   * Punkt zwar zu sehen, aber nicht anzufassen.
-   *
-   * @returns {{trains: object[], own: ?object}} own = der verfolgte Zug
-   */
-  trainsOnMap() {
-    const trains = this.liveTrains.slice();
-    let own = this.trackedLiveTrain();
+  /** Ebene ein-/ausschalten. */
+  toggleWorks(on) {
+    this.showWorks = !!on;
+    if (this.built) this.render();
+  }
 
-    if (!own && this.tracked?.train && this.tracked?.position) {
-      const p = this.tracked.position;
-      own = { ...this.tracked.train, lat: p.lat, lon: p.lon, estimated: p.estimated };
-      trains.push(own);
+  /** Auf einen Bauabschnitt zoomen. */
+  focusWork(w) {
+    const pts = [w?.from, w?.to]
+      .filter((p) => p && p.lat != null && p.lon != null)
+      .map((p) => [p.lat, p.lon]);
+    if (pts.length === 0) return;
+
+    this.showWorks = true;
+    if (pts.length === 2) {
+      this.fitPoints(pts);
+      // Ein einzelner Abschnitt fuellt sonst den ganzen Bildschirm.
+      this.zoom = Math.min(this.zoom, 11);
+    } else {
+      this.center = { lat: pts[0][0], lon: pts[0][1] };
+      this.zoom = 10;
     }
-    return { trains, own };
+    this.render();
+    this.el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    this.onViewChange && this.onViewChange();
   }
 
   /** Ausschnitt auf die verfolgte Route setzen. */
@@ -1083,11 +1076,66 @@ export class RouteMap {
       placeLabels(svg, labelled, toPx, w, h);
     }
 
+    // Bauarbeiten ganz unten: sie sind Hintergrundinformation und dürfen
+    // Routen und Züge nicht verdecken.
+    if (this.showWorks) this.renderWorks(svg, w, h, toPx);
+
     // Die verfolgte Route zuletzt vor den Zügen: sie soll über den
     // Suchergebnissen liegen, aber unter den Positionsmarkern.
     this.renderTracked(svg, toPx);
     this.renderLiveTrains(svg, w, h, toPx);
     this.renderUserLocation(svg, w, h, toPx);
+  }
+
+  /**
+   * Bauarbeiten als markierte Abschnitte.
+   *
+   * Die Meldungen nennen zwei Bahnhöfe, nicht den Streckenverlauf dazwischen.
+   * Gezeichnet wird deshalb eine gerade Verbindung — sie zeigt, WELCHER
+   * Abschnitt betroffen ist, nicht wie die Schiene dort verläuft. Gestrichelt
+   * und zurückhaltend, damit das auch so gelesen wird.
+   */
+  renderWorks(svg, w, h, toPx) {
+    if (this.works.length === 0) return;
+
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', 'map__works');
+
+    for (const item of this.works) {
+      const a = item.from, b = item.to;
+      if (a?.lat == null || b?.lat == null) continue;
+
+      const [x1, y1] = toPx([a.lat, a.lon]);
+      const [x2, y2] = toPx([b.lat, b.lon]);
+      // Ausserhalb des Ausschnitts nichts zeichnen - bei fünfzig Abschnitten
+      // spart das spürbar Arbeit.
+      const off = (x, y) => x < -200 || y < -200 || x > w + 200 || y > h + 200;
+      if (off(x1, y1) && off(x2, y2)) continue;
+
+      const line = document.createElementNS(NS, 'line');
+      line.setAttribute('x1', x1.toFixed(1));
+      line.setAttribute('y1', y1.toFixed(1));
+      line.setAttribute('x2', x2.toFixed(1));
+      line.setAttribute('y2', y2.toFixed(1));
+      line.setAttribute('class', 'map__work-line');
+      g.append(line);
+
+      for (const [x, y] of [[x1, y1], [x2, y2]]) {
+        const dot = document.createElementNS(NS, 'circle');
+        dot.setAttribute('cx', x.toFixed(1));
+        dot.setAttribute('cy', y.toFixed(1));
+        dot.setAttribute('r', '3.5');
+        dot.setAttribute('class', 'map__work-dot');
+        g.append(dot);
+      }
+
+      const title = document.createElementNS(NS, 'title');
+      title.textContent = `${a.name} – ${b.name}: ${item.title}`
+        + (item.end ? ` (bis ${item.end})` : '');
+      line.append(title);
+    }
+
+    svg.append(g);
   }
 
   /**

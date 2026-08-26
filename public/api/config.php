@@ -23,6 +23,8 @@ return [
         'prices'      => 600,    // Preise: 10 Minuten
         'disruptions' => 120,    // MVG-Stoerungsticker: 2 Minuten
         'fxrate'      => 21600,  // EZB-Wechselkurse: 6 Stunden (taeglich neu)
+        'platforms'   => 604800, // Bahnsteige aus OSM: 7 Tage (bewegen sich nicht)
+        'works'       => 3600,   // Bauarbeiten: 1 Stunde
     ],
 
     // Timeout pro Upstream-Request in Sekunden.
@@ -91,6 +93,25 @@ return [
         'mvg' => [
             'enabled'    => true,
             'endpoint'   => 'https://www.mvg.de/api/bgw-pt/v3',
+            'user_agent' => 'train-maxxing (+https://github.com/)',
+        ],
+
+        // --- OpenStreetMap via Overpass: Bahnsteige fuer den Umstiegsplan. ---
+        //
+        // Liefert Gleisnummer, Lage und Ebene der Bahnsteige. Daraus baut die
+        // App bei knappen Umstiegen einen massstaeblichen Lageplan mit der
+        // Luftlinie zwischen Ankunfts- und Abfahrtsgleis.
+        //
+        // Overpass ist ein kostenlos betriebener Gemeinschaftsdienst. Sei
+        // fair: Bahnsteige aendern sich praktisch nie, deshalb sind sieben
+        // Tage Cache gesetzt. Eine oeffentliche Instanz vertraegt keine
+        // Dauerlast - wer das Tool stark nutzt, sollte eine eigene Instanz
+        // eintragen oder den Provider abschalten.
+        'overpass' => [
+            'enabled'    => true,
+            'endpoint'   => 'https://overpass-api.de/api/interpreter',
+            // Ausweichserver: die Hauptinstanz antwortet bei Last mit 504.
+            'fallback'   => 'https://overpass.kumi.systems/api/interpreter',
             'user_agent' => 'train-maxxing (+https://github.com/)',
         ],
 

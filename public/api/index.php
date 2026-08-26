@@ -12,6 +12,8 @@
  *   ?action=bestprices&from=..&to=..&date=.. Preisstrecke fuer eine Woche
  *   ?action=nextconnection&from=..&to=..    Naechster Anschluss nach einem knappen Umstieg
  *   ?action=fxrate                          EZB-Tageskurse (fuer CHF neben EUR)
+ *   ?action=platforms&lat=..&lon=..         Bahnsteiglage aus OSM fuer den Umstiegsplan
+ *   ?action=works                           Bauarbeiten im Netz, mit Abschnitt und Zeitraum
  *   ?action=disruptions                     MVG-Stoerungsticker Muenchen
  *
  * Strategie bei journeys:
@@ -54,6 +56,8 @@ require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
 require __DIR__ . '/lib/Providers/CoachSequence.php';
 require __DIR__ . '/lib/Providers/Mvg.php';
+require __DIR__ . '/lib/Providers/Overpass.php';
+require __DIR__ . '/lib/StationPlan.php';
 
 $config = require __DIR__ . '/config.php';
 
@@ -127,11 +131,17 @@ try {
         case 'fxrate':
             handleFxRate($http, $config, $cache);
             break;
+        case 'platforms':
+            handlePlatforms($http, $config, $cache);
+            break;
+        case 'works':
+            handleWorks($http, $config, $cache);
+            break;
         case 'disruptions':
             handleDisruptions($http, $config, $cache);
             break;
         default:
-            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, fxrate, disruptions', 400);
+            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, fxrate, platforms, works, disruptions', 400);
     }
 } catch (Throwable $e) {
     // Details bleiben im Log, der Client bekommt nur eine generische Meldung.
@@ -560,6 +570,145 @@ function handleFxRate(Http $http, array $config, Cache $cache): void
     ];
     $cache->set($key, $payload);
     ok($payload + ['cached' => false]);
+}
+
+/**
+ * Bahnsteige eines Bahnhofs, fuer den Umstiegsplan.
+ *
+ * Beantwortet die Frage, die bei vier Minuten Umsteigezeit wirklich zaehlt:
+ * wie weit ist es vom Ankunfts- zum Abfahrtsgleis, und muss ich dabei die
+ * Ebene wechseln.
+ *
+ * Quelle ist OpenStreetMap. Das ist bewusst KEIN Gebaeudeplan - Treppen und
+ * Laufwege sind dort zu luecken haft erfasst, um daraus einen Fussweg zu
+ * rechnen. Geliefert werden Lage und Ebene der Bahnsteige, alles Weitere
+ * waere geraten.
+ */
+/**
+ * Bauarbeiten im Netz, mit betroffenem Abschnitt und Zeitraum.
+ *
+ * Beantwortet "wo wird gerade gebaut und wie lange noch" - auf der Karte als
+ * markierter Streckenabschnitt zwischen zwei Bahnhoefen.
+ *
+ * Quelle ist der HAFAS Information Manager der OeBB. Der Schwerpunkt liegt
+ * damit auf Oesterreich; deutsche Meldungen sind nur vereinzelt dabei. Eine
+ * deutschlandweite Quelle (DB InfraGO / strecken.info) braucht einen eigenen
+ * Provider - im README steht, was dafuer noetig waere.
+ */
+function handleWorks(Http $http, array $config, Cache $cache): void
+{
+    $days = max(1, min(90, (int) ($_GET['days'] ?? 30)));
+
+    $key    = 'works:' . $days;
+    $cached = $cache->get($key, (int) ($config['cache_ttl']['works'] ?? 3600));
+    if ($cached !== null) {
+        ok(['works' => $cached, 'cached' => true]);
+    }
+
+    $oebb = new OebbHafas($http, $config['providers']['oebb']);
+    $res  = $oebb->works($days);
+
+    if (!$res['ok']) {
+        // Beiwerk - ohne Baustellenliste funktioniert alles andere weiter.
+        ok(['works' => [], 'error' => $res['error']]);
+    }
+
+    // Die groessten zuerst, und "gross" heisst hier: dauert am laengsten.
+    // Die HAFAS-Prioritaet taugt dafuer nicht, sie steht bei allen auf 100.
+    $works = $res['data'];
+    usort($works, static function ($a, $b) {
+        $da = strtotime((string) $a['end']) - strtotime((string) $a['start']);
+        $db = strtotime((string) $b['end']) - strtotime((string) $b['start']);
+        return $db <=> $da;
+    });
+
+    $cache->set($key, $works);
+    ok(['works' => $works, 'cached' => false]);
+}
+
+function handlePlatforms(Http $http, array $config, Cache $cache): void
+{
+    if (($config['providers']['overpass']['enabled'] ?? false) !== true) {
+        ok(['platforms' => [], 'note' => 'Overpass-Provider ist abgeschaltet.']);
+    }
+
+    $lat = (float) ($_GET['lat'] ?? 0);
+    $lon = (float) ($_GET['lon'] ?? 0);
+    if ($lat === 0.0 || $lon === 0.0 || abs($lat) > 90 || abs($lon) > 180) {
+        fail('Parameter "lat" und "lon" sind erforderlich.', 400);
+    }
+
+    $station = stationData($http, $config, $cache, $lat, $lon, $why);
+    if ($station === null) {
+        // Grund mitgeben: ohne ihn ist im Betrieb nicht zu unterscheiden, ob
+        // Overpass ueberlastet war oder der Bahnhof schlicht nicht kartiert ist.
+        ok(['platforms' => [], 'error' => $why ?? 'Bahnhofsdaten nicht verfuegbar.']);
+    }
+
+    $from = trim((string) ($_GET['from'] ?? ''));
+    $to   = trim((string) ($_GET['to'] ?? ''));
+
+    // Ohne Gleisangaben nur die Bahnsteige - dann will jemand bloss wissen,
+    // was der Bahnhof ueberhaupt hat.
+    if ($from === '' || $to === '') {
+        ok(['platforms' => $station['platforms'], 'route' => null]);
+    }
+
+    $find = static function (array $platforms, string $track): ?array {
+        foreach ($platforms as $p) {
+            foreach ($p['tracks'] as $t) {
+                if ((string) $t === $track) {
+                    return $p;
+                }
+            }
+        }
+        return null;
+    };
+
+    $a = $find($station['platforms'], $from);
+    $b = $find($station['platforms'], $to);
+
+    $route = null;
+    if ($a !== null && $b !== null && $a !== $b) {
+        $route = StationPlan::route($station['platforms'], $station['ways'], $a, $b);
+    }
+
+    ok([
+        'platforms' => $station['platforms'],
+        'route'     => $route,
+        // Damit die Anzeige "gleicher Bahnsteig" von "kein Weg bekannt"
+        // unterscheiden kann.
+        'samePlatform' => $a !== null && $a === $b,
+    ]);
+}
+
+/**
+ * Bahnsteige und Fusswege eines Bahnhofs, gecacht.
+ *
+ * Auf drei Nachkommastellen gerundet (~100 m): Anfragen zum selben Bahnhof
+ * treffen denselben Cache-Eintrag, auch wenn die Quellen leicht abweichende
+ * Mittelpunkte melden. Bahnsteige und Treppen bewegen sich nicht, deshalb
+ * eine Woche - das schont den Gemeinschaftsdienst Overpass.
+ *
+ * @return ?array{platforms:array,ways:array}
+ */
+function stationData(Http $http, array $config, Cache $cache, float $lat, float $lon, ?string &$error = null): ?array
+{
+    $key    = sprintf('station:%.3f,%.3f', $lat, $lon);
+    $cached = $cache->get($key, (int) ($config['cache_ttl']['platforms'] ?? 604800));
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    $op  = new Overpass($http, $config['providers']['overpass']);
+    $res = $op->stationData($lat, $lon);
+    if (!$res['ok']) {
+        $error = $res['error'];
+        return null;
+    }
+
+    $cache->set($key, $res['data']);
+    return $res['data'];
 }
 
 function handleJourneys(Http $http, array $config, Cache $cache): void

@@ -383,6 +383,27 @@ body::before {
 }
 
 .field--grow { flex: 1 1 220px; }
+
+/*
+ * Die Optionszeile ist auf JEDER Breite ein Raster, nicht nur auf dem Telefon.
+ *
+ * Als Flexbox bestimmten die Feldinhalte die Breite — der längste Optionstext
+ * zog sein Feld auf und schob die Nachbarn ineinander. Auf dem Telefon war
+ * das behoben, auf dem iPad (768–1024 px) griff die Ausnahme nicht und der
+ * Fehler war wieder da. Rasterzellen können sich grundsätzlich nicht
+ * überlagern, egal wie lang ein Text wird; auto-fit wählt die Spaltenzahl
+ * passend zur Breite.
+ */
+.row--options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
+/* Umsteigezeit hat den längsten Text ("egal — kürzestmöglich") und bekommt
+   deshalb zwei Spalten, solange welche da sind. */
+.row--options .field--wide { grid-column: span 2; }
 .field--check { justify-content: flex-end; padding-bottom: 0.5rem; }
 
 label {
@@ -2057,6 +2078,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .badge--rule { background: var(--accent-soft); color: var(--accent); }
 .badge--score { background: var(--purple-soft); color: var(--purple); }
 .badge--variant { background: var(--surface-inset); color: var(--text-dim); }
+.badge--rerouted { background: var(--amber-soft); color: var(--amber); }
 .badge--dticket { background: var(--db-red-soft); color: var(--db-red); }
 .badge--risky { background: var(--rose-soft); color: var(--rose); }
 .badge--tight { background: var(--amber-soft); color: var(--amber); }
@@ -2178,9 +2200,155 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   color: var(--text-dim);
 }
 
-.leg__fallback-label { font-weight: 500; color: var(--text-muted); }
-.leg__fallback-text { font-variant-numeric: tabular-nums; }
-.leg__fallback-lost { color: var(--amber); }
+.leg__fallback { flex-direction: column; align-items: stretch; }
+
+.leg__fallback-label {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.leg__fallback-list { display: flex; flex-direction: column; gap: 0.25rem; }
+
+/* Jede Alternative ist ein Vorschlag zum Antippen, nicht nur eine Notiz. */
+.leg__alt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface-card);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.leg__alt:hover { border-color: var(--accent); background: var(--surface-card-hover); }
+.leg__alt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.leg__alt-times { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 500; }
+.leg__alt-meta { min-width: 0; }
+.leg__alt-lost { color: var(--amber); }
+
+/* --- Umstiegsplan ----------------------------------------------------- */
+
+.xfer {
+  margin: 0.2rem 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface-card);
+}
+
+.xfer__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  list-style: none;
+  min-height: 30px;
+}
+
+.xfer__summary::-webkit-details-marker { display: none; }
+.xfer__summary::after { content: '▾'; margin-left: auto; opacity: 0.6; }
+.xfer[open] .xfer__summary::after { content: '▴'; }
+.xfer__summary:hover { color: var(--accent); }
+
+.xfer__tracks { color: var(--text); font-weight: 500; }
+.xfer__hint { color: var(--text-muted); font-size: 0.68rem; }
+
+.xfer__body { padding: 0.1rem 0.5rem 0.5rem; }
+
+.xfer__note {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.xfer__level { color: var(--amber); }
+
+.xfer__source {
+  margin: 0.3rem 0 0;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+}
+
+/* Skizze: bewusst schlicht. Sie zeigt Lage und Abstand, keinen Grundriss —
+   alles Weitere wäre geraten und würde mehr Vertrauen wecken als verdient. */
+.xfer__svg {
+  display: block;
+  width: 100%;
+  max-width: 380px;
+  height: auto;
+  background: var(--surface-inset);
+  border-radius: var(--radius-xs);
+}
+
+/* Bahnsteige als Balken in ihrer echten Lage. Unbeteiligte blass, damit
+   Ankunfts- und Abfahrtsgleis sofort ins Auge fallen. */
+.xfer__plat-line {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 5;
+  stroke-linecap: round;
+  opacity: 0.35;
+}
+
+.xfer__plat circle { fill: var(--text-muted); opacity: 0.45; }
+
+.xfer__plat text {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  fill: var(--text-muted);
+}
+
+.xfer__plat.is-from .xfer__plat-line { stroke: var(--accent); opacity: 1; }
+.xfer__plat.is-to   .xfer__plat-line { stroke: var(--green);  opacity: 1; }
+.xfer__plat.is-from circle { fill: var(--accent); opacity: 1; }
+.xfer__plat.is-to circle { fill: var(--green); opacity: 1; }
+.xfer__plat.is-from text { fill: var(--accent); font-weight: 600; }
+.xfer__plat.is-to text { fill: var(--green); font-weight: 600; }
+
+/* Der Laufweg. Heller Untergrund darunter, damit er auch über einem
+   Bahnsteigbalken lesbar bleibt. */
+.xfer__walk-casing {
+  fill: none;
+  stroke: var(--surface-inset);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.xfer__walk {
+  fill: none;
+  stroke: var(--amber);
+  stroke-width: 2.5;
+  stroke-dasharray: 5 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.leg__alt-take {
+  margin-left: auto;
+  padding: 0.02rem 0.35rem;
+  border-radius: var(--radius-xs);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.66rem;
+}
 
 .leg__fallback--pending,
 .leg__fallback--none { color: var(--text-muted); font-style: italic; }
@@ -2482,6 +2650,62 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   color: var(--text-dim);
   border: 1px solid var(--border);
 }
+/* --- Bauarbeiten im Netz --------------------------------------------- */
+
+.works__note {
+  margin: 0.2rem 0 0.3rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* Drei Spalten: Abschnitt, Meldung, Restdauer. Die Restdauer ist die Zahl,
+   die entscheidet, ob einen das noch betrifft — deshalb rechts und farbig. */
+.works__list .mvg-ticker__item { grid-template-columns: auto 1fr auto; }
+
+/* Der Abschnitt ist anklickbar und springt auf der Karte dorthin. */
+.works__jump {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.works__jump:hover { border-color: var(--accent); color: var(--accent); }
+
+.works__section {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.mvg-ticker__until {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--amber);
+  white-space: nowrap;
+}
+
+.mvg-ticker__line--more { color: var(--text-muted); }
+
+/* Bauarbeiten auf der Karte: gestrichelt, weil die gerade Linie den
+   BETROFFENEN ABSCHNITT zeigt und nicht den Verlauf der Schiene. */
+.map__works { pointer-events: none; }
+
+.map__work-line {
+  stroke: var(--amber);
+  stroke-width: 3;
+  stroke-dasharray: 6 4;
+  opacity: 0.8;
+  pointer-events: stroke;
+}
+
+.map__work-dot { fill: var(--amber); opacity: 0.9; }
+
 .mvg-ticker__line[data-transport="UBAHN"] { color: #fff; background: #1f6bb6; border-color: #1f6bb6; }
 .mvg-ticker__line[data-transport="SBAHN"] { color: #fff; background: #128f4c; border-color: #128f4c; }
 .mvg-ticker__line[data-transport="TRAM"]  { color: #fff; background: #cc0018; border-color: #cc0018; }
@@ -2550,13 +2774,12 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
      Beschriftung und Nachbarfeld dadurch ineinander. Feste Spalten können
      das nicht, egal wie lang der Text wird. */
   .row--options {
-    display: grid;
-    /* Datum braucht mehr Platz als die Uhrzeit ("22.08.2026" gegen "12:31").
-       Gleich breite Spalten lassen das Uhrzeitfeld halb leer wirken, weil
-       Chrome den Inhalt nativer Datums- und Zeitfelder zentriert. */
+    /* Auf dem Telefon fest zwei Spalten: auto-fit käme bei 320 px Innenbreite
+       auf zwei gleich breite: Datum braucht aber mehr Platz als die Uhrzeit
+       ("22.08.2026" gegen "12:31"), sonst wirkt das Zeitfeld halb leer —
+       Chrome zentriert den Inhalt nativer Datums- und Zeitfelder. */
     grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
     gap: 0.7rem 0.55rem;
-    align-items: end;
   }
 
   /* Etwas flacher und links ausgerichtet — die Felder wirkten sonst wie

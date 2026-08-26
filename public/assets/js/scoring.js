@@ -290,6 +290,62 @@ function variantOf(entry) {
   return { id: 'via:' + mid, label: 'über ' + mid };
 }
 
+/**
+ * Eine Verbindung ab einem Umstieg durch eine andere ersetzen.
+ *
+ * Wird an zwei Stellen gebraucht und ist deshalb hier: in der Trefferliste,
+ * wenn man bei einem knappen Anschluss lieber gleich die spätere Variante
+ * nimmt, und in der Live-Verfolgung, wenn der Anschluss unterwegs platzt.
+ *
+ * Die Abschnitte VOR dem Umstieg bleiben stehen — bei der Live-Verfolgung,
+ * weil man schon im Zug sitzt, und in der Liste, weil man diesen Teil ja
+ * ohnehin genauso fahren würde.
+ *
+ * @param {object} journey   die ursprüngliche Verbindung
+ * @param {number} cutIndex  Index des Abschnitts, ab dem ersetzt wird
+ * @param {object} option    vollständige Ersatzverbindung ab dem Umstieg
+ */
+export function spliceJourney(journey, cutIndex, option) {
+  const kept = (journey.legs || []).slice(0, cutIndex);
+  const legs = [...kept, ...(option.legs || [])];
+  const trains = legs.filter((l) => l.mode === 'train');
+
+  // Die Umsteigezeit an der Nahtstelle kennt keine der beiden Quellen: sie
+  // entsteht erst durch das Zusammensetzen.
+  const lastKept = [...kept].reverse().find((l) => l.mode === 'train');
+  const firstNew = (option.legs || []).find((l) => l.mode === 'train');
+  if (lastKept && firstNew) {
+    const arr = Date.parse(lastKept.arrivalReal || lastKept.arrival || '');
+    const dep = Date.parse(firstNew.departureReal || firstNew.departure || '');
+    if (Number.isFinite(arr) && Number.isFinite(dep)) {
+      const gap = Math.round((dep - arr) / 60000);
+      firstNew.transferMin = gap;
+      firstNew.transferRisk = gap < 5 ? 'risky' : gap < 10 ? 'tight' : 'ok';
+    }
+  }
+
+  const started = Date.parse(journey.departure || '');
+  const ends = Date.parse(option.arrival || '');
+
+  return {
+    ...journey,
+    id: journey.id + '+' + (option.id || 'alt'),
+    legs,
+    arrival: option.arrival,
+    arrivalReal: option.arrivalReal ?? null,
+    changes: Math.max(0, trains.length - 1),
+    durationMin: Number.isFinite(started) && Number.isFinite(ends)
+      ? Math.round((ends - started) / 60000)
+      : journey.durationMin,
+    price: option.price ?? journey.price,
+    // Nur die Nahtstelle ist neu bewertet; die Gesamtwerte stimmen nicht mehr.
+    minTransferMin: firstNew?.transferMin ?? journey.minTransferMin,
+    transferRisk: firstNew?.transferRisk ?? journey.transferRisk,
+    minTransferLive: null,
+    rerouted: true,
+  };
+}
+
 /** Kennzeichnet die jeweils beste Verbindung je Kategorie fuer die Badges. */
 export function highlights(ranked) {
   if (!ranked || ranked.length === 0) return {};

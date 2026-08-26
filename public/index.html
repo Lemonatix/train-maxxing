@@ -247,6 +247,11 @@
         </div>
       </details>
 
+      <label class="check">
+        <input type="checkbox" id="show-works">
+        <span>Bauarbeiten</span>
+      </label>
+
       <span id="live-note" class="map-bar__note"></span>
     </div>
     <!-- Routenkarte: Kacheln von OpenStreetMap/CARTO, darüber die Routen
@@ -280,6 +285,9 @@
 
   <!-- MVG-Stoerungsticker Muenchen, per JS eingeblendet wenn aktive Meldungen vorliegen. -->
   <aside id="mvg-ticker" class="mvg-ticker-mount" hidden></aside>
+
+  <!-- Bauarbeiten im Netz: Abschnitt, Zeitraum, Sprung auf die Karte. -->
+  <aside id="works" class="mvg-ticker-mount" hidden></aside>
 
   <footer class="page-foot">
     <p>

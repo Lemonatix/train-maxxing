@@ -62,6 +62,116 @@ final class OebbHafas
         $this->cfg  = $cfg;
     }
 
+    /**
+     * Bauarbeiten und Stoerungen im Netz (HAFAS Information Manager).
+     *
+     * Liefert Meldungen mit betroffenem ABSCHNITT (von-Ort, bis-Ort),
+     * Gueltigkeitszeitraum und Koordinaten - also genau das, was sich auf
+     * einer Karte darstellen laesst: welche Strecke ist wie lange betroffen.
+     *
+     * ABDECKUNG: Diese Instanz gehoert der OeBB, entsprechend liegt der
+     * Schwerpunkt auf Oesterreich. Deutsche Meldungen sind nur vereinzelt
+     * dabei. Eine deutschlandweite Quelle braucht einen eigenen Provider -
+     * siehe README.
+     *
+     * @param int $days Vorausschau in Tagen
+     * @return array{ok:bool,error:?string,data:array}
+     */
+    public function works(int $days = 30, int $max = 200): array
+    {
+        $res = $this->call('HimSearch', [
+            'dateB'  => date('Ymd'),
+            'dateE'  => date('Ymd', strtotime('+' . max(1, $days) . ' days')),
+            'timeB'  => '000000',
+            'timeE'  => '235900',
+            'maxNum' => max(1, min(500, $max)),
+        ]);
+        if (!$res['ok']) {
+            return $res;
+        }
+
+        $body = $res['data']['res'] ?? [];
+        $locL = $body['common']['locL'] ?? [];
+        $catL = $body['common']['himMsgCatL'] ?? [];
+        $out  = [];
+        $seen = [];
+
+        foreach (($body['msgL'] ?? []) as $m) {
+            // Nur Betriebsmeldungen, keine Reisehinweise. HAFAS trennt das
+            // ueber die Kategorie: 1-3 sind Stoerung, Bauarbeiten und Ausfall,
+            // 4 ist reine Information. Ohne diesen Filter stehen 115
+            // "ACHTUNG: Starker Reisetag"-Hinweise in der Baustellenliste.
+            $catId = null;
+            foreach ($m['catRefL'] ?? [] as $ci) {
+                $catId = $catL[$ci]['id'] ?? null;
+                if ($catId !== null) {
+                    break;
+                }
+            }
+            if ($catId === null || $catId < 1 || $catId > 3) {
+                continue;
+            }
+
+            $from = $locL[$m['fLocX'] ?? -1] ?? null;
+            $to   = $locL[$m['tLocX'] ?? -1] ?? null;
+            if ($from === null || $to === null) {
+                continue;
+            }
+
+            $head = trim((string) ($m['head'] ?? ''));
+            if ($head === '') {
+                continue;
+            }
+
+            // Dieselbe Baustelle kommt je Linie und je Richtung erneut. Der
+            // Schluessel ignoriert die Richtung: Hartberg-Fehring und
+            // Fehring-Hartberg sind ein und dieselbe Sperrung.
+            $ends = [(string) ($from['extId'] ?? $from['name'] ?? ''), (string) ($to['extId'] ?? $to['name'] ?? '')];
+            sort($ends);
+            $key = $head . '|' . implode('|', $ends) . '|' . ($m['sDate'] ?? '') . ($m['eDate'] ?? '');
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $out[] = [
+                'id'    => (string) ($m['hid'] ?? $key),
+                'title' => $head,
+                // HAFAS liefert den Text mit HTML-Fragmenten; die Anzeige
+                // setzt alles per textContent, also hier schon bereinigen.
+                'text'  => trim(strip_tags((string) ($m['text'] ?? ''))),
+                'from'  => self::worksPlace($from),
+                'to'    => self::worksPlace($to),
+                'start' => self::himDate($m['sDate'] ?? null),
+                'end'   => self::himDate($m['eDate'] ?? null),
+                'category' => (int) $catId,
+                'products' => self::productsFromCls((int) ($m['prod'] ?? 0)),
+            ];
+        }
+
+        return ['ok' => true, 'error' => null, 'data' => $out];
+    }
+
+    /** @param array<string,mixed> $loc */
+    private static function worksPlace(array $loc): array
+    {
+        return [
+            'name' => (string) ($loc['name'] ?? ''),
+            'id'   => (string) ($loc['extId'] ?? ''),
+            'lat'  => isset($loc['crd']['y']) ? $loc['crd']['y'] / 1000000 : null,
+            'lon'  => isset($loc['crd']['x']) ? $loc['crd']['x'] / 1000000 : null,
+        ];
+    }
+
+    /** HAFAS-Datum "20260817" als ISO-Datum. */
+    private static function himDate(?string $d): ?string
+    {
+        if ($d === null || !preg_match('/^\d{8}$/', $d)) {
+            return null;
+        }
+        return substr($d, 0, 4) . '-' . substr($d, 4, 2) . '-' . substr($d, 6, 2);
+    }
+
     /** Ortssuche. @return array{ok:bool,error:?string,data:array} */
     public function locations(string $query, int $limit = 8): array
     {
