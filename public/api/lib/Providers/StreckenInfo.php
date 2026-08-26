@@ -53,6 +53,12 @@ final class StreckenInfo
     /** Ab wie vielen Tagen eine Sperrung als grosse Baustelle gilt. */
     private const MIN_DAYS = 7;
 
+    /** Ergebnis einer Revisionsprobe - siehe probeRevision(). */
+    private const REV_OK      = 0;
+    private const REV_TOO_OLD = 1;
+    private const REV_TOO_NEW = 2;
+    private const REV_ERROR   = 3;
+
     /** Mehr Eintraege braucht keine Uebersicht - und die Antwort bleibt klein. */
     private const MAX_WORKS = 60;
 
@@ -243,11 +249,19 @@ final class StreckenInfo
      *
      * Die Weboberflaeche bekommt ihn beim Start mitgeliefert; ein Endpunkt,
      * der ihn allein liefert, existiert nicht. Der Server verraet aber bei
-     * jeder Anfrage, in welche Richtung man suchen muss: "zu alt" oder
-     * "existiert noch nicht". Damit laesst er sich einkreisen.
+     * jeder Anfrage, in WELCHE RICHTUNG man suchen muss:
      *
-     * Der zuletzt gueltige Stand wird gemerkt und zuerst probiert - im
-     * Normalfall bleibt es bei einer einzigen kleinen Abfrage.
+     *   "Angefragte Revision 3520724 zu alt"        -> hoeher
+     *   "Revision 3530000 existiert noch nicht"     -> tiefer
+     *
+     * Genau diese Unterscheidung fehlte anfangs, und deshalb fand die Suche
+     * gar nichts: jeder Fehlschlag galt als "zu neu", also lief sie sofort
+     * nach unten - waehrend der gemerkte Stand in Wirklichkeit veraltet war
+     * und es nach oben gegangen waere. Die deutschen Baustellen blieben
+     * dadurch stumm aus, sobald der hinterlegte Ausgangswert alt genug war.
+     *
+     * Der zuletzt gueltige Stand wird gemerkt; im Normalfall bleibt es bei
+     * einer einzigen kleinen Abfrage.
      */
     private function findRevision(): ?int
     {
@@ -255,54 +269,94 @@ final class StreckenInfo
         $gemerkt = (int) ($this->cache->get($key, 86400) ?? 0);
         $start = $gemerkt > 0 ? $gemerkt : self::REVISION_SEED;
 
-        if ($this->revisionOk($start)) {
+        $p = $this->probeRevision($start);
+        if ($p === self::REV_OK) {
             return $start;
         }
+        if ($p === self::REV_ERROR) {
+            return null;   // Dienst antwortet nicht - nicht weitersuchen
+        }
 
-        // Untere und obere Schranke suchen: von der letzten bekannten Zahl aus
-        // in Zweierschritten nach oben, bis der Server "existiert noch nicht"
-        // sagt. Der gesuchte Stand liegt dann dazwischen.
+        // Ein Fenster finden, in dem der gueltige Stand liegen muss.
         $unten = $start;
         $oben  = null;
-        for ($schritt = 64; $schritt <= 1048576; $schritt *= 2) {
-            $probe = $start + $schritt;
-            if ($this->revisionOk($probe)) {
+
+        if ($p === self::REV_TOO_OLD) {
+            // In Zweierschritten nach oben, bis der Server "existiert noch
+            // nicht" sagt. Trifft ein Schritt das Fenster, sind wir fertig.
+            for ($schritt = 256; $schritt <= 4194304; $schritt *= 2) {
+                $probe = $start + $schritt;
+                $q = $this->probeRevision($probe);
+                if ($q === self::REV_OK) {
+                    $this->cache->set($key, $probe);
+                    return $probe;
+                }
+                if ($q === self::REV_TOO_NEW) {
+                    $oben = $probe;
+                    break;
+                }
+                if ($q !== self::REV_TOO_OLD) {
+                    return null;
+                }
                 $unten = $probe;
-                continue;
             }
-            $oben = $probe;
-            break;
+        } else {
+            // Der gemerkte Stand liegt in der Zukunft - kommt vor, wenn die
+            // Gegenseite ihre Zaehlung zuruecksetzt.
+            $oben  = $start;
+            $unten = max(1, $start - 4194304);
         }
+
         if ($oben === null) {
             return null;
         }
 
-        // Zwischen "geht" und "geht nicht" halbieren, bis der Uebergang
-        // gefunden ist. Zwanzig Schritte reichen fuer eine Million.
-        for ($i = 0; $i < 20 && $oben - $unten > 1; $i++) {
+        // Halbieren, bis eine Probe im Fenster landet. Das Fenster ist ein
+        // paar hundert Staende breit, deshalb geht das schnell.
+        for ($i = 0; $i < 24 && $oben - $unten > 1; $i++) {
             $mitte = intdiv($unten + $oben, 2);
-            if ($this->revisionOk($mitte)) {
+            $q = $this->probeRevision($mitte);
+            if ($q === self::REV_OK) {
+                $this->cache->set($key, $mitte);
+                return $mitte;
+            }
+            if ($q === self::REV_TOO_OLD) {
                 $unten = $mitte;
-            } else {
+            } elseif ($q === self::REV_TOO_NEW) {
                 $oben = $mitte;
+            } else {
+                return null;
             }
         }
 
-        if ($unten === $start && $gemerkt === 0) {
-            return null; // nie etwas Gueltiges gefunden
-        }
-
-        $this->cache->set($key, $unten);
-        return $unten;
+        return null;
     }
 
-    /** Kleinstmoegliche Anfrage: nimmt der Server diesen Stand an? */
-    private function revisionOk(int $rev): bool
+    /**
+     * Nimmt der Server diesen Stand an - und wenn nicht, warum?
+     *
+     * Kleinstmoegliche Anfrage: eine Region, eine Stunde, nur
+     * Totalsperrungen. Die Antwort ist damit ein paar Kilobyte statt
+     * mehrerer Megabyte.
+     */
+    private function probeRevision(int $rev): int
     {
-        // Eine Region, eine Stunde, nur Totalsperrungen - die Antwort ist
-        // damit ein paar Kilobyte statt mehrerer Megabyte.
         $res = $this->request($rev, ['MITTE'], 1, true);
-        return $res['ok'] && is_array($res['json']);
+        if ($res['ok'] && is_array($res['json'])) {
+            return self::REV_OK;
+        }
+
+        $text = (string) (($res['json']['details'][0] ?? null)
+            ?? ($res['json']['message'] ?? null)
+            ?? $res['body']);
+
+        if (mb_stripos($text, 'zu alt') !== false) {
+            return self::REV_TOO_OLD;
+        }
+        if (mb_stripos($text, 'existiert noch nicht') !== false) {
+            return self::REV_TOO_NEW;
+        }
+        return self::REV_ERROR;
     }
 
     /**

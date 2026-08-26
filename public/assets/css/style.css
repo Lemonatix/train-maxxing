@@ -1109,12 +1109,13 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
    und Wald unterscheiden sich weiter in der Helligkeit — und die farbigen
    Linien stechen wieder heraus.
 
-   Die Werte sind an der alten Kachelquelle geeicht, die vorher hier stand:
-   nachgemessen über eine Stadt- und eine Landkachel liegt CARTO „positron"
-   bei einer mittleren Helligkeit von 0,92 und „dark matter" bei 0,05. Ein
-   erster Versuch mit blossem Entsättigen landete im dunklen Layout bei 0,22
-   — ein flaues Mittelgrau statt einer dunklen Karte, und genau das sah
-   schlechter aus als vorher. Mit diesen Werten: 0,91 hell, 0,07 dunkel.
+   Die Werte sind an der alten Kachelquelle geeicht, die vorher hier stand.
+   Nachgemessen an derselben Kachel (Zuerich, Zoomstufe 13) liegt CARTO
+   „positron" bei einer mittleren Helligkeit von 0,92 und „dark matter" bei
+   0,05. Ein erster Versuch mit blossem Entsaettigen landete im dunklen
+   Layout bei 0,22 — ein flaues Mittelgrau statt einer dunklen Karte, und
+   genau das sah schlechter aus als vorher. Mit diesen Werten: 0,91 hell,
+   0,051 dunkel.
 
    Der Filter liegt nur auf den Kacheln. Das SVG mit Routen, Zügen und
    Baustellen liegt daneben und behält seine Farben. */
@@ -1132,7 +1133,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
    unter 1 zieht alles zur Mitte, und genau das war der Fehler zuvor — die
    Karte wurde ein flaues Mittelgrau statt dunkel. */
 .map__tiles.is-dark {
-  filter: grayscale(1) invert(1) contrast(1.2) brightness(0.45);
+  filter: grayscale(1) invert(1) contrast(1.2) brightness(0.34);
 }
 
 .map__tile {

@@ -324,6 +324,15 @@ Sechs Dinge, die dabei zu beachten waren:
   „4 Nord", „4 Süd", „5a", „5b" — und kein einziges nacktes „4". Der Fahrplan
   sagt aber „Gleis 4". Die blosse Nummer kommt als Zweitname dazu, nachrangig:
   wo es ein echtes „4" gibt, gewinnt das.
+- **Einzelne fehlende Nummern ergänzen.** Mannheim Hbf hat in OSM die Gleise
+  1–5 und 7–12, aber **kein 6** — jemand hat es beim Erfassen ausgelassen.
+  Fuhr der Anschlusszug von Gleis 6, entfiel deshalb der ganze Umstiegsplan,
+  obwohl der Bahnhof ringsum vollständig kartiert ist. Ergänzt wird nur, wo
+  genau *eine* Nummer zwischen zwei vorhandenen fehlt und die beiden Nachbarn
+  dicht beieinanderliegen — Gleis 5 und 7 sind in Mannheim neun Meter
+  auseinander, die Kante dazwischen ist dann kein Raten mehr. Zwischen Gleis
+  18 und 31 in Zürich klaffen dreizehn Nummern und mehrere hundert Meter;
+  dort wird nichts ergänzt. Was ergänzt wurde, sagt die Anzeige dazu.
 
 **Die Abdeckung ist sehr unterschiedlich** — und war lange schlechter, als sie
 sein musste. Zwei Fehler steckten dahinter:
@@ -403,6 +412,13 @@ App Bussteige als Zuggleise angezeigt. Ausgeschlossen wird nur, was sich
 ausdrücklich als Nicht-Bahn ausweist; ein fehlendes `train`-Tag heisst bei
 Bahnsteigen meist nur, dass es niemand eingetragen hat.
 
+**Das Aufräumen darf die teuren Einträge nicht wegwerfen.** Der Cache-Ordner
+wird gelegentlich durchgesehen, damit er nicht unbegrenzt wächst — mit dem
+Standardwert von einem Tag. Genau der traf aber jeden Tag die Einträge, die am
+teuersten zu beschaffen sind: Bahnsteige gelten sieben Tage, Streckenverläufe
+dreissig, und Overpass durfte sie danach jedes Mal neu liefern. Die Grenze
+richtet sich jetzt nach der längsten eingestellten Haltbarkeit.
+
 Wo die Fusswege fehlen, bleibt es bei der Lage ohne Weg — die Anzeige sagt das
 dann auch. Geladen wird erst beim Aufklappen: Overpass ist ein kostenlos
 betriebener Gemeinschaftsdienst, ungefragte Abfragen für jeden sichtbaren
@@ -437,16 +453,30 @@ Deutschland praktisch nichts übrig. Für eine Übersicht „wo wird gerade gros
 gebaut" war das die falsche Hälfte des Bildes. Jetzt stehen 60 deutsche
 Vorhaben vor 35 österreichischen.
 
+**Für die Schweiz gibt es keine Quelle.** Die ÖBB-Instanz kennt zwar
+schweizerische Meldungen — neun von 500 —, aber keine davon übersteht den
+Kategorie- und Dauerfilter; in der Liste steht deshalb nichts aus der Schweiz.
+Geprüft und ergebnislos: der offene Datenkatalog der SBB (`data.sbb.ch`)
+enthält keinen Datensatz zu Bauarbeiten, und `opentransportdata.swiss` verlangt
+für die interessanten Datensätze einen Schlüssel.
+
 Zwei Eigenheiten der DB-Schnittstelle haben Arbeit gemacht:
 
 - **`revision`.** Jede Anfrage muss den Datenstand nennen, auf den sie sich
   bezieht; einen Endpunkt, der ihn allein liefert, gibt es nicht (die
   Weboberfläche bekommt ihn beim Start mitgeliefert). Die Zahl wächst monoton,
-  und der Server nimmt ein Fenster von einigen hundert Ständen an — er sagt
-  dabei brauchbar, in welche Richtung man muss: *„Revision X zu alt"* gegen
-  *„Revision X existiert noch nicht"*. Damit lässt er sich einkreisen. Der
-  zuletzt gültige Stand wird gemerkt, im Normalfall bleibt es bei einer
-  einzigen kleinen Abfrage.
+  und der Server nimmt ein Fenster von einigen hundert Ständen an.
+
+  Entscheidend ist, dass er sagt, **in welche Richtung** man suchen muss:
+  *„Angefragte Revision 3520724 zu alt"* gegen *„Revision 3530000 existiert
+  noch nicht"*. Genau diese Unterscheidung fehlte im ersten Wurf — jeder
+  Fehlschlag galt als „zu neu", also lief die Suche nach unten, während der
+  hinterlegte Ausgangswert in Wirklichkeit veraltet war und es nach oben
+  gegangen wäre. Die Folge: **sobald der Startwert alt genug war, blieben die
+  deutschen Baustellen stumm aus** und die Liste zeigte wieder nur Österreich.
+  Jetzt wird die Fehlermeldung ausgewertet, exponentiell nach oben getastet
+  und dann halbiert. Der zuletzt gültige Stand wird gemerkt; im Normalfall
+  bleibt es bei einer einzigen kleinen Abfrage.
 - **Koordinaten in EPSG:3857**, nicht in Grad.
 
 Gefiltert wird auf **Totalsperrungen ab einer Woche Dauer** und nach
@@ -487,12 +517,23 @@ Aufruf genauer. Wo es nicht klappt — keine Streckennummer, in OSM nicht
 erfasst, Overpass überlastet — bleibt es bei der geraden Linie; sie wird
 gestrichelt gezeichnet, der echte Verlauf durchgezogen.
 
-Nachgemessen nach ein paar Durchläufen: **37 von 60 deutschen Abschnitten**
-(62 %) mit echtem Streckenverlauf, dazu 4 der 35 österreichischen aus den
-HAFAS-Polylinien. Die Längen sind plausibel — Berlin Zoologischer Garten bis
-Friedrichstrasse 4,9 km Verlauf gegen 4,0 km Luftlinie, Meerbeck–Xanten 26,3
-gegen 25,3. Der Anteil steigt mit jeder Aktualisierung weiter, weil der Cache
-sich füllt.
+**Erfolg hält dreissig Tage, Misserfolg nur einen.** Ein leerer Eintrag heisst
+nämlich nicht zwingend „gibt es in OSM nicht" — er entsteht genauso, wenn
+Overpass an dem Tag nur einen Teil der Gleise geliefert hat. Gemessen an
+denselben zwanzig Abschnitten schwankte die Ausbeute je nach erwischter
+Instanz zwischen 7 und 11; ohne diese Unterscheidung hätte sich so eine
+Schwankung für einen Monat festgesetzt.
+
+Nachgemessen: **41 von 60 deutschen Abschnitten** (68 %) mit echtem
+Streckenverlauf, dazu 4 der 35 österreichischen aus den HAFAS-Polylinien. Die
+Längen sind plausibel — Berlin Zoologischer Garten bis Friedrichstrasse 4,9 km
+Verlauf gegen 4,0 km Luftlinie, Meerbeck–Xanten 26,3 gegen 25,3.
+
+Was übrig bleibt, scheitert an der Erfassung, nicht am Verfahren: die Strecke
+zerfällt in OSM in mehrere unverbundene Teile (Hochrheinbahn Rheinfelden–
+Waldshut, Berlin Bornholmer Strasse–Schönholz) oder am gemeldeten Endpunkt
+liegt gar kein Gleis (Neustadt–Puttgarden: 52 km bis zum nächsten). Dort bleibt
+die gerade Linie.
 
 ### Leistung auf schwacher Hardware
 
@@ -905,7 +946,11 @@ die dunklen Flächen auf. Richtig ist das Gegenteil — Kontrast leicht **über*
 | | Filter | gemessen |
 |---|---|---|
 | hell | `grayscale(1) contrast(0.5) brightness(1.42)` | 0,91 (Ziel 0,92) |
-| dunkel | `grayscale(1) invert(1) contrast(1.2) brightness(0.45)` | 0,07 (Ziel 0,05) |
+| dunkel | `grayscale(1) invert(1) contrast(1.2) brightness(0.34)` | 0,051 (Ziel 0,052) |
+
+Gemessen wird immer an derselben Kachel (Zürich, Zoomstufe 13) — über Stadt-
+und Landkachel gemittelt fällt der Wert niedriger aus, und dann vergleicht man
+Äpfel mit Birnen.
 
 Die Reihenfolge zählt: `brightness` steht **nach** `invert` und skaliert die
 umgedrehten Werte nach unten. Davor hätte es die Karte aufgehellt.

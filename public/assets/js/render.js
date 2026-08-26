@@ -583,6 +583,14 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
       + 'nicht durchgehend erfasst — gezeigt ist nur die Lage.';
   }
 
+  // Geschätzte Lage kenntlich machen — sie stammt aus den Nachbargleisen,
+  // nicht aus OpenStreetMap selbst.
+  const geschaetzt = [a, b].filter((p) => p.estimated).map((p) => p.tracks.join('/'));
+  if (geschaetzt.length) {
+    line.append(el('span', 'xfer__level',
+      ` Die Lage von Gleis ${geschaetzt.join(' und ')} ist aus den Nachbargleisen geschätzt.`));
+  }
+
   // Ein Ebenenwechsel kostet mehr Zeit, als die Entfernung vermuten lässt.
   if (a.level != null && b.level != null && a.level !== b.level) {
     line.append(el('span', 'xfer__level', ' Dazu ein Ebenenwechsel.'));

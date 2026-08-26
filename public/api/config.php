@@ -25,6 +25,9 @@ return [
         'fxrate'      => 21600,  // EZB-Wechselkurse: 6 Stunden (taeglich neu)
         'platforms'   => 604800, // Bahnsteige aus OSM: 7 Tage (bewegen sich nicht)
         'works'       => 3600,   // Bauarbeiten: 1 Stunde
+        // Streckenverlaeufe aus OSM. Der laengste Wert hier bestimmt zugleich,
+        // wie lange der Cache-Ordner Dateien behaelt - siehe gc() in index.php.
+        'railgeom'    => 2592000, // 30 Tage (Schienen ziehen nicht um)
     ],
 
     // Timeout pro Upstream-Request in Sekunden.

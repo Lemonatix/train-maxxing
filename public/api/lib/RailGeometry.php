@@ -30,6 +30,13 @@ final class RailGeometry
     private const PAD_DEG = 0.02;
 
     /**
+     * Radius um die beiden Endpunkte, in dem ALLE Gleise geholt werden -
+     * auch die ohne Streckennummer. Rund 450 m: das fasst den Bahnhof, aber
+     * nicht die Nachbarstrecke.
+     */
+    private const ENDS_DEG = 0.004;
+
+    /**
      * Hoechstzahl Abschnitte je Abfrage. Jeder bringt eine eigene
      * Teilabfrage mit; irgendwann wird die Anfrage dem Server zu gross.
      */
@@ -62,10 +69,13 @@ final class RailGeometry
      * ist damit alles beisammen, ohne Overpass in einem Rutsch mit vierzig
      * Teilabfragen zu belasten.
      */
-    private const PER_CALL = 12;
+    private const PER_CALL = 20;
 
     /** Wie lange ein einmal ermittelter Verlauf gilt. Schienen ziehen nicht um. */
     private const TTL = 2592000; // 30 Tage
+
+    /** Nach einem Fehlschlag: fruehestens am naechsten Tag wieder versuchen. */
+    private const RETRY_AFTER = 86400;
 
     private Http $http;
     private Cache $cache;
@@ -103,15 +113,23 @@ final class RailGeometry
                 continue;
             }
 
-            // Schon einmal ermittelt? Dann von dort. Ein leeres Ergebnis wird
-            // ebenfalls gemerkt - sonst fragt jeder Aufruf erneut nach einem
-            // Abschnitt, den OSM nun einmal nicht hergibt.
+            // Schon einmal ermittelt? Dann von dort.
+            //
+            // ERFOLG haelt dreissig Tage, MISSERFOLG nur einen. Ein leerer
+            // Eintrag heisst naemlich nicht zwingend "gibt es in OSM nicht":
+            // er entsteht genauso, wenn Overpass an dem Tag nur einen Teil
+            // der Gleise geliefert hat, und dann waere die Strecke einen
+            // Monat lang zu Unrecht abgeschrieben. Gemessen an denselben
+            // zwanzig Abschnitten schwankte die Ausbeute je nach Instanz
+            // zwischen 7 und 11 - genau diese Schwankung darf sich nicht
+            // festsetzen.
             $gemerkt = $this->cache->get(self::cacheKey($w), self::TTL);
-            if (is_array($gemerkt)) {
-                if ($gemerkt !== []) {
-                    $works[$i]['geometry'] = $gemerkt;
-                }
+            if (is_array($gemerkt) && ($gemerkt['geom'] ?? []) !== []) {
+                $works[$i]['geometry'] = $gemerkt['geom'];
                 continue;
+            }
+            if (is_array($gemerkt) && time() - (int) ($gemerkt['ts'] ?? 0) < self::RETRY_AFTER) {
+                continue;   // heute schon vergeblich versucht
             }
 
             $offen[$i] = $w;
@@ -130,7 +148,7 @@ final class RailGeometry
 
         foreach ($offen as $i => $w) {
             $verlauf = $this->route($w, $wege);
-            $this->cache->set(self::cacheKey($w), $verlauf);
+            $this->cache->set(self::cacheKey($w), ['geom' => $verlauf, 'ts' => time()]);
             if ($verlauf !== []) {
                 $works[$i]['geometry'] = $verlauf;
             }
@@ -170,6 +188,23 @@ final class RailGeometry
                 'way(%.4f,%.4f,%.4f,%.4f)["railway"="rail"]["ref"~"^(%s)$"];',
                 $s, $west, $n, $ost, $refs
             );
+
+            // DAZU DIE GLEISE IN DEN BEIDEN BAHNHOEFEN, ohne Ruecksicht auf
+            // die Streckennummer: innerhalb eines Bahnhofs traegt kaum ein
+            // Gleis sie, sie klebt an der freien Strecke. Der Verlauf endete
+            // deshalb regelmaessig am Einfahrsignal und fand den gemeldeten
+            // Endpunkt nicht mehr.
+            //
+            // Eng begrenzt - ein knapper halber Kilometer um jeden Endpunkt.
+            // Grosszuegiger geschnitten kaeme in einer Stadt das halbe Netz
+            // mit, und der Weg koennte ueber eine Nachbarstrecke abkuerzen.
+            foreach ([$w['from'], $w['to']] as $ort) {
+                $teile[] = sprintf(
+                    'way(%.4f,%.4f,%.4f,%.4f)["railway"="rail"];',
+                    (float) $ort['lat'] - self::ENDS_DEG, (float) $ort['lon'] - self::ENDS_DEG,
+                    (float) $ort['lat'] + self::ENDS_DEG, (float) $ort['lon'] + self::ENDS_DEG
+                );
+            }
         }
 
         $query = '[out:json][timeout:60];(' . implode('', $teile) . ');out geom;';
@@ -208,9 +243,12 @@ final class RailGeometry
     {
         $out = [];
         foreach ($elements as $e) {
+            // Ohne `ref` ist der Weg trotzdem brauchbar: es ist dann ein
+            // Bahnhofsgleis, und genau die braucht der Anschluss an die
+            // gemeldeten Endpunkte.
             $ref = trim((string) ($e['tags']['ref'] ?? ''));
             $geom = $e['geometry'] ?? null;
-            if ($ref === '' || !is_array($geom) || count($geom) < 2) {
+            if (!is_array($geom) || count($geom) < 2) {
                 continue;
             }
             $pts = [];
@@ -239,11 +277,26 @@ final class RailGeometry
         $adj   = [];
         $key = static fn(array $p): string => $p[0] . ',' . $p[1];
 
+        // Gleise in unmittelbarer Naehe der beiden Endpunkte zaehlen mit,
+        // auch ohne passende Streckennummer - siehe ENDS_DEG.
+        $nahAmEnde = function (array $pts) use ($work): bool {
+            foreach ([$work['from'], $work['to']] as $ort) {
+                $la = (float) $ort['lat'];
+                $lo = (float) $ort['lon'];
+                foreach ($pts as $p) {
+                    if (abs($p[0] - $la) <= self::ENDS_DEG && abs($p[1] - $lo) <= self::ENDS_DEG) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
         foreach ($wege as $weg) {
-            if (!isset($refs[$weg['ref']])) {
+            $pts = $weg['points'];
+            if (!isset($refs[$weg['ref']]) && !$nahAmEnde($pts)) {
                 continue;
             }
-            $pts = $weg['points'];
             $drin = false;
             foreach ($pts as $p) {
                 if ($p[0] >= $s && $p[0] <= $n && $p[1] >= $west && $p[1] <= $ost) {

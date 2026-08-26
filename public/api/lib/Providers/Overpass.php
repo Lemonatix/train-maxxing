@@ -32,6 +32,13 @@ final class Overpass
      */
     private const RADIUS_M = 350;
 
+    /**
+     * Wie dicht zwei Nachbargleise liegen muessen, damit die Nummer
+     * dazwischen ergaenzt wird. Zwei Gleisachsen sind gut zehn Meter
+     * auseinander, ein Bahnsteig dazwischen macht rund zwanzig.
+     */
+    private const GAP_NEIGHBOUR_M = 40.0;
+
     private Http $http;
     private array $cfg;
 
@@ -358,11 +365,87 @@ final class Overpass
             ];
         }
 
+        $platforms = self::preferBestSource($out);
+        $platforms = self::fillNumberGaps($platforms);
+
         return [
             'ok'    => true,
             'error' => null,
-            'data'  => ['platforms' => self::preferBestSource($out), 'ways' => $ways],
+            'data'  => ['platforms' => $platforms, 'ways' => $ways],
         ];
+    }
+
+    /**
+     * Einzelne fehlende Gleisnummern aus ihren Nachbarn ergaenzen.
+     *
+     * WOZU: Mannheim Hbf hat in OSM die Gleise 1-5 und 7-12, aber kein 6 -
+     * jemand hat es beim Erfassen ausgelassen. Faehrt der Anschlusszug von
+     * Gleis 6, entfiel deshalb der ganze Umstiegsplan, obwohl der Bahnhof
+     * ringsum vollstaendig kartiert ist.
+     *
+     * WIE: Nur wo genau EINE Nummer zwischen zwei vorhandenen fehlt und die
+     * beiden Nachbarn dicht beieinanderliegen. Gleis 6 liegt dann in der
+     * Mitte zwischen 5 und 7 - bei neun Metern Abstand ist das kein Raten
+     * mehr, sondern die Bahnsteigkante dazwischen.
+     *
+     * WO NICHT: Zwischen Gleis 18 und 31 in Zuerich klafft eine Luecke von
+     * dreizehn Nummern und mehreren hundert Metern; dort wird nichts
+     * ergaenzt. Und was ergaenzt wurde, sagt es ueber `estimated`, damit die
+     * Anzeige es kenntlich machen kann.
+     *
+     * @param array<int,array> $platforms
+     * @return array<int,array>
+     */
+    private static function fillNumberGaps(array $platforms): array
+    {
+        $nachNummer = [];
+        foreach ($platforms as $p) {
+            foreach ($p['tracks'] as $t) {
+                if (preg_match('/^\d{1,3}$/', $t)) {
+                    $nachNummer[(int) $t] ??= $p;
+                }
+            }
+        }
+        if (count($nachNummer) < 2) {
+            return $platforms;
+        }
+        ksort($nachNummer);
+
+        $nummern = array_keys($nachNummer);
+        $neu = [];
+        for ($i = 0, $n = count($nummern) - 1; $i < $n; $i++) {
+            if ($nummern[$i + 1] - $nummern[$i] !== 2) {
+                continue;   // keine Luecke von genau einer Nummer
+            }
+            $a = $nachNummer[$nummern[$i]];
+            $b = $nachNummer[$nummern[$i + 1]];
+            if (self::metres([$a['lat'], $a['lon']], [$b['lat'], $b['lon']]) > self::GAP_NEIGHBOUR_M) {
+                continue;
+            }
+
+            $neu[] = [
+                'tracks' => [(string) ($nummern[$i] + 1)],
+                'name'   => '',
+                'lat'    => ($a['lat'] + $b['lat']) / 2,
+                'lon'    => ($a['lon'] + $b['lon']) / 2,
+                // Kein Umriss: die Lage ist geschaetzt, eine Flaeche waere
+                // eine Genauigkeit, die es nicht gibt.
+                'shape'  => [],
+                'level'  => $a['level'] !== null && $a['level'] === $b['level'] ? $a['level'] : null,
+                'estimated' => true,
+            ];
+        }
+
+        return array_merge($platforms, $neu);
+    }
+
+    /** Entfernung zweier [lat, lon]-Punkte in Metern. */
+    private static function metres(array $a, array $b): float
+    {
+        $lat = ($a[0] + $b[0]) / 2 * M_PI / 180;
+        $dx = ($b[1] - $a[1]) * 111320 * cos($lat);
+        $dy = ($b[0] - $a[0]) * 110540;
+        return sqrt($dx * $dx + $dy * $dy);
     }
 
     /**

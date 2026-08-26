@@ -92,8 +92,14 @@ $cache = new Cache((string) $config['cache_dir']);
 $http  = new Http((int) $config['http_timeout']);
 
 // Gelegentlich aufraeumen, damit der Cache-Ordner nicht unbegrenzt waechst.
+//
+// NICHT KUERZER ALS DIE LAENGSTE HALTBARKEIT: Der Standardwert von gc() ist
+// ein Tag, und der warf taeglich genau die Eintraege weg, die am teuersten zu
+// beschaffen sind - Bahnsteige gelten sieben Tage, Streckenverlaeufe dreissig.
+// Overpass durfte sie danach jedes Mal neu liefern.
+$maxTtl = max([86400, ...array_map('intval', array_values($config['cache_ttl'] ?? []))]);
 if (random_int(1, 100) === 1) {
-    $cache->gc();
+    $cache->gc($maxTtl + 86400);
 }
 
 if (!rateLimitOk($cache, $config)) {
