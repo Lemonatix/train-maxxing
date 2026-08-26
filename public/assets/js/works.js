@@ -114,6 +114,18 @@ export function initWorks(mount) {
   };
 }
 
+/**
+ * Die Liste, nach Ländern gruppiert und je Land aufklappbar.
+ *
+ * Vorher standen hier acht Zeilen und sonst nichts — an die übrigen
+ * siebenundachtzig kam man gar nicht heran. Sie alle auf einmal auszuschütten
+ * wäre aber auch nichts: hundert Zeilen unter der Karte liest niemand.
+ *
+ * Also nach Land gruppiert, mit Anzahl an der Überschrift. Das erste Land ist
+ * offen, die übrigen zugeklappt, und innerhalb eines Landes werden die ersten
+ * Einträge gezeigt und der Rest über einen Knopf nachgeschoben. So ist alles
+ * erreichbar, ohne dass beim Aufklappen eine Wand aus Text kommt.
+ */
 function render(mount, count, list, works, ensureMap) {
   if (works.length === 0) {
     mount.hidden = true;
@@ -122,41 +134,113 @@ function render(mount, count, list, works, ensureMap) {
   mount.hidden = false;
   count.textContent = String(works.length);
 
-  list.replaceChildren();
-  for (const w of works.slice(0, MAX_ROWS)) {
-    const li = document.createElement('li');
-    li.className = 'mvg-ticker__item works__item';
-    // Der vollständige Meldungstext als Tooltip. In der Zeile steht nur, was
-    // dort hineinpasst; wer mehr wissen will, fährt darüber.
-    if (w.text) li.title = w.text;
-
-    // Anklickbar: der Kartenausschnitt springt auf den Abschnitt. Genau
-    // dafür sind die Koordinaten da — "wo ist das eigentlich".
-    const jump = document.createElement('button');
-    jump.type = 'button';
-    jump.className = 'works__jump';
-    jump.title = 'Auf der Karte zeigen';
-
-    const sect = document.createElement('span');
-    sect.className = 'works__section';
-    sect.textContent = `${short(w.from?.name)} → ${short(w.to?.name)}`;
-    jump.append(sect);
-
-    jump.addEventListener('click', () => ensureMap().focusWork(w));
-    li.append(jump);
-
-    const title = document.createElement('span');
-    title.className = 'mvg-ticker__title works__title';
-    title.textContent = topic(w.title);
-    li.append(title);
-
-    const until = document.createElement('span');
-    until.className = 'mvg-ticker__until';
-    until.textContent = untilText(w.end);
-    li.append(until);
-
-    list.append(li);
+  // Reihenfolge der Länder wie sie kommen — der Server sortiert bereits
+  // Deutschland nach vorn.
+  const nachLand = new Map();
+  for (const w of works) {
+    const land = String(w.country || '').toLowerCase() || 'xx';
+    if (!nachLand.has(land)) nachLand.set(land, []);
+    nachLand.get(land).push(w);
   }
+
+  list.replaceChildren();
+  let erstes = true;
+  for (const [land, eintraege] of nachLand) {
+    list.append(landGruppe(land, eintraege, erstes, ensureMap));
+    erstes = false;
+  }
+}
+
+/** Ein Land als aufklappbarer Block mit seinen Baustellen. */
+function landGruppe(land, eintraege, offen, ensureMap) {
+  const li = document.createElement('li');
+  li.className = 'works__land';
+
+  const box = document.createElement('details');
+  box.className = 'works__land-box';
+  box.open = offen;
+
+  const sum = document.createElement('summary');
+  sum.className = 'works__land-summary';
+  const name = document.createElement('span');
+  name.textContent = landName(land);
+  const zahl = document.createElement('span');
+  zahl.className = 'works__land-count';
+  zahl.textContent = String(eintraege.length);
+  sum.append(name, zahl);
+  box.append(sum);
+
+  const ul = document.createElement('ul');
+  ul.className = 'mvg-ticker__list works__list';
+  box.append(ul);
+
+  let gezeigt = 0;
+  const mehr = document.createElement('button');
+  mehr.type = 'button';
+  mehr.className = 'works__more';
+
+  const nachschieben = () => {
+    for (const w of eintraege.slice(gezeigt, gezeigt + MAX_ROWS)) {
+      ul.append(zeile(w, ensureMap));
+    }
+    gezeigt = Math.min(gezeigt + MAX_ROWS, eintraege.length);
+    const rest = eintraege.length - gezeigt;
+    mehr.hidden = rest === 0;
+    mehr.textContent = rest > MAX_ROWS
+      ? `${MAX_ROWS} weitere von ${rest}`
+      : `${rest} weitere`;
+  };
+  mehr.addEventListener('click', nachschieben);
+  nachschieben();
+
+  box.append(mehr);
+  li.append(box);
+  return li;
+}
+
+/** Eine Baustelle als Zeile. */
+function zeile(w, ensureMap) {
+  const li = document.createElement('li');
+  li.className = 'mvg-ticker__item works__item';
+  // Der vollständige Meldungstext als Tooltip. In der Zeile steht nur, was
+  // dort hineinpasst; wer mehr wissen will, fährt darüber.
+  if (w.text) li.title = w.text;
+
+  // Anklickbar: der Kartenausschnitt springt auf den Abschnitt. Genau
+  // dafür sind die Koordinaten da — "wo ist das eigentlich".
+  const jump = document.createElement('button');
+  jump.type = 'button';
+  jump.className = 'works__jump';
+  jump.title = 'Auf der Karte zeigen';
+
+  const sect = document.createElement('span');
+  sect.className = 'works__section';
+  sect.textContent = `${short(w.from?.name)} → ${short(w.to?.name)}`;
+  jump.append(sect);
+
+  jump.addEventListener('click', () => ensureMap().focusWork(w));
+  li.append(jump);
+
+  const title = document.createElement('span');
+  title.className = 'mvg-ticker__title works__title';
+  title.textContent = topic(w.title);
+  li.append(title);
+
+  const until = document.createElement('span');
+  until.className = 'mvg-ticker__until';
+  until.textContent = untilText(w.end);
+  li.append(until);
+
+  return li;
+}
+
+/** Ländercode als Name — "de" liest sich in einer Überschrift schlecht. */
+function landName(code) {
+  return {
+    de: 'Deutschland',
+    at: 'Österreich',
+    ch: 'Schweiz',
+  }[code] || 'Übrige';
 }
 
 /**

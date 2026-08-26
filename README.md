@@ -324,15 +324,21 @@ Sechs Dinge, die dabei zu beachten waren:
   „4 Nord", „4 Süd", „5a", „5b" — und kein einziges nacktes „4". Der Fahrplan
   sagt aber „Gleis 4". Die blosse Nummer kommt als Zweitname dazu, nachrangig:
   wo es ein echtes „4" gibt, gewinnt das.
-- **Einzelne fehlende Nummern ergänzen.** Mannheim Hbf hat in OSM die Gleise
-  1–5 und 7–12, aber **kein 6** — jemand hat es beim Erfassen ausgelassen.
-  Fuhr der Anschlusszug von Gleis 6, entfiel deshalb der ganze Umstiegsplan,
-  obwohl der Bahnhof ringsum vollständig kartiert ist. Ergänzt wird nur, wo
-  genau *eine* Nummer zwischen zwei vorhandenen fehlt und die beiden Nachbarn
-  dicht beieinanderliegen — Gleis 5 und 7 sind in Mannheim neun Meter
-  auseinander, die Kante dazwischen ist dann kein Raten mehr. Zwischen Gleis
-  18 und 31 in Zürich klaffen dreizehn Nummern und mehrere hundert Meter;
-  dort wird nichts ergänzt. Was ergänzt wurde, sagt die Anzeige dazu.
+- **Fehlende Nummern aus den Nachbarn ergänzen.** Mannheim Hbf hat in OSM die
+  Gleise 1–5 und 7–12, aber **kein 6** — jemand hat es beim Erfassen
+  ausgelassen. Fuhr der Anschlusszug von Gleis 6, entfiel deshalb der ganze
+  Umstiegsplan, obwohl der Bahnhof ringsum vollständig kartiert ist. Genau
+  daher rührt auch der Eindruck, der Plan erscheine „mal ja, mal nein" für
+  denselben Bahnhof: die Koordinaten sind stabil, die *Gleisnummern* der
+  jeweiligen Verbindung sind es nicht.
+
+  Ergänzt werden Lücken von höchstens drei Nummern, und nur wenn die beiden
+  Nachbarn entsprechend dicht beieinanderliegen — je fehlender Nummer knapp
+  fünfzehn Meter, das ist eine Gleisachse. Der Abstand ist der eigentliche
+  Wächter: Zürichs Sprung von 18 auf 31, Berns von 13 auf 21 (RBS) und Basels
+  von 20 auf 30 (SNCF) sind keine Erfassungslücken, sondern eigene
+  Bahnhofsteile, und die liegen hunderte Meter auseinander. Was ergänzt wurde,
+  sagt die Anzeige dazu.
 
 **Die Abdeckung ist sehr unterschiedlich** — und war lange schlechter, als sie
 sein musste. Zwei Fehler steckten dahinter:
@@ -350,6 +356,20 @@ sein musste. Zwei Fehler steckten dahinter:
    vor `ref`, und was wie eine Stationsnummer aussieht, fällt vorher raus: was
    auf **drei oder mehr** Haltepunkten gleich lautet, kann keine Gleisnummer
    sein — ein Gleis hat höchstens zwei, einen je Richtung.
+
+#### Abdeckung, über 33 Bahnhöfe erhoben
+
+Von den 33 abgefragten Bahnhöfen (CH/DE/AT) lieferten 28 Daten; die übrigen
+fünf liefen an dem Tag in Overpass-Fehler und sind beim nächsten Versuch
+wieder dabei. **Alle 28 haben nummerierte Bahnsteige und damit einen Plan.**
+Bei 25 davon lässt sich zusätzlich ein Laufweg berechnen; an drei (Basel SBB,
+Leipzig, Graz) fehlen die Fusswege in OSM, dort bleibt es bei der Lage.
+
+Die Lücken in der Nummerierung sind meistens **echt**, keine Datenlücken:
+Hamburg Hbf und Berlin Hbf haben schlicht keine Gleise 9 und 10, Genf keine 8
+und 9. Deshalb wird dort auch nichts ergänzt — der Abstandstest weist es
+korrekt ab. Tatsächlich ergänzt wurden bei der Stichprobe Mannheim 6,
+Nürnberg 10 und 11 sowie Bern 11.
 
 Nach der Korrektur, nachgemessen:
 
@@ -430,6 +450,13 @@ werden sieben Tage gecacht (rund 70 KB je Bahnhof).
 `?action=works` liefert Bauarbeiten mit **betroffenem Abschnitt** (von Bahnhof
 A bis Bahnhof B), Zeitraum und — soweit ermittelbar — dem tatsächlichen
 Streckenverlauf.
+
+**Die Liste ist nach Ländern gruppiert und vollständig erreichbar.** Vorher
+standen dort acht Zeilen und sonst nichts — an die übrigen siebenundachtzig
+kam man gar nicht heran. Alle auf einmal auszuschütten wäre aber auch nichts:
+hundert Zeilen unter der Karte liest niemand. Also je Land ein aufklappbarer
+Block mit Anzahl in der Überschrift, das erste offen, und innerhalb eines
+Landes schiebt ein Knopf die nächsten acht nach.
 
 **Eine eigene Karte, nicht die Routenkarte.** Baustellen und Suchergebnisse
 beantworten verschiedene Fragen und stehen einander im Weg: über einer
@@ -1176,11 +1203,23 @@ center` sind **drei** Werte, und die Dreiwert-Schreibweise ist ungültig — der
 Browser wirft die Zeile ersatzlos weg und setzt das Symbol nach oben links.
 Gültig sind ein, zwei oder vier Werte, hier also `right 0.6rem top 50%`.
 
-Nachgemessen bei 375 px und bei 320 px Fensterbreite, jeweils auch mit auf
-22 px hochgesetzter Grundschrift: kein Überlauf, die Felder schrumpfen mit.
-Unter 360 px bekommt das Datum eine eigene Zeile — 360 und nicht 380, weil die
-verbreiteten Telefongrössen bei 375 und 390 px liegen und dort beide Felder
-bequem nebeneinander passen.
+**Die Regel gilt für alle Breiten, nicht nur fürs Telefon.** Zuerst stand sie
+in der Telefon-Abfrage — und prompt kam dieselbe Meldung fürs iPad: dort sind
+die Spalten 161 px breit, ein natives Datumsfeld will 165, und schon
+überlappen Datum, Uhrzeit und Klasse. Dieselbe Ursache, nur eine
+Bildschirmgrösse weiter. Auf dem Schreibtisch schadet sie nichts, dort ist
+ohnehin Platz.
+
+Zwei Dinge kamen fürs Tablet dazu: **16 px Schriftgrösse bis 1024 px** (sonst
+zoomt iOS beim Antippen eines Feldes hinein — die Regel stand ebenfalls nur in
+der Telefon-Abfrage), und eine etwas grössere Grundbreite je Spalte
+(`minmax(170px, 1fr)` statt 150). Lieber eine Spalte weniger als vier zu enge.
+
+Nachgemessen bei 768 px (drei Spalten à 219 px), 375 px und 320 px, jeweils
+auch mit auf 22 px hochgesetzter Grundschrift: kein Überlauf, die Felder
+schrumpfen mit. Unter 360 px bekommt das Datum eine eigene Zeile — 360 und
+nicht 380, weil die verbreiteten Telefongrössen bei 375 und 390 px liegen und
+dort beide Felder bequem nebeneinander passen.
 
 ### Teilen
 

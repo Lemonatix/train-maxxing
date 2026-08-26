@@ -33,11 +33,19 @@ final class Overpass
     private const RADIUS_M = 350;
 
     /**
-     * Wie dicht zwei Nachbargleise liegen muessen, damit die Nummer
-     * dazwischen ergaenzt wird. Zwei Gleisachsen sind gut zehn Meter
-     * auseinander, ein Bahnsteig dazwischen macht rund zwanzig.
+     * Wie viele Nummern hoechstens fehlen duerfen, damit ergaenzt wird.
+     * Darueber ist es keine Erfassungsluecke mehr, sondern ein eigener
+     * Bahnhofsteil mit eigener Nummerierung.
      */
-    private const GAP_NEIGHBOUR_M = 40.0;
+    private const MAX_GAP = 3;
+
+    /**
+     * Abstand zweier benachbarter Gleisnummern, grob. Zwei Gleisachsen mit
+     * einem Bahnsteig dazwischen sind gut zehn Meter auseinander; fuenfzehn
+     * lassen Luft fuer breitere Bahnsteige, ohne einen ganzen Bahnhofsteil
+     * einzufangen.
+     */
+    private const TRACK_SPACING_M = 15.0;
 
     private Http $http;
     private array $cfg;
@@ -383,15 +391,23 @@ final class Overpass
      * Gleis 6, entfiel deshalb der ganze Umstiegsplan, obwohl der Bahnhof
      * ringsum vollstaendig kartiert ist.
      *
-     * WIE: Nur wo genau EINE Nummer zwischen zwei vorhandenen fehlt und die
-     * beiden Nachbarn dicht beieinanderliegen. Gleis 6 liegt dann in der
-     * Mitte zwischen 5 und 7 - bei neun Metern Abstand ist das kein Raten
-     * mehr, sondern die Bahnsteigkante dazwischen.
+     * WIE: Nur wo hoechstens drei Nummern zwischen zwei vorhandenen fehlen
+     * und die beiden Nachbarn entsprechend dicht beieinanderliegen. Gleis 6
+     * liegt dann in der Mitte zwischen 5 und 7 - bei neun Metern Abstand ist
+     * das kein Raten mehr, sondern die Bahnsteigkante dazwischen. Bei
+     * groesseren Luecken wird linear zwischen den Nachbarn geteilt.
+     *
+     * Drei und nicht eine, weil die Erhebung ueber dreissig Bahnhoefe zeigte,
+     * dass Zweierluecken genauso haeufig sind: Genf fehlen 8 und 9, Hamburg
+     * und Berlin Hbf je 9 und 10, Nuernberg 10 und 11.
      *
      * WO NICHT: Zwischen Gleis 18 und 31 in Zuerich klafft eine Luecke von
-     * dreizehn Nummern und mehreren hundert Metern; dort wird nichts
-     * ergaenzt. Und was ergaenzt wurde, sagt es ueber `estimated`, damit die
-     * Anzeige es kenntlich machen kann.
+     * dreizehn Nummern und mehreren hundert Metern - das ist keine
+     * Erfassungsluecke, sondern ein zweiter Bahnhofsteil. Genauso Bern
+     * (13 -> 21, RBS) und Basel SBB (20 -> 30, SNCF). Der Abstand entscheidet:
+     * je fehlender Nummer sind knapp fuenfzehn Meter zulaessig, das ist eine
+     * Gleisachse. Und was ergaenzt wurde, sagt es ueber `estimated`, damit
+     * die Anzeige es kenntlich machen kann.
      *
      * @param array<int,array> $platforms
      * @return array<int,array>
@@ -414,26 +430,34 @@ final class Overpass
         $nummern = array_keys($nachNummer);
         $neu = [];
         for ($i = 0, $n = count($nummern) - 1; $i < $n; $i++) {
-            if ($nummern[$i + 1] - $nummern[$i] !== 2) {
-                continue;   // keine Luecke von genau einer Nummer
-            }
-            $a = $nachNummer[$nummern[$i]];
-            $b = $nachNummer[$nummern[$i + 1]];
-            if (self::metres([$a['lat'], $a['lon']], [$b['lat'], $b['lon']]) > self::GAP_NEIGHBOUR_M) {
+            $luecke = $nummern[$i + 1] - $nummern[$i] - 1;
+            if ($luecke < 1 || $luecke > self::MAX_GAP) {
                 continue;
             }
 
-            $neu[] = [
-                'tracks' => [(string) ($nummern[$i] + 1)],
-                'name'   => '',
-                'lat'    => ($a['lat'] + $b['lat']) / 2,
-                'lon'    => ($a['lon'] + $b['lon']) / 2,
-                // Kein Umriss: die Lage ist geschaetzt, eine Flaeche waere
-                // eine Genauigkeit, die es nicht gibt.
-                'shape'  => [],
-                'level'  => $a['level'] !== null && $a['level'] === $b['level'] ? $a['level'] : null,
-                'estimated' => true,
-            ];
+            $a = $nachNummer[$nummern[$i]];
+            $b = $nachNummer[$nummern[$i + 1]];
+            $abstand = self::metres([$a['lat'], $a['lon']], [$b['lat'], $b['lon']]);
+            if ($abstand > ($luecke + 1) * self::TRACK_SPACING_M) {
+                continue;   // zu weit auseinander - das ist ein anderer Bahnhofsteil
+            }
+
+            // Linear teilen: bei einer Luecke von zwei liegen die beiden
+            // fehlenden Gleise auf einem und zwei Dritteln der Strecke.
+            for ($k = 1; $k <= $luecke; $k++) {
+                $t = $k / ($luecke + 1);
+                $neu[] = [
+                    'tracks' => [(string) ($nummern[$i] + $k)],
+                    'name'   => '',
+                    'lat'    => $a['lat'] + ($b['lat'] - $a['lat']) * $t,
+                    'lon'    => $a['lon'] + ($b['lon'] - $a['lon']) * $t,
+                    // Kein Umriss: die Lage ist geschaetzt, eine Flaeche waere
+                    // eine Genauigkeit, die es nicht gibt.
+                    'shape'  => [],
+                    'level'  => $a['level'] !== null && $a['level'] === $b['level'] ? $a['level'] : null,
+                    'estimated' => true,
+                ];
+            }
         }
 
         return array_merge($platforms, $neu);
