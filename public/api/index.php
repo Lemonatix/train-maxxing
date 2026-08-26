@@ -58,7 +58,9 @@ require __DIR__ . '/lib/Providers/DbVendo.php';
 require __DIR__ . '/lib/Providers/CoachSequence.php';
 require __DIR__ . '/lib/Providers/Mvg.php';
 require __DIR__ . '/lib/Providers/Overpass.php';
+require __DIR__ . '/lib/Providers/StreckenInfo.php';
 require __DIR__ . '/lib/StationPlan.php';
+require __DIR__ . '/lib/RailGeometry.php';
 
 $config = require __DIR__ . '/config.php';
 
@@ -586,19 +588,25 @@ function handleFxRate(Http $http, array $config, Cache $cache): void
  * waere geraten.
  */
 /**
- * Bauarbeiten im Netz, mit betroffenem Abschnitt und Zeitraum.
+ * Grosse Baustellen im Netz, mit betroffenem Abschnitt und Zeitraum.
  *
- * Beantwortet "wo wird gerade gebaut und wie lange noch" - auf der Karte als
- * markierter Streckenabschnitt zwischen zwei Bahnhoefen.
+ * ZWEI QUELLEN, weil keine allein reicht:
  *
- * Gezeigt werden die GROSSEN Baustellen im deutschsprachigen Raum, und
- * Fernverkehrsstrecken zuerst - die Auswahl trifft OebbHafas::works(), die
- * Reihenfolge diese Funktion.
+ *   strecken.info (DB InfraGO) fuer DEUTSCHLAND. Liefert Totalsperrungen im
+ *   ganzen Netz, mit Betriebsstelle, Zeitraum, Art der Arbeiten und
+ *   Streckennummer.
  *
- * Quelle ist der HAFAS Information Manager der OeBB. Der Schwerpunkt liegt
- * damit auf Oesterreich; deutsche Meldungen sind nur vereinzelt dabei. Eine
- * deutschlandweite Quelle (DB InfraGO / strecken.info) braucht einen eigenen
- * Provider - im README steht, was dafuer noetig waere.
+ *   HAFAS Information Manager der OeBB fuer OESTERREICH und die Schweiz.
+ *
+ * Deutschland steht vorn: das Netz ist das groesste im deutschsprachigen
+ * Raum, und die oesterreichische Quelle liefert ohnehin fast nur Meldungen
+ * zu Nebenbahnen. Faellt eine Quelle aus, bleibt die andere - eine leere
+ * Liste gibt es nur, wenn beide schweigen.
+ *
+ * STRECKENVERLAUF: Die OeBB liefert ihn mit. Fuer die deutschen Abschnitte
+ * wird er ueber die Streckennummer aus OpenStreetMap geholt (RailGeometry),
+ * nach und nach und dauerhaft gecacht. Wo er fehlt, zeichnet die Karte die
+ * Verbindung der beiden Endpunkte.
  */
 function handleWorks(Http $http, array $config, Cache $cache): void
 {
@@ -610,26 +618,46 @@ function handleWorks(Http $http, array $config, Cache $cache): void
         ok(['works' => $cached, 'cached' => true]);
     }
 
-    $oebb = new OebbHafas($http, $config['providers']['oebb']);
-    $res  = $oebb->works($days);
+    $works  = [];
+    $fehler = [];
 
-    if (!$res['ok']) {
-        // Beiwerk - ohne Baustellenliste funktioniert alles andere weiter.
-        ok(['works' => [], 'error' => $res['error']]);
+    // --- Deutschland ---------------------------------------------------
+    if (($config['providers']['streckeninfo']['enabled'] ?? true) === true) {
+        $si  = new StreckenInfo($http, $cache, $config['providers']['streckeninfo'] ?? []);
+        $res = $si->works($days);
+        if ($res['ok']) {
+            $works = array_merge($works, $res['data']);
+        } else {
+            $fehler[] = $res['error'];
+        }
     }
 
-    // Die wichtigsten zuerst. "Wichtig" heisst hier zweierlei, in dieser
-    // Reihenfolge: faehrt dort Fernverkehr, und wie lange dauert es noch.
+    // --- Oesterreich und Schweiz ---------------------------------------
+    $oebb = new OebbHafas($http, $config['providers']['oebb']);
+    $res  = $oebb->works($days);
+    if ($res['ok']) {
+        $works = array_merge($works, $res['data']);
+    } else {
+        $fehler[] = $res['error'];
+    }
+
+    if ($works === []) {
+        // Beiwerk - ohne Baustellenliste funktioniert alles andere weiter.
+        ok(['works' => [], 'error' => implode('; ', array_filter($fehler))]);
+    }
+
+    // Die wichtigsten zuerst. "Wichtig" heisst hier dreierlei, in dieser
+    // Reihenfolge: Deutschland, dann Fernverkehr, dann Dauer.
     //
     // Die Reihenfolge zaehlt, weil die Liste nur die ersten Eintraege zeigt.
-    // Nach Dauer allein standen dort die Nebenbahnen mit den laengsten
-    // Sperrungen - richtig sortiert, aber nicht das, was jemand sucht, der
-    // wissen will, wo im Netz gerade gebaut wird.
-    //
-    // Die HAFAS-Prioritaet taugt als Kriterium nicht: sie steht bei allen
-    // Meldungen auf 100.
-    $works = $res['data'];
-    usort($works, static function ($a, $b) {
+    // Nach Dauer allein standen dort oesterreichische Nebenbahnen mit den
+    // laengsten Sperrungen - richtig sortiert, aber nicht das, was jemand
+    // sucht, der wissen will, wo im Netz gerade gebaut wird.
+    usort($works, static function (array $a, array $b): int {
+        $land = (int) (($b['country'] ?? '') === 'de') <=> (int) (($a['country'] ?? '') === 'de');
+        if ($land !== 0) {
+            return $land;
+        }
         $fern = (int) ($b['longDistance'] ?? false) <=> (int) ($a['longDistance'] ?? false);
         if ($fern !== 0) {
             return $fern;
@@ -638,6 +666,14 @@ function handleWorks(Http $http, array $config, Cache $cache): void
         $db = strtotime((string) $b['end']) - strtotime((string) $b['start']);
         return $db <=> $da;
     });
+
+    // Streckenverlauf ergaenzen, soweit noch nicht bekannt. Nur fuer die
+    // vorderen Eintraege, und die Ergebnisse halten dreissig Tage - der
+    // Verlauf einer Strecke aendert sich nicht.
+    if (($config['providers']['overpass']['enabled'] ?? false) === true) {
+        $rg = new RailGeometry($http, $cache, $config['providers']['overpass']);
+        $works = $rg->enrich($works);
+    }
 
     $cache->set($key, $works);
     ok(['works' => $works, 'cached' => false]);

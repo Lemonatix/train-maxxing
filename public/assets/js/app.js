@@ -60,6 +60,12 @@ const state = {
   // getrennt von state.products: auf der Karte will man oft nur den
   // Fernverkehr sehen, ohne die Verbindungssuche einzuschraenken.
   liveProducts: [],
+  // Sortierung der Trefferliste. Chronologisch nach Abfahrt ist die
+  // Voreinstellung, weil das die Reihenfolge ist, in der die Züge fahren -
+  // man sucht sich die Abfahrt aus, die zeitlich passt, und vergleicht erst
+  // dann. Die Empfehlung mischt Preis und Dauer zu einer Punktzahl; als
+  // Voreinstellung verbirgt sie, wonach eigentlich sortiert wurde.
+  sort: 'departure',
   // Laufzeit
   lastPayload: null,
   ranked: [],

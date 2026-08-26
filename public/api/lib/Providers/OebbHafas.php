@@ -120,15 +120,25 @@ final class OebbHafas
             // 500 Meldungen bleiben nach Kategorie, Land, Dauer und
             // Entdoppelung rund drei Dutzend uebrig.
             'maxNum' => max(1, min(500, $max)),
+            // Der STRECKENVERLAUF des betroffenen Abschnitts, nicht nur seine
+            // Endpunkte. Ohne ihn bleibt der Karte nur eine gerade Linie
+            // zwischen zwei Bahnhoefen - und die laeuft quer durchs Gelaende,
+            // wo die Schiene einen Bogen macht.
+            //
+            // Der Schalter gehoert in 'req', nicht in 'cfg': dort quittiert
+            // ihn HAFAS mit "Parse fail".
+            'getPolyline' => true,
         ]);
         if (!$res['ok']) {
             return $res;
         }
 
-        $body = $res['data']['res'] ?? [];
-        $locL = $body['common']['locL'] ?? [];
-        $catL = $body['common']['himMsgCatL'] ?? [];
-        $out  = [];
+        $body   = $res['data']['res'] ?? [];
+        $common = $body['common'] ?? [];
+        $locL   = $common['locL'] ?? [];
+        $catL   = $common['himMsgCatL'] ?? [];
+        $edgeL  = $common['himMsgEdgeL'] ?? [];
+        $out    = [];
 
         foreach (($body['msgL'] ?? []) as $m) {
             $catId = null;
@@ -182,6 +192,7 @@ final class OebbHafas
                 'start' => $start,
                 'end'   => $end,
                 'country'  => $land,
+                'geometry' => $this->worksGeometry($m, $edgeL, $common),
                 'category' => (int) $catId,
                 'products' => self::productsFromCls((int) ($m['prod'] ?? 0)),
                 // Faehrt hier Fernverkehr? Zwei Wege dorthin, weil HAFAS die
@@ -192,6 +203,32 @@ final class OebbHafas
         }
 
         return ['ok' => true, 'error' => null, 'data' => self::mergeDuplicates($out)];
+    }
+
+    /**
+     * Streckenverlauf des betroffenen Abschnitts.
+     *
+     * Eine Meldung verweist ueber `edgeRefL` auf ein oder mehrere Kanten des
+     * Netzes; jede Kante bringt ihren eigenen Polylinienzug mit. Aneinander-
+     * gehaengt ergibt das den tatsaechlichen Verlauf - bei einer Sperrung
+     * ueber mehrere Betriebsstellen also den ganzen Zug der Strecke, nicht
+     * die Luftlinie zwischen erstem und letztem Bahnhof.
+     *
+     * @return array<int,array{0:float,1:float}>
+     */
+    private function worksGeometry(array $msg, array $edgeL, array $common): array
+    {
+        $points = [];
+        foreach ($msg['edgeRefL'] ?? [] as $ei) {
+            $edge = $edgeL[$ei] ?? null;
+            if ($edge === null || !isset($edge['polyG'])) {
+                continue;
+            }
+            foreach ($this->geometryOf($edge, $common) as $p) {
+                $points[] = $p;
+            }
+        }
+        return $this->thin($points, self::MAX_GEOMETRY_POINTS);
     }
 
     /** Laendercode einer HAFAS-Station, klein geschrieben. */
@@ -279,6 +316,12 @@ final class OebbHafas
             }
             // Fernverkehr aus irgendeiner der Teilmeldungen zaehlt.
             $vorhanden['longDistance'] = $vorhanden['longDistance'] || $w['longDistance'];
+            // Und der ausfuehrlichere Streckenverlauf gewinnt: dieselbe
+            // Baustelle wird je Linie gemeldet, und nicht jede Linie faehrt
+            // den ganzen gesperrten Abschnitt.
+            if (count($w['geometry']) > count($vorhanden['geometry'])) {
+                $vorhanden['geometry'] = $w['geometry'];
+            }
             unset($vorhanden);
         }
 

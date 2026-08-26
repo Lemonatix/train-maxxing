@@ -17,26 +17,41 @@
 const NS = 'http://www.w3.org/2000/svg';
 
 /**
- * Zwei Kachel-Quellen von CARTO:
- * - light: "Voyager"     — farbige, aber dezente Kacheln fürs helle Layout.
- * - dark:  "dark matter" — dunkle Kacheln fürs dunkle Layout.
- * Attribution ist bei OSM-basierten Kacheln Pflicht und steht unten im Bild.
+ * Kachelquelle: OpenStreetMap, direkt.
+ *
+ * WARUM NICHT CARTO, wie vorher: deren Basemap-CDN verlangt inzwischen einen
+ * API-Schlüssel. Ohne ihn liefert sie weiterhin HTTP 200 — aber ein Bild mit
+ * der Aufschrift "API key required" darin. Für den Browser ist das eine
+ * gültige Kachel, `onerror` schlägt nie an, und die Karte besteht aus lauter
+ * Fehlermeldungen, ohne dass die App etwas davon merkt. Genau so sah es aus.
+ *
+ * OSM selbst braucht keinen Schlüssel. Die Nutzungsbedingungen verlangen die
+ * Namensnennung (steht unten im Bild) und keine Massenabfragen; für eine
+ * Handvoll Kacheln je Seitenaufruf ist das erfüllt.
+ *
+ * DUNKLES LAYOUT: OSM hat keine dunklen Kacheln. Statt dafür wieder einen
+ * Anbieter mit Schlüsselpflicht zu holen, werden dieselben Kacheln per
+ * CSS-Filter umgefärbt (siehe `.map__tiles.is-dark` im Stylesheet). Das
+ * Ergebnis ist nicht so fein wie eine eigens gezeichnete dunkle Karte, aber
+ * es funktioniert ohne Anmeldung und ohne zweite Quelle.
+ *
+ * Wer lieber CARTO möchte und einen Schlüssel hat, ändert nur diesen Block:
+ * 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
+ * mit subdomains ['a','b','c','d'] und dem Schlüssel als Query-Parameter.
  */
+const OSM_TILES = {
+  url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  // Die a/b/c-Subdomains sind bei OSM abgeschafft; über HTTP/2 bringen sie
+  // ohnehin nichts. Ein leerer Eintrag lässt {s} einfach verschwinden.
+  subdomains: [''],
+  maxZoom: 19,
+  minZoom: 3,
+  attribution: '© OpenStreetMap',
+};
+
 const TILE_SOURCES = {
-  light: {
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    subdomains: ['a', 'b', 'c', 'd'],
-    maxZoom: 19,
-    minZoom: 3,
-    attribution: '© OpenStreetMap · © CARTO',
-  },
-  dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    subdomains: ['a', 'b', 'c', 'd'],
-    maxZoom: 19,
-    minZoom: 3,
-    attribution: '© OpenStreetMap · © CARTO',
-  },
+  light: { ...OSM_TILES, invert: false },
+  dark:  { ...OSM_TILES, invert: true },
 };
 
 // Aktuelle Kachel-Quelle. Über setMapTheme() aus app.js umschaltbar.
@@ -577,6 +592,7 @@ export class RouteMap {
       return;
     }
 
+
     for (const e of this.ranked) {
       for (const part of geometryOf(e.journey)) pts.push(...part);
     }
@@ -635,9 +651,14 @@ export class RouteMap {
   /** Die Zeile unter der Karte — sie sagt, was hier zu sehen und zu tun ist. */
   hintText() {
     if (this.mode === 'works') {
-      return this.works.length === 0
-        ? 'Zurzeit sind keine grösseren Baustellen gemeldet.'
-        : 'Gestrichelt: der gesperrte oder eingeschränkte Abschnitt — nicht der Verlauf der Strecke.';
+      if (this.works.length === 0) return 'Zurzeit sind keine grösseren Baustellen gemeldet.';
+      // Zwei Linienarten, zwei Aussagen — das gehört dazugesagt, sonst liest
+      // man die gestrichelte Gerade als Streckenverlauf.
+      const exakt = this.works.filter((w) => w.geometry?.length > 1).length;
+      return exakt === 0
+        ? 'Gestrichelt: der gesperrte Abschnitt — nicht der Verlauf der Strecke.'
+        : 'Durchgezogen: der Verlauf der Strecke. Gestrichelt: nur der betroffene '
+          + 'Abschnitt, wo der Verlauf nicht bekannt ist.';
     }
     return this.ranked.length === 0
       ? 'Start und Ziel wählen — die Routen erscheinen hier.'
@@ -689,9 +710,13 @@ export class RouteMap {
 
   /** Auf einen Bauabschnitt zoomen. */
   focusWork(w) {
-    const pts = [w?.from, w?.to]
-      .filter((p) => p && p.lat != null && p.lon != null)
-      .map((p) => [p.lat, p.lon]);
+    // Der Verlauf, wenn er bekannt ist: er reicht oft weiter als die
+    // Luftlinie zwischen den Endpunkten, und angeschnitten sähe er falsch aus.
+    const pts = (w?.geometry?.length > 1 ? w.geometry : [])
+      .map((p) => [p[0], p[1]])
+      .concat([w?.from, w?.to]
+        .filter((p) => p && p.lat != null && p.lon != null)
+        .map((p) => [p.lat, p.lon]));
     if (pts.length === 0) return;
 
     this.showWorks = true;
@@ -966,6 +991,9 @@ export class RouteMap {
   renderTiles(w, h, cx, cy) {
     if (!TILES.url) return;
 
+    // Dunkles Layout: dieselben Kacheln, umgefärbt. Siehe TILE_SOURCES.
+    this.tileLayer.classList.toggle('is-dark', !!TILES.invert);
+
     // Kacheln gibt es nur ganzzahlig; der Rest wird per CSS skaliert.
     const zi = Math.round(this.zoom);
     const scale = 2 ** (this.zoom - zi);
@@ -1136,16 +1164,23 @@ export class RouteMap {
   /**
    * Bauarbeiten als markierte Abschnitte.
    *
-   * Die Meldungen nennen zwei Bahnhöfe, nicht den Streckenverlauf dazwischen.
-   * Gezeichnet wird deshalb eine gerade Verbindung — sie zeigt, WELCHER
-   * Abschnitt betroffen ist, nicht wie die Schiene dort verläuft. Gestrichelt
-   * und zurückhaltend, damit das auch so gelesen wird.
+   * ZWEI DARSTELLUNGEN, je nachdem, was die Quelle hergibt:
+   *
+   *   Mit Streckenverlauf — die ÖBB liefert ihn mit, für die deutschen
+   *   Abschnitte kommt er aus OpenStreetMap. Dann folgt die Linie der
+   *   Schiene, und man sieht, welcher Bogen betroffen ist.
+   *
+   *   Ohne — dann bleibt die gerade Verbindung der beiden Betriebsstellen.
+   *   Sie zeigt, WELCHER Abschnitt betroffen ist, nicht wie die Schiene dort
+   *   verläuft; gestrichelt, damit das auch so gelesen wird. Der Verlauf
+   *   wird nach und nach nachgeladen, die Linie also mit der Zeit genauer.
    */
   renderWorks(svg, w, h, toPx) {
     if (this.works.length === 0) return;
 
     const g = document.createElementNS(NS, 'g');
     g.setAttribute('class', 'map__works');
+    const off = (x, y) => x < -200 || y < -200 || x > w + 200 || y > h + 200;
 
     for (const item of this.works) {
       const a = item.from, b = item.to;
@@ -1153,18 +1188,28 @@ export class RouteMap {
 
       const [x1, y1] = toPx([a.lat, a.lon]);
       const [x2, y2] = toPx([b.lat, b.lon]);
-      // Ausserhalb des Ausschnitts nichts zeichnen - bei fünfzig Abschnitten
+      // Ausserhalb des Ausschnitts nichts zeichnen - bei hundert Abschnitten
       // spart das spürbar Arbeit.
-      const off = (x, y) => x < -200 || y < -200 || x > w + 200 || y > h + 200;
       if (off(x1, y1) && off(x2, y2)) continue;
 
-      const line = document.createElementNS(NS, 'line');
-      line.setAttribute('x1', x1.toFixed(1));
-      line.setAttribute('y1', y1.toFixed(1));
-      line.setAttribute('x2', x2.toFixed(1));
-      line.setAttribute('y2', y2.toFixed(1));
-      line.setAttribute('class', 'map__work-line');
-      g.append(line);
+      const verlauf = item.geometry?.length > 1 ? item.geometry : null;
+      let shape;
+      if (verlauf) {
+        const d = verlauf
+          .map((p, i) => `${i === 0 ? 'M' : 'L'}${toPx(p).map((v) => v.toFixed(1)).join(' ')}`)
+          .join(' ');
+        shape = document.createElementNS(NS, 'path');
+        shape.setAttribute('d', d);
+        shape.setAttribute('class', 'map__work-line is-exact');
+      } else {
+        shape = document.createElementNS(NS, 'line');
+        shape.setAttribute('x1', x1.toFixed(1));
+        shape.setAttribute('y1', y1.toFixed(1));
+        shape.setAttribute('x2', x2.toFixed(1));
+        shape.setAttribute('y2', y2.toFixed(1));
+        shape.setAttribute('class', 'map__work-line');
+      }
+      g.append(shape);
 
       for (const [x, y] of [[x1, y1], [x2, y2]]) {
         const dot = document.createElementNS(NS, 'circle');
@@ -1178,7 +1223,7 @@ export class RouteMap {
       const title = document.createElementNS(NS, 'title');
       title.textContent = `${a.name} – ${b.name}: ${item.title}`
         + (item.end ? ` (bis ${item.end})` : '');
-      line.append(title);
+      shape.append(title);
     }
 
     svg.append(g);

@@ -37,7 +37,11 @@ final class Overpass
 
     public function __construct(Http $http, array $cfg)
     {
-        $this->http = $http;
+        // Siehe 'timeout' in der Konfiguration: Overpass braucht laenger als
+        // die Fahrplanquellen, und ein Abbruch sieht hier aus wie ein
+        // unkartierter Bahnhof.
+        $timeout = (int) ($cfg['timeout'] ?? 0);
+        $this->http = $timeout > 0 ? new Http($timeout) : $http;
         $this->cfg  = $cfg;
     }
 
@@ -105,7 +109,7 @@ final class Overpass
         // Bahnsteige erfasst", obwohl die Daten in OSM stehen.
         $r = self::RADIUS_M;
         $query = sprintf(
-            '[out:json][timeout:25];('
+            '[out:json][timeout:40];('
             . 'node(around:%1$d,%2$.6f,%3$.6f)["railway"="platform"];'
             . 'way(around:%1$d,%2$.6f,%3$.6f)["railway"="platform"];'
             . 'relation(around:%1$d,%2$.6f,%3$.6f)["railway"="platform"];'
@@ -152,10 +156,14 @@ final class Overpass
             ];
         }
 
+        $elements = $res['json']['elements'] ?? [];
+
         $out  = [];
         $ways = [];
         $seen = [];
-        foreach (($res['json']['elements'] ?? []) as $e) {
+        $stationsnummern = self::stationCodes($elements);
+
+        foreach ($elements as $e) {
             $tags = $e['tags'] ?? [];
 
             // Fusswege und Treppen: Verlauf und Art, mehr braucht das
@@ -211,26 +219,34 @@ final class Overpass
             // Ein Bahnsteig bedient oft zwei Gleise ("24;25"). Beide sollen
             // sich spaeter ueber ihre Nummer wiederfinden lassen.
             //
-            // ERST local_ref, DANN ref: an Haltepunkten traegt `ref` die
-            // Nummer des BAHNHOFS im Netz des Betreibers, nicht die des
-            // Gleises. Zuerich HB lieferte darueber "Gleis 13030" - und weil
-            // sich unter dieser Nummer natuerlich kein Zug wiederfand, blieb
-            // der Lageplan dort aus. An Bahnsteigflaechen meinen beide Tags
-            // dasselbe, die Reihenfolge schadet dort also nicht.
+            // WELCHES TAG die Nummer traegt, ist von Bahnhof zu Bahnhof
+            // verschieden, und beide Lesarten kommen vor:
+            //
+            //   Mannheim Hbf  ref=1..12,  local_ref fehlt
+            //   Zuerich HB    local_ref=3..44,  ref=13030 - die Nummer des
+            //                 BAHNHOFS im Netz der SBB, auf jedem Knoten
+            //                 dieselbe
+            //
+            // Erst local_ref, dann ref - und was wie eine Stationsnummer
+            // aussieht, faellt vorher raus (siehe stationCodes()). Nur
+            // local_ref zu nehmen liess Mannheim mit einem einzigen
+            // Bahnsteig dastehen; nur ref zu nehmen machte aus Zuerich
+            // "Gleis 13030".
             $ref = trim((string) ($tags['local_ref'] ?? ''));
-            if ($ref === '' && !$isStopNode) {
+            if ($ref === '') {
                 $ref = trim((string) ($tags['ref'] ?? ''));
             }
             $tracks = $ref === ''
                 ? []
                 : array_values(array_filter(array_map('trim', preg_split('/[;,]/', $ref))));
 
-            // Vierstellige "Gleisnummern" gibt es nicht. Was so aussieht, ist
-            // eine Betriebsstellen- oder DS100-Nummer, die jemand ins falsche
-            // Feld geschrieben hat - sie wuerde nur eine Zuordnung vortaeuschen.
+            // Vierstellige "Gleisnummern" gibt es nicht, und was an mehreren
+            // Haltepunkten desselben Bahnhofs gleich lautet, ist die Nummer
+            // des Bahnhofs. Beides wuerde nur eine Zuordnung vortaeuschen.
             $tracks = array_values(array_filter(
                 $tracks,
                 static fn(string $t): bool => !preg_match('/^\d{4,}$/', $t)
+                    && !isset($stationsnummern[$t])
             ));
 
             if ($tracks === []) {
@@ -260,6 +276,18 @@ final class Overpass
             // Ausgeschlossen wird nur, was sich AUSDRUECKLICH als Nicht-Bahn
             // ausweist: ein fehlendes train-Tag heisst bei Bahnsteigen in der
             // Regel nur, dass es niemand eingetragen hat.
+            //
+            // Fuer HALTEPUNKTE gilt das Gegenteil: sie liegen auf einem Gleis
+            // und muessen sagen, auf was fuer einem. Mannheim Hbf hat neben
+            // den zwoelf Bahngleisen die Bussteige "Steig E" bis "Steig G"
+            // als stop_position ohne jedes Modus-Tag - ohne diese Bedingung
+            // stuenden sie als Gleise im Plan.
+            if ($isStopNode
+                && ($tags['train'] ?? '') !== 'yes'
+                && ($tags['railway'] ?? '') !== 'stop') {
+                continue;
+            }
+
             if (($tags['train'] ?? '') !== 'yes') {
                 foreach (['tram', 'subway', 'bus', 'light_rail', 'monorail'] as $other) {
                     if (($tags[$other] ?? '') === 'yes') {
@@ -305,6 +333,44 @@ final class Overpass
             'error' => null,
             'data'  => ['platforms' => self::preferBestSource($out), 'ways' => $ways],
         ];
+    }
+
+    /**
+     * Werte, die keine Gleisnummer sein koennen, weil sie den ganzen
+     * Bahnhof meinen.
+     *
+     * An Haltepunkten steht in `ref` mancherorts die Nummer des BAHNHOFS im
+     * Netz des Betreibers - in Zuerich HB die 13030, auf jedem der 26
+     * Haltepunkte dieselbe. Ein Gleis hat hoechstens zwei Haltepunkte, einen
+     * je Richtung. Was auf DREI oder mehr auftaucht, ist deshalb keine
+     * Gleisnummer.
+     *
+     * @param array<int,array> $elements Overpass-Rohdaten
+     * @return array<string,true> verdaechtige Werte als Schluessel
+     */
+    private static function stationCodes(array $elements): array
+    {
+        $zaehler = [];
+        foreach ($elements as $e) {
+            $tags = $e['tags'] ?? [];
+            $istHalt = ($tags['public_transport'] ?? '') === 'stop_position'
+                || ($tags['railway'] ?? '') === 'stop';
+            if (!$istHalt) {
+                continue;
+            }
+            $ref = trim((string) ($tags['ref'] ?? ''));
+            if ($ref === '') {
+                continue;
+            }
+            foreach (preg_split('/[;,]/', $ref) as $teil) {
+                $teil = trim($teil);
+                if ($teil !== '') {
+                    $zaehler[$teil] = ($zaehler[$teil] ?? 0) + 1;
+                }
+            }
+        }
+
+        return array_filter($zaehler, static fn(int $n): bool => $n >= 3);
     }
 
     /**

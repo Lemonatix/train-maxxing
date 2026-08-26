@@ -16,11 +16,10 @@
  * Sie wird erst gebaut, wenn jemand aufklappt: eine Karte lädt Kacheln, und
  * das gehört nicht zum Seitenaufbau.
  *
- * ABDECKUNG: Die Meldungen kommen aus dem HAFAS Information Manager der ÖBB.
- * Der Schwerpunkt liegt damit auf Österreich, deutsche und schweizerische
- * Meldungen sind nur vereinzelt dabei. Das steht auch in der Anzeige, damit
- * niemand aus einer leeren Karte schliesst, es werde nirgends gebaut. Was für
- * eine deutschlandweite Quelle nötig wäre, steht im README.
+ * ZWEI QUELLEN: das Verzeichnis der DB InfraGO hinter strecken.info für
+ * Deutschland, der HAFAS Information Manager der ÖBB für Österreich und die
+ * Schweiz. Deutschland steht vorn — das grösste Netz im deutschsprachigen
+ * Raum, und die österreichische Quelle meldet fast nur Nebenbahnen.
  *
  * Bewusst zurückhaltend: standardmässig eingeklappt, Aktualisierung nur
  * stündlich (der Server cacht ohnehin so lange), und bei Fehlern lautlos
@@ -58,8 +57,8 @@ export function initWorks(mount) {
 
   const note = document.createElement('p');
   note.className = 'works__note';
-  note.textContent = 'Sperrungen ab einer Woche Dauer, Fernverkehrsstrecken zuerst. '
-    + 'Quelle ÖBB — Schwerpunkt Österreich, deutsche und schweizerische Meldungen nur vereinzelt.';
+  note.textContent = 'Totalsperrungen ab einer Woche Dauer, Deutschland zuerst. '
+    + 'Quellen: DB InfraGO (strecken.info) und ÖBB.';
   details.append(note);
 
   const mapEl = document.createElement('div');

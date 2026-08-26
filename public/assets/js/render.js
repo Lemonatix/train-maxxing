@@ -557,6 +557,39 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
 }
 
 /**
+ * Dafür sorgen, dass eine Punktmenge mindestens `minM` Meter überspannt.
+ *
+ * Nur wenn sie kleiner ist, und dann um ihren Mittelpunkt herum. Die Form
+ * bleibt sonst unangetastet: ein anteiliger Rand würde einen langen, schmalen
+ * Laufweg quadratisch machen, und beim massstabsgetreuen Einpassen bliebe
+ * dann die halbe Bildbreite leer — die Skizze wurde dadurch kleiner statt
+ * grösser.
+ */
+function atLeastSpan(points, minM) {
+  if (points.length === 0) return points;
+
+  let laMin = 90, laMax = -90, loMin = 180, loMax = -180;
+  for (const [la, lo] of points) {
+    if (la < laMin) laMin = la;
+    if (la > laMax) laMax = la;
+    if (lo < loMin) loMin = lo;
+    if (lo > loMax) loMax = lo;
+  }
+
+  const mProLat = 110540;
+  const mProLon = 111320 * Math.cos((((laMin + laMax) / 2) * Math.PI) / 180);
+  const fehltLa = Math.max(0, minM - (laMax - laMin) * mProLat) / 2 / mProLat;
+  const fehltLo = Math.max(0, minM - (loMax - loMin) * mProLon) / 2 / mProLon;
+  if (fehltLa === 0 && fehltLo === 0) return points;
+
+  return [
+    ...points,
+    [laMin - fehltLa, loMin - fehltLo],
+    [laMax + fehltLa, loMax + fehltLo],
+  ];
+}
+
+/**
  * Bahnhofsskizze mit Umsteigeweg — nach dem Vorbild der SBB-App.
  *
  * Alles ist massstäblich und gedreht auf die Längsachse des Bahnhofs, sonst
@@ -570,21 +603,49 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
 function transferSvg(platforms, a, b, route) {
   const NS = 'http://www.w3.org/2000/svg';
 
+  // AUSSCHNITT: der Laufweg, nicht der Bahnhof.
+  //
+  // Ein grosser Bahnhof ist vierhundert Meter lang. Passt er ganz ins Bild,
+  // ist der Umsteigeweg ein Strich von zwei Zentimetern irgendwo darin — und
+  // die Frage, um die es geht ("wo muss ich lang"), bleibt unbeantwortet.
+  // Massgebend ist deshalb der Weg selbst, zusammen mit den beiden Gleisen,
+  // um die es geht. Die übrigen Bahnsteige werden weiterhin gezeichnet, als
+  // Orientierung; was nicht in den Ausschnitt passt, schneidet das SVG ab.
+  // Der WEG bestimmt den Ausschnitt, nicht die Bahnsteige: die sind
+  // vierhundert Meter lang, und nimmt man sie ganz mit, ist der Weg wieder
+  // ein Strich in der Ecke. Nur wo kein Weg bekannt ist, bleiben die beiden
+  // Gleise als Anhaltspunkt.
+  let focus = route?.path?.length > 1 ? [...route.path] : [];
+  if (focus.length === 0) {
+    for (const p of [a, b]) {
+      if (p.shape?.length) focus.push(...p.shape);
+      else focus.push([p.lat, p.lon]);
+    }
+  }
+
+  // Untergrenze: ein Umstieg von fünf Metern sähe sonst aus wie ein Blick
+  // durchs Mikroskop. Rand braucht es keinen — den zieht die Skizze weiter
+  // unten selbst ein (`pad`).
+  focus = atLeastSpan(focus, 60);
+
+  // Alle Punkte - gebraucht für die Umrechnung, nicht für den Ausschnitt.
   const all = [];
   for (const p of platforms) {
     if (p.shape?.length) all.push(...p.shape);
     else all.push([p.lat, p.lon]);
   }
   if (route?.path?.length) all.push(...route.path);
-  if (all.length < 2) return el('p', 'xfer__note', 'Zu wenig Geodaten für eine Skizze.');
+  if (all.length < 2 || focus.length < 2) {
+    return el('p', 'xfer__note', 'Zu wenig Geodaten für eine Skizze.');
+  }
 
-  const lat0 = all[0][0];
-  const lon0 = all[0][1];
+  const lat0 = focus[0][0];
+  const lon0 = focus[0][1];
   const toM = ([la, lo]) => [
     (lo - lon0) * 111320 * Math.cos((lat0 * Math.PI) / 180),
     (la - lat0) * 110540,
   ];
-  const pts = all.map(toM);
+  const pts = focus.map(toM);
 
   // Längsachse über das am weitesten entfernte Punktepaar. Bei vielen Punkten
   // reicht eine Stichprobe — quadratisch über tausende Punkte wäre verschwendet.
@@ -637,23 +698,32 @@ function transferSvg(platforms, a, b, route) {
   };
 
   // --- Bahnsteige -----------------------------------------------------
+  // Liegt ein Punkt noch im Bild? Seit der Ausschnitt dem Laufweg folgt,
+  // reichen die meisten Bahnsteige darüber hinaus.
+  const drin = ([x, y]) => x >= -40 && y >= -40 && x <= W + 40 && y <= H + 40;
+
   for (const p of platforms) {
     const role = p === a ? ' is-from' : p === b ? ' is-to' : '';
+    const eckpunkte = (p.shape?.length ? p.shape : [[p.lat, p.lon]]).map(px);
+    // Bahnsteige weit ausserhalb gar nicht erst zeichnen.
+    if (!eckpunkte.some(drin)) continue;
+
     const g = node('g', {}, 'xfer__plat' + role);
 
     if (p.shape?.length > 1) {
-      const d = p.shape
-        .map((ll, k) => `${k === 0 ? 'M' : 'L'}${px(ll).map((v) => v.toFixed(1)).join(' ')}`)
+      const d = eckpunkte
+        .map((xy, k) => `${k === 0 ? 'M' : 'L'}${xy.map((v) => v.toFixed(1)).join(' ')}`)
         .join(' ');
       g.append(node('path', { d }, 'xfer__plat-line'));
     } else {
-      const [x, y] = px([p.lat, p.lon]);
+      const [x, y] = eckpunkte[0];
       g.append(node('circle', { cx: x.toFixed(1), cy: y.toFixed(1), r: 3 }));
     }
 
-    // Gleisnummer als Schild am Bahnsteiganfang — wie auf einem Bahnhofsplan.
-    const anchor = p.shape?.length ? p.shape[0] : [p.lat, p.lon];
-    const [lx, ly] = px(anchor);
+    // Gleisnummer als Schild — dort, wo der Bahnsteig ins Bild kommt, nicht
+    // an seinem Anfang: der liegt jetzt oft ausserhalb, und das Schild klebte
+    // dann am Rand oder fehlte ganz.
+    const [lx, ly] = eckpunkte.find(drin) ?? eckpunkte[0];
     const text = p.tracks.join('/');
     const w = 9 + text.length * 5.2;
     g.append(node('rect', {

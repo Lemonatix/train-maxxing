@@ -308,15 +308,21 @@ sein musste. Zwei Fehler steckten dahinter:
    die war nie gesetzt, `sprintf` bekam `%1,` zu sehen und warf *Unknown format
    specifier*. Die Abfrage kam gar nicht erst zustande — **jeder** Bahnhof ohne
    Cache-Eintrag meldete „keine Bahnsteige erfasst".
-2. An Haltepunkten trägt `ref` die Nummer des **Bahnhofs**, nicht die des
-   Gleises. Zürich HB lieferte darüber „Gleis 13030". Die Gleisnummer steht
-   dort in `local_ref`.
+2. An Haltepunkten trägt `ref` **mancherorts** die Nummer des Bahnhofs, nicht
+   die des Gleises. Zürich HB lieferte darüber „Gleis 13030" — die Gleisnummer
+   steht dort in `local_ref`. Nur `local_ref` zu nehmen war aber auch falsch:
+   Mannheim Hbf führt seine zwölf Gleise als `ref` und kennt kein `local_ref`,
+   und der Lageplan zeigte dort **einen** Bahnsteig. Jetzt gilt `local_ref`
+   vor `ref`, und was wie eine Stationsnummer aussieht, fällt vorher raus: was
+   auf **drei oder mehr** Haltepunkten gleich lautet, kann keine Gleisnummer
+   sein — ein Gleis hat höchstens zwei, einen je Richtung.
 
 Nach der Korrektur, nachgemessen:
 
 | Bahnhof | Bahnsteige mit Nummer | berechenbare Gleispaare |
 |---|---|---|
 | Zürich HB | 24 (Gleis 3–18, 31–34, 41–44) | 276 / 276 |
+| Mannheim Hbf | 12 (vorher 1) | — |
 | München Hbf | 17 | 136 / 136 |
 | Bern | 16 | 120 / 120 |
 | Ulm Hbf | 18 (Abschnitte) | — |
@@ -327,6 +333,21 @@ Der Plan erscheint nur, wenn **beide** Gleise gefunden werden; sonst sagt die
 Anzeige, was fehlt — und unterscheidet dabei „Dienst gerade überlastet" von
 „Bahnhof nicht kartiert". Vorher stand in beiden Fällen dieselbe Zeile, und in
 einem davon war sie falsch.
+
+**Der Ausschnitt folgt dem Laufweg, nicht dem Bahnhof.** Ein grosser Bahnhof
+ist vierhundert Meter lang; passt er ganz ins Bild, ist der Umsteigeweg ein
+Strich von zwei Zentimetern irgendwo darin — und die Frage, um die es geht
+(„wo muss ich lang"), bleibt unbeantwortet. Massgebend sind deshalb der Weg
+selbst und die beiden beteiligten Gleise. Die übrigen Bahnsteige werden
+weiterhin gezeichnet, als Orientierung; was nicht in den Ausschnitt passt,
+schneidet das SVG ab, und die Gleisnummer steht dort, wo der Bahnsteig ins
+Bild kommt, statt an seinem Anfang ausserhalb.
+
+**Overpass bekommt mehr Zeit als die übrigen Quellen** (50 s statt 25, und
+`[timeout:40]` in der Abfrage selbst). Der Dienst stellt Anfragen bei Last in
+eine Warteschlange; mit dem allgemeinen Timeout brach die Anfrage genau dann
+ab, und der Bahnhof galt als nicht kartiert. Vertretbar, weil das Ergebnis
+eine Woche gilt und nur beim Aufklappen eines Umstiegs geholt wird.
 
 Ein Fallstrick, der beim Bauen aufgefallen ist: Würzburg Hbf liefert vierzehn
 Objekte mit den Nummern 1–14 — das ist aber der **Busbahnhof davor**
@@ -344,54 +365,87 @@ werden sieben Tage gecacht (rund 70 KB je Bahnhof).
 ### Grosse Baustellen im Netz
 
 `?action=works` liefert Bauarbeiten mit **betroffenem Abschnitt** (von Bahnhof
-A bis Bahnhof B), Zeitraum und Koordinaten.
+A bis Bahnhof B), Zeitraum und — soweit ermittelbar — dem tatsächlichen
+Streckenverlauf.
 
 **Eine eigene Karte, nicht die Routenkarte.** Baustellen und Suchergebnisse
 beantworten verschiedene Fragen und stehen einander im Weg: über einer
-gefundenen Verbindung liegen ein Dutzend gestrichelter Abschnitte, die mit ihr
+gefundenen Verbindung liegen ein Dutzend markierter Abschnitte, die mit ihr
 nichts zu tun haben, und der Ausschnitt kann nicht beiden gerecht werden — die
 Route will Zürich–Wien zeigen, die Baustellenkarte das ganze Netz. Der Kasten
 unter der Trefferliste bringt deshalb seine eigene Karte mit; gebaut wird sie
 erst beim Aufklappen, denn eine Karte lädt Kacheln.
 
-Quelle ist der **HAFAS Information Manager der ÖBB** (`HimSearch`). Was dabei
-nötig war, damit aus 500 Meldungen eine lesbare Übersicht wird:
+#### Zwei Quellen, Deutschland zuerst
 
-- **Nach Kategorie filtern.** HAFAS liefert Betriebsmeldungen (Kategorie 1–3)
-  und reine Reisehinweise (4) gemischt. Ohne Filter standen 117 Meldungen
-  „ACHTUNG: Starker Reisetag" in der Baustellenliste.
-- **Nach Land filtern.** Die Instanz kennt auch Ungarn, Slowenien und Italien.
-- **Nach Dauer filtern.** Was in wenigen Tagen vorbei ist, ist eine Störung und
-  keine Baustelle. Die Grenze liegt bei einer Woche.
-- **Richtungs- und zeitraumunabhängig entdoppeln.** Dieselbe Sperrung kommt je
-  Linie, je Richtung und je Zeitabschnitt erneut: Wampersdorf–Ebenfurth stand
-  viermal in der Liste, wortgleich, nur mit anderen Datumsgrenzen. Der
-  zusammengefasste Eintrag bekommt den weitesten Zeitraum.
-- **Fernverkehr zuerst.** Die Liste zeigt nur die ersten acht Einträge. Nach
-  Dauer allein standen dort die Nebenbahnen mit den längsten Sperrungen —
-  richtig sortiert, aber nicht das, wonach jemand sucht. Ob Fernverkehr fährt,
-  sagt die Produktklasse der Meldung; sie fehlt bei vier von fünf Meldungen,
-  dann entscheiden die Produktklassen der beiden Endbahnhöfe.
-- **Den Meldungstext kürzen.** Die HAFAS-Texte sind 280–340 Zeichen und zu vier
-  Fünfteln Formelware („Bitte beachten Sie, dass in den Bussen des
-  Schienenersatzverkehres keine Fahrradmitnahme möglich ist …"). In der Liste
-  lief das über den Rand und verdrängte genau die Angaben, wegen derer man
-  hinschaut. Die Zeile zeigt jetzt Abschnitt, Thema und Restdauer; der volle
-  Text steht als Tooltip.
+| Land | Quelle | liefert |
+|---|---|---|
+| Deutschland | DB InfraGO über `strecken-info.de/api/baustellen` | Totalsperrungen im ganzen Netz, mit Betriebsstelle, Zeitraum, Art der Arbeiten und Streckennummer |
+| Österreich, Schweiz | HAFAS Information Manager der ÖBB (`HimSearch`) | Betriebsmeldungen mit Abschnitt und Zeitraum, teils mit Streckenverlauf |
 
-**Die Abdeckung ist österreichlastig.** Nachgemessen über 500 Meldungen: 452
-mit österreichischem, 17 mit deutschem und 9 mit schweizerischem
-Anfangsbahnhof; nach Kategorie, Dauer und Entdopplung bleibt praktisch nur
-Österreich übrig. Das steht auch in der Anzeige.
+Vorher gab es nur die ÖBB-Quelle, und die ist österreichlastig: nachgemessen
+über 500 Meldungen 452 mit österreichischem, 17 mit deutschem und 9 mit
+schweizerischem Anfangsbahnhof — nach Kategorie- und Dauerfilter blieb aus
+Deutschland praktisch nichts übrig. Für eine Übersicht „wo wird gerade gross
+gebaut" war das die falsche Hälfte des Bildes. Jetzt stehen 60 deutsche
+Vorhaben vor 35 österreichischen.
 
-**Eine deutschlandweite Quelle fehlt weiterhin.** Geprüft und aus der
-Entwicklungsumgebung heraus *nicht erreichbar*: `strecken.info` (DB InfraGO),
-`v6.db.transport.rest` (db-rest), `reiseauskunft.bahn.de/bin/mgate.exe`. Die
-Web-APIs unter `int.bahn.de` antworten zwar, kennen aber keinen Endpunkt für
-Bauarbeiten (403 auf alle geprüften Pfade), und `dbstreckenagent.de` ist ein
-Abodienst mit Anmeldung. Ein zweiter Provider nach dem Muster von
-`OebbHafas::works()` würde reichen, sobald eine Quelle erreichbar ist; das
-Frontend nimmt beliebig viele Einträge entgegen.
+Zwei Eigenheiten der DB-Schnittstelle haben Arbeit gemacht:
+
+- **`revision`.** Jede Anfrage muss den Datenstand nennen, auf den sie sich
+  bezieht; einen Endpunkt, der ihn allein liefert, gibt es nicht (die
+  Weboberfläche bekommt ihn beim Start mitgeliefert). Die Zahl wächst monoton,
+  und der Server nimmt ein Fenster von einigen hundert Ständen an — er sagt
+  dabei brauchbar, in welche Richtung man muss: *„Revision X zu alt"* gegen
+  *„Revision X existiert noch nicht"*. Damit lässt er sich einkreisen. Der
+  zuletzt gültige Stand wird gemerkt, im Normalfall bleibt es bei einer
+  einzigen kleinen Abfrage.
+- **Koordinaten in EPSG:3857**, nicht in Grad.
+
+Gefiltert wird auf **Totalsperrungen ab einer Woche Dauer** und nach
+`baustellenID`-Präfix gebündelt: ein Bauvorhaben zerfällt in der Quelle in
+viele Einzeleinträge (je Richtung, je Abschnitt, je Zeitfenster), aus 66
+Einträgen „1E79F.x" wird ein Vorhaben. Ohne das stünden über viertausend
+nächtliche Sperrpausen in der Liste.
+
+Für die ÖBB-Seite gilt weiterhin: nach Kategorie filtern (1–3 sind
+Betriebsmeldungen, 4 sind Reisehinweise — ohne den Filter standen 117
+„ACHTUNG: Starker Reisetag" in der Liste), nach Land filtern, und richtungs-
+wie zeitraumunabhängig entdoppeln.
+
+#### Der Streckenverlauf
+
+Eine gerade Linie zwischen zwei Betriebsstellen läuft quer durchs Gelände,
+während die Schiene einen Bogen macht. Deshalb zwei Wege zum echten Verlauf:
+
+- **Die ÖBB liefert ihn mit** — `getPolyline: true` im `HimSearch`-Request.
+  Der Schalter gehört in `req`, nicht in `cfg`; dort quittiert ihn HAFAS mit
+  *„Parse fail"*.
+- **Für die deutschen Abschnitte** kommt er aus OpenStreetMap: deutsche
+  Strecken tragen ihre VzG-Nummer als `ref` an den Gleisen. `RailGeometry`
+  holt das Stück Netz mit dieser Nummer — begrenzt auf ein Rechteck um die
+  beiden Endpunkte, sonst antwortet Overpass mit einer Zeitüberschreitung —
+  und sucht darin per Dijkstra den Weg von einem Endpunkt zum anderen.
+
+  **Lücken schliessen:** Innerhalb eines Bahnhofs tragen die Gleise meist
+  keine Streckennummer; sie klebt an der freien Strecke. Der Graph riss
+  deshalb genau dort auseinander, wo die Endpunkte liegen. Enden zweier
+  Gleisstücke, die keine vierzig Meter auseinanderliegen, werden verbunden.
+
+Alle Abschnitte kommen in **einer** Overpass-Abfrage mit je einer begrenzten
+Teilabfrage — sechzig einzelne Anfragen wären unhöflich und langsam. Pro
+Aufruf werden höchstens zwölf Abschnitte nachgeladen, das Ergebnis hält
+dreissig Tage (Schienen ziehen nicht um), und die Karte wird so von Aufruf zu
+Aufruf genauer. Wo es nicht klappt — keine Streckennummer, in OSM nicht
+erfasst, Overpass überlastet — bleibt es bei der geraden Linie; sie wird
+gestrichelt gezeichnet, der echte Verlauf durchgezogen.
+
+Nachgemessen nach ein paar Durchläufen: **37 von 60 deutschen Abschnitten**
+(62 %) mit echtem Streckenverlauf, dazu 4 der 35 österreichischen aus den
+HAFAS-Polylinien. Die Längen sind plausibel — Berlin Zoologischer Garten bis
+Friedrichstrasse 4,9 km Verlauf gegen 4,0 km Luftlinie, Meerbeck–Xanten 26,3
+gegen 25,3. Der Anteil steigt mit jeder Aktualisierung weiter, weil der Cache
+sich füllt.
 
 ### Leistung auf schwacher Hardware
 
@@ -459,8 +513,12 @@ ein. Wichtig: Das Skript braucht `type="module"`.
 
 ### Sortierung der Trefferliste
 
-Über der Liste steht ein Menü mit drei Möglichkeiten. Es merkt sich die Wahl
-zusammen mit den übrigen Einstellungen.
+Über der Liste steht ein Menü mit drei Möglichkeiten.
+
+**Voreingestellt ist „Abfahrt — chronologisch".** Das ist die Reihenfolge, in
+der die Züge fahren: man sucht sich die Abfahrt, die zeitlich passt, und
+vergleicht erst dann. Die Empfehlung mischt Preis und Dauer zu einer Punktzahl
+— als Voreinstellung verbirgt sie, wonach eigentlich sortiert wurde.
 
 | Auswahl | Reihenfolge |
 |---|---|
@@ -730,12 +788,29 @@ Gebaut ohne Leaflet: ein Kachel-Layer aus `<img>`-Elementen, darüber ein SVG mi
 Routen, Halten und Zugpositionen. Das spart ein mitzulieferndes Paket und hält
 die Kachelquelle an einer Stelle (`TILES` in `assets/js/map.js`).
 
-**Zur Kachelquelle:** Voreingestellt ist CARTO „dark matter" auf
-OpenStreetMap-Basis, passend zum dunklen Design. Damit sieht ein fremder Server
-die IP-Adressen deiner Besucher — das ist der Preis für den Hintergrund. Wer das
-nicht will, setzt `TILES.url` auf `null`; dann rendert die Karte wie zuvor nur
-die Routen, ganz ohne externe Requests. Die Attribution unten rechts ist bei
-OSM-Kacheln Pflicht und darf nicht entfernt werden.
+**Zur Kachelquelle:** OpenStreetMap direkt, ohne Schlüssel.
+
+Vorher stand hier CARTO. Deren Basemap-CDN verlangt inzwischen einen
+API-Schlüssel — und verweigert die Auskunft nicht etwa mit einem Fehlercode,
+sondern liefert weiterhin **HTTP 200 mit einem Bild, auf dem „API key
+required" steht**. Für den Browser ist das eine gültige Kachel, `onerror`
+schlägt nie an, und die Karte besteht aus lauter Fehlermeldungen, ohne dass die
+App etwas davon merkt. Genau so sah es aus.
+
+OSM braucht keinen Schlüssel. Die Nutzungsbedingungen verlangen die
+Namensnennung — sie steht unten rechts im Bild und darf nicht entfernt werden —
+und keine Massenabfragen; eine Handvoll Kacheln je Seitenaufruf erfüllt das.
+
+**Dunkles Layout ohne zweite Quelle:** OSM hat keine dunklen Kacheln. Statt
+dafür wieder einen Anbieter mit Schlüsselpflicht zu holen, werden dieselben
+Kacheln per CSS-Filter umgefärbt: `invert(1)` dreht Hell und Dunkel, und
+`hue-rotate(180deg)` dreht die dabei verdrehten Farbtöne zurück, damit Wasser
+blau bleibt statt orange zu werden. Der Filter liegt nur auf den Kacheln; das
+SVG mit Routen und Zügen darüber bleibt unangetastet.
+
+Damit sieht ein fremder Server die IP-Adressen deiner Besucher — das ist der
+Preis für den Hintergrund. Wer das nicht will, setzt `TILES.url` auf `null`;
+dann rendert die Karte nur die Routen, ganz ohne externe Requests.
 
 **Beschriftungen überlappen nicht.** Für jeden Halt werden acht Positionen rund
 um den Punkt durchprobiert; passt keine kollisionsfrei ins Bild, bleibt der Name
@@ -928,6 +1003,34 @@ Ticker und die Ortssuche fällt auf HAFAS-only zurück.
 zwischen zwei MVG-Halten muss weiterhin HAFAS herhalten — und HAFAS versteht
 die MVG-IDs nicht. In der Praxis ist das selten ein Problem, weil HAFAS
 München S-Bahn/Fernverkehr ohnehin sauber abbildet.
+
+### Datum und Uhrzeit auf dem Telefon
+
+iOS und Android zeichnen `input[type="date"]` und `input[type="time"]` als
+**Systemsteuerelement** und geben ihm die Breite seines *Inhalts*.
+`width: 100%`, `max-width` und `min-width: 0` prallen daran ab: das Element ist
+schlicht nicht bereit, schmaler zu werden als der Text darin, und schiebt sich
+über das Nachbarfeld und über den Rand des Panels.
+
+Es hilft nur `appearance: none`. Was dabei verloren geht, wird einzeln
+zurückgeholt — genau das war der Einwand beim ersten Versuch:
+
+| verloren | zurückgeholt mit |
+|---|---|
+| Wert sass oben links statt mittig | `display: flex` + `align-items: center` |
+| Kalender- bzw. Uhrsymbol fehlte | eingebettetes SVG als `background-image` |
+| Feld wirkte leer | `::-webkit-date-and-time-value { text-align: left }` |
+
+Ein Detail, das eine Weile gekostet hat: `background-position: right 0.6rem
+center` sind **drei** Werte, und die Dreiwert-Schreibweise ist ungültig — der
+Browser wirft die Zeile ersatzlos weg und setzt das Symbol nach oben links.
+Gültig sind ein, zwei oder vier Werte, hier also `right 0.6rem top 50%`.
+
+Nachgemessen bei 375 px und bei 320 px Fensterbreite, jeweils auch mit auf
+22 px hochgesetzter Grundschrift: kein Überlauf, die Felder schrumpfen mit.
+Unter 360 px bekommt das Datum eine eigene Zeile — 360 und nicht 380, weil die
+verbreiteten Telefongrössen bei 375 und 390 px liegen und dort beide Felder
+bequem nebeneinander passen.
 
 ### Teilen
 

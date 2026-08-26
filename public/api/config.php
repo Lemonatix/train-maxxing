@@ -96,6 +96,20 @@ return [
             'user_agent' => 'train-maxxing (+https://github.com/)',
         ],
 
+        // --- strecken.info (DB InfraGO): grosse Baustellen in Deutschland. ---
+        //
+        // Das Verzeichnis hinter strecken.info. Liefert Totalsperrungen im
+        // ganzen deutschen Netz mit Abschnitt, Zeitraum, Art der Arbeiten und
+        // Streckennummer - die OeBB-Quelle deckt fast nur Oesterreich ab.
+        //
+        // Die Antwort umfasst mehrere Megabyte, deshalb greift cache_ttl
+        // ['works']. Abschalten kostet nur die deutschen Baustellen; die
+        // oesterreichischen kommen weiter ueber die OeBB.
+        'streckeninfo' => [
+            'enabled'    => true,
+            'user_agent' => 'train-maxxing (+https://github.com/)',
+        ],
+
         // --- OpenStreetMap via Overpass: Bahnsteige fuer den Umstiegsplan. ---
         //
         // Liefert Gleisnummer, Lage und Ebene der Bahnsteige. Daraus baut die
@@ -113,6 +127,13 @@ return [
             // Ausweichserver: die Hauptinstanz antwortet bei Last mit 504.
             'fallback'   => 'https://overpass.kumi.systems/api/interpreter',
             'user_agent' => 'train-maxxing (+https://github.com/)',
+            // Eigener, laengerer Timeout als die uebrigen Quellen. Overpass
+            // stellt Anfragen bei Last in eine Warteschlange und braucht dann
+            // 30 bis 40 Sekunden; mit den 25 aus 'http_timeout' brach die
+            // Anfrage genau dann ab, und der Bahnhof galt als nicht kartiert.
+            // Vertretbar, weil das Ergebnis eine Woche gilt und nur beim
+            // Aufklappen eines Umstiegs geholt wird.
+            'timeout'    => 50,
         ],
 
         // --- Wagenreihung: liefert die Baureihe (ICE 4 = BR 412 usw.). ---
