@@ -98,22 +98,40 @@ function yToLat(y, z) {
 // Daten aus den Verbindungen
 // ---------------------------------------------------------------------------
 
+/** Ebenenbezeichnung: 0 wird zu "E", der Rest bleibt die Zahl. */
+function levelName(lv) {
+  if (lv == null) return '–';
+  if (lv === 0) return 'E';
+  return lv > 0 ? `+${lv}` : String(lv);
+}
+
 /**
- * Zugbezeichnung fuer die Anzeige: "ICE 516" statt bloss "ICE".
+ * Zugbezeichnung für die Anzeige: "ICE 516", aber "S 33" statt "S 20326".
  *
- * HAFAS liefert die Nummer nicht bei jedem Zug getrennt in `trainNumber` —
- * mal steckt sie nur im Produktnamen ("ICE 516"), mal gibt es ueberhaupt
- * keine (S-Bahnen, Busse). Deshalb der Reihe nach: Gattung plus Nummer,
- * sonst der Produktname, sonst die blosse Gattung.
+ * DIE LINIE SCHLÄGT DIE ZUGNUMMER, wo es eine Linie gibt. Im Fernverkehr ist
+ * die Nummer der Zug — ein ICE 593 fährt heute so und morgen anders, und am
+ * Bahnsteig steht „ICE 593". Im Nahverkehr ist es umgekehrt: dort steht „S 33"
+ * angeschrieben, und die Zugnummer 20326 ist eine interne Betriebsnummer, die
+ * auf keiner Anzeigetafel auftaucht. Vorher stand genau die in der App —
+ * „S 20318" für eine S 11.
  *
- * @param {?object} t Zug mit {category, trainNumber, name}
+ * HAFAS trennt beides sauber: `prodCtx.line` ist bei Linienverkehr gesetzt und
+ * im Fernverkehr leer. Manche Linien tragen die Gattung schon in sich ("RE3"),
+ * dann wird sie nicht doppelt davorgesetzt.
+ *
+ * @param {?object} t Zug mit {category, line, trainNumber, name}
  * @returns {string}
  */
 export function trainLabel(t) {
   const cat  = String(t?.category || '').trim();
+  const line = String(t?.line || '').trim();
   const num  = String(t?.trainNumber || '').trim();
   const name = String(t?.name || '').replace(/\s+/g, ' ').trim();
 
+  if (line) {
+    if (!cat) return line;
+    return line.toUpperCase().startsWith(cat.toUpperCase()) ? line : `${cat} ${line}`;
+  }
   if (cat && num) return `${cat} ${num}`;
   if (name) return name;
   return cat || 'Zug';
@@ -125,11 +143,14 @@ export function trainLabel(t) {
  * Die `jid` waere die eindeutige Antwort, taugt aber nur INNERHALB einer
  * HAFAS-Antwort: sie wird pro Anfrage neu aufgebaut, die Kennung aus der
  * Verbindungssuche und die aus der Positionsmeldung sind deshalb in aller
- * Regel verschieden. Verglichen wird darum die Bezeichnung ("ICE 516") und
- * ersatzweise die blosse Nummer - der Positionsmeldung fehlt manchmal die
- * Gattung. Widersprechen sich die Gattungen, ist es nicht derselbe Zug.
+ * Regel verschieden.
  *
- * @param {?object} a Zug mit {jid, category, trainNumber, name}
+ * DIE ZUGNUMMER ENTSCHEIDET, wo es eine gibt. Die Beschriftung taugt dafuer
+ * nicht mehr, seit sie im Nahverkehr die LINIE zeigt: auf der S 33 sind zu
+ * jeder Zeit mehrere Zuege unterwegs, und "S 33" ist kein Zug, sondern eine
+ * Linie. Widersprechen sich die Gattungen, ist es ohnehin nicht derselbe Zug.
+ *
+ * @param {?object} a Zug mit {jid, category, line, trainNumber, name}
  * @param {?object} b dito
  */
 export function sameTrain(a, b) {
@@ -138,15 +159,18 @@ export function sameTrain(a, b) {
 
   const norm = (v) => String(v || '').replace(/\s+/g, '').toUpperCase();
 
-  const la = norm(trainLabel(a));
-  if (la !== '' && la === norm(trainLabel(b))) return true;
-
   const ca = norm(a.category);
   const cb = norm(b.category);
   if (ca !== '' && cb !== '' && ca !== cb) return false;
 
   const na = norm(a.trainNumber);
-  return na !== '' && na === norm(b.trainNumber);
+  const nb = norm(b.trainNumber);
+  if (na !== '' && nb !== '') return na === nb;
+
+  // Ohne Nummer bleibt nur der Produktname - der Positionsmeldung fehlt
+  // manchmal beides.
+  const la = norm(a.name);
+  return la !== '' && la === norm(b.name);
 }
 
 /**
@@ -257,7 +281,11 @@ export class RouteMap {
    */
   constructor(container, opts = {}) {
     this.el = container;
-    this.mode = opts.mode === 'works' ? 'works' : 'routes';
+    this.mode = ['works', 'station'].includes(opts.mode) ? opts.mode : 'routes';
+    // Bahnhofsmodus: Bahnsteige, Laufweg und die Ebene, die gerade gezeigt
+    // wird. Siehe setStation().
+    this.station = null;
+    this.level = null;
     this.zoom = 7;
     this.center = { lat: 47.8, lon: 10.5 };
     this.ranked = [];
@@ -318,14 +346,22 @@ export class RouteMap {
       b.addEventListener('click', (e) => { e.stopPropagation(); fn(b); });
       return b;
     };
+    const zeigAlles = {
+      works: 'Alle Baustellen zeigen',
+      station: 'Ganzen Weg zeigen',
+    }[this.mode] || 'Ganze Route zeigen';
+
     controls.append(
       btn('+', 'Hineinzoomen', () => this.zoomBy(1)),
       btn('−', 'Herauszoomen', () => this.zoomBy(-1)),
-      btn('⤢', this.mode === 'works' ? 'Alle Baustellen zeigen' : 'Ganze Route zeigen',
-        () => { this.fit(); this.render(); }),
-      // Kleine Lücke vor dem Standort-Button, damit er als eigene Gruppe wirkt.
-      btn('◎', 'Meinen Standort zeigen', (b) => this.locate(b), 'map__btn--locate'),
+      btn('⤢', zeigAlles, () => { this.fit(); this.render(); }),
     );
+    // Im Bahnhof hilft der eigene Standort nicht weiter: die Karte zeigt
+    // ohnehin nur den Umstieg, und drinnen taugt GPS nichts.
+    if (this.mode !== 'station') {
+      // Kleine Lücke vor dem Standort-Button, damit er als eigene Gruppe wirkt.
+      controls.append(btn('◎', 'Meinen Standort zeigen', (b) => this.locate(b), 'map__btn--locate'));
+    }
 
     const attr = document.createElement('a');
     attr.className = 'map__attr';
@@ -345,6 +381,7 @@ export class RouteMap {
     this.scaleEl.append(scaleBar, scaleLbl);
 
     this.viewport.append(controls, attr, this.scaleEl);
+    if (this.mode === 'station') this.viewport.append(this.buildLevelControl());
     this.el.append(this.viewport);
 
     // Karte tastaturbedienbar machen (Pfeile / +- / Home).
@@ -584,6 +621,20 @@ export class RouteMap {
   fit() {
     const pts = [];
 
+    // Im Bahnhof zählt der Laufweg, nicht der ganze Bahnhof.
+    if (this.mode === 'station') {
+      const st = this.station;
+      for (const p of st?.route?.path || []) pts.push(p);
+      if (pts.length < 2) {
+        for (const p of [st?.from, st?.to]) {
+          if (p?.shape?.length) pts.push(...p.shape);
+          else if (p) pts.push([p.lat, p.lon]);
+        }
+      }
+      this.fitPoints(pts, 55);
+      return;
+    }
+
     // Auf der Baustellenkarte gibt es keine Routen — dort sind die
     // Abschnitte selbst der Inhalt.
     if (this.mode === 'works') {
@@ -606,7 +657,7 @@ export class RouteMap {
   }
 
   /** Ausschnitt so wählen, dass alle Punkte hineinpassen. */
-  fitPoints(pts) {
+  fitPoints(pts, pad = 40) {
     if (pts.length < 2) return;
 
     let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
@@ -618,7 +669,6 @@ export class RouteMap {
     }
 
     const { w, h } = this.size();
-    const pad = 40;
     let z = TILES.maxZoom;
     while (z > TILES.minZoom) {
       const dx = Math.abs(lonToX(maxLon, z) - lonToX(minLon, z));
@@ -654,6 +704,11 @@ export class RouteMap {
 
   /** Die Zeile unter der Karte — sie sagt, was hier zu sehen und zu tun ist. */
   hintText() {
+    if (this.mode === 'station') {
+      return this.levelsPresent().length > 1
+        ? 'Ziehen und zoomen. Mit ▲ ▼ die Ebene wechseln — was woanders liegt, ist blass.'
+        : 'Ziehen zum Verschieben, Scrollen zum Zoomen.';
+    }
     if (this.mode === 'works') {
       if (this.works.length === 0) return 'Zurzeit sind keine grösseren Baustellen gemeldet.';
       // Zwei Linienarten, zwei Aussagen — das gehört dazugesagt, sonst liest
@@ -687,6 +742,213 @@ export class RouteMap {
   setTrackedRoute(route) {
     this.tracked = route || null;
     if (this.built) this.render();
+  }
+
+  // -------------------------------------------------------------------
+  // Bahnhofsmodus
+  // -------------------------------------------------------------------
+
+  /**
+   * Bahnsteige und Umsteigeweg setzen.
+   *
+   * @param {object} st {platforms, from, to, route}
+   *   `from`/`to` sind die beiden beteiligten Bahnsteige aus `platforms`,
+   *   `route` das Ergebnis von StationPlan::route mit `path` und `levels`.
+   */
+  setStation(st) {
+    this.station = st || null;
+    this.level = this.defaultLevel();
+    if (!this.built) return;
+    this.fit();
+    this.render();
+    this.updateLevelControl();
+    this.updateHint();
+  }
+
+  /**
+   * Welche Ebene wird zuerst gezeigt?
+   *
+   * Die des ABFAHRTSGLEISES, nicht die des Ankunftsgleises: der Weg dorthin
+   * ist die Frage, und dort will man wissen, wo man herauskommt. Kennt OSM
+   * keine Ebenen, bleibt es bei null — dann gibt es auch nichts umzuschalten.
+   */
+  defaultLevel() {
+    const st = this.station;
+    if (!st) return null;
+    if (st.to?.level != null) return st.to.level;
+    if (st.from?.level != null) return st.from.level;
+    return this.levelsPresent()[0] ?? null;
+  }
+
+  /** Alle Ebenen, die im Bild vorkommen, von oben nach unten. */
+  levelsPresent() {
+    const st = this.station;
+    if (!st) return [];
+    const set = new Set();
+    for (const p of st.platforms || []) if (p.level != null) set.add(p.level);
+    for (const l of st.route?.levels || []) if (l != null) set.add(l);
+    return [...set].sort((a, b) => b - a);
+  }
+
+  /** Der Umschalter am Bildrand: eine Ebene hoch, eine tiefer. */
+  buildLevelControl() {
+    const box = document.createElement('div');
+    box.className = 'map__levels';
+    box.hidden = true;
+
+    const mk = (label, title, fn) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'map__level-btn';
+      b.textContent = label;
+      b.title = title;
+      b.setAttribute('aria-label', title);
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+      return b;
+    };
+
+    this.levelUp = mk('▲', 'Eine Ebene höher', () => this.stepLevel(1));
+    this.levelOut = document.createElement('span');
+    this.levelOut.className = 'map__level-value';
+    this.levelDown = mk('▼', 'Eine Ebene tiefer', () => this.stepLevel(-1));
+
+    box.append(this.levelUp, this.levelOut, this.levelDown);
+    this.levelBox = box;
+    return box;
+  }
+
+  /** Eine Ebene weiter, so weit es welche gibt. */
+  stepLevel(richtung) {
+    const ebenen = this.levelsPresent();
+    if (ebenen.length < 2) return;
+    // Die Liste ist von oben nach unten sortiert — "höher" heisst rückwärts.
+    const i = Math.max(0, ebenen.indexOf(this.level));
+    const next = ebenen[Math.min(ebenen.length - 1, Math.max(0, i - richtung))];
+    if (next === this.level) return;
+    this.level = next;
+    this.render();
+    this.updateLevelControl();
+  }
+
+  updateLevelControl() {
+    if (!this.levelBox) return;
+    const ebenen = this.levelsPresent();
+
+    // Ohne Ebenenangaben in OSM gibt es nichts umzuschalten — dann bleibt der
+    // Knopf ganz weg, statt untätig herumzustehen.
+    this.levelBox.hidden = ebenen.length < 2;
+    if (this.levelBox.hidden) return;
+
+    const i = ebenen.indexOf(this.level);
+    this.levelOut.textContent = levelName(this.level);
+    this.levelOut.title = `Ebene ${this.levelOut.textContent} von ${ebenen.length}`;
+    this.levelUp.disabled = i <= 0;
+    this.levelDown.disabled = i < 0 || i >= ebenen.length - 1;
+  }
+
+  /**
+   * Bahnsteige und Laufweg.
+   *
+   * NACH EBENEN GETRENNT: was auf der gerade gezeigten Ebene liegt, ist
+   * kräftig gezeichnet, alles andere tritt blass zurück. Ein Umstieg über
+   * vier Ebenen ist sonst ein einziger Strich, in dem sich Bahnsteig,
+   * Unterführung und Halle ununterscheidbar überlagern.
+   */
+  renderStation(svg, w, h, toPx) {
+    const st = this.station;
+    if (!st) return;
+
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', 'map__station');
+    const zeigeEbene = this.level;
+    const aufEbene = (lv) => zeigeEbene == null || lv == null || lv === zeigeEbene;
+
+    // --- Bahnsteige ---------------------------------------------------
+    for (const p of st.platforms || []) {
+      const pts = (p.shape?.length ? p.shape : [[p.lat, p.lon]]).map(toPx);
+      if (!pts.some(([x, y]) => x > -60 && y > -60 && x < w + 60 && y < h + 60)) continue;
+
+      const rolle = p === st.from ? ' is-from' : p === st.to ? ' is-to' : '';
+      const blass = aufEbene(p.level) ? '' : ' is-other-level';
+      const shape = document.createElementNS(NS, pts.length > 1 ? 'path' : 'circle');
+      if (pts.length > 1) {
+        shape.setAttribute('d', pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' '));
+      } else {
+        shape.setAttribute('cx', pts[0][0].toFixed(1));
+        shape.setAttribute('cy', pts[0][1].toFixed(1));
+        shape.setAttribute('r', '4');
+      }
+      shape.setAttribute('class', 'map__platform' + rolle + blass);
+      const t = document.createElementNS(NS, 'title');
+      t.textContent = `Gleis ${(p.tracks || []).join('/')}`
+        + (p.level != null ? ` · Ebene ${levelName(p.level)}` : '');
+      shape.append(t);
+      g.append(shape);
+
+      // Gleisnummer dort, wo der Bahnsteig ins Bild kommt.
+      const sicht = pts.find(([x, y]) => x > 12 && y > 12 && x < w - 12 && y < h - 12);
+      if (sicht && (rolle !== '' || aufEbene(p.level))) {
+        const lbl = document.createElementNS(NS, 'text');
+        lbl.setAttribute('x', sicht[0].toFixed(1));
+        lbl.setAttribute('y', (sicht[1] - 9).toFixed(1));
+        lbl.setAttribute('text-anchor', 'middle');
+        lbl.setAttribute('class', 'map__platform-tag' + rolle + blass);
+        lbl.textContent = (p.tracks || []).join('/');
+        g.append(lbl);
+      }
+    }
+
+    // --- Laufweg, Abschnitt für Abschnitt ------------------------------
+    const pfad = st.route?.path || [];
+    const ebenen = st.route?.levels || [];
+    for (let i = 0; i < pfad.length - 1; i++) {
+      const [x1, y1] = toPx(pfad[i]);
+      const [x2, y2] = toPx(pfad[i + 1]);
+      const lv = ebenen[i + 1] ?? ebenen[i] ?? null;
+      const seg = document.createElementNS(NS, 'line');
+      seg.setAttribute('x1', x1.toFixed(1));
+      seg.setAttribute('y1', y1.toFixed(1));
+      seg.setAttribute('x2', x2.toFixed(1));
+      seg.setAttribute('y2', y2.toFixed(1));
+      seg.setAttribute('class', 'map__walk' + (aufEbene(lv) ? '' : ' is-other-level'));
+      g.append(seg);
+    }
+
+    // --- Anfang, Ende, und wo es hinauf- oder hinuntergeht -------------
+    for (const [pt, cls, txt] of [
+      [pfad[0], 'is-start', 'Ankunftsgleis'],
+      [pfad[pfad.length - 1], 'is-end', 'Abfahrtsgleis'],
+    ]) {
+      if (!pt) continue;
+      const [x, y] = toPx(pt);
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('cx', x.toFixed(1));
+      c.setAttribute('cy', y.toFixed(1));
+      c.setAttribute('r', '6');
+      c.setAttribute('class', 'map__walk-end ' + cls);
+      const t = document.createElementNS(NS, 'title');
+      t.textContent = txt;
+      c.append(t);
+      g.append(c);
+    }
+
+    for (const m of st.route?.marks || []) {
+      const pt = pfad[m.at];
+      if (!pt) continue;
+      const [x, y] = toPx(pt);
+      const c = document.createElementNS(NS, 'text');
+      c.setAttribute('x', x.toFixed(1));
+      c.setAttribute('y', (y + 5).toFixed(1));
+      c.setAttribute('text-anchor', 'middle');
+      c.setAttribute('class', 'map__walk-mark');
+      c.textContent = m.kind === 'elevator' ? '⇕' : '⇅';
+      const t = document.createElementNS(NS, 'title');
+      t.textContent = m.kind === 'elevator' ? 'Aufzug' : 'Treppe';
+      c.append(t);
+      g.append(c);
+    }
+
+    svg.append(g);
   }
 
   /**
@@ -1076,6 +1338,12 @@ export class RouteMap {
     const svg = this.svg;
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
     svg.replaceChildren();
+
+    // Im Bahnhof gibt es weder Routen noch Züge — nur Bahnsteige und den Weg.
+    if (this.mode === 'station') {
+      this.renderStation(svg, w, h, toPx);
+      return;
+    }
 
     // Aktive Route zuletzt zeichnen, damit sie obenauf liegt.
     const order = this.ranked

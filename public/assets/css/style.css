@@ -1109,17 +1109,30 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
    und Wald unterscheiden sich weiter in der Helligkeit — und die farbigen
    Linien stechen wieder heraus.
 
+   Die Werte sind an der alten Kachelquelle geeicht, die vorher hier stand:
+   nachgemessen über eine Stadt- und eine Landkachel liegt CARTO „positron"
+   bei einer mittleren Helligkeit von 0,92 und „dark matter" bei 0,05. Ein
+   erster Versuch mit blossem Entsättigen landete im dunklen Layout bei 0,22
+   — ein flaues Mittelgrau statt einer dunklen Karte, und genau das sah
+   schlechter aus als vorher. Mit diesen Werten: 0,91 hell, 0,07 dunkel.
+
    Der Filter liegt nur auf den Kacheln. Das SVG mit Routen, Zügen und
    Baustellen liegt daneben und behält seine Farben. */
 .map__tiles {
-  filter: grayscale(1) contrast(0.92) brightness(1.06);
+  filter: grayscale(1) contrast(0.5) brightness(1.42);
 }
 
 /* Dunkles Layout aus denselben Kacheln: `invert` dreht Hell und Dunkel um.
    Einen `hue-rotate` braucht es hier nicht mehr — es ist ohnehin nichts
-   Farbiges mehr da, das sich verdrehen könnte. */
+   Farbiges mehr da, das sich verdrehen könnte.
+
+   Die REIHENFOLGE zählt: `brightness` kommt nach `invert` und skaliert die
+   umgedrehten Werte nach unten, macht die Karte also dunkel. Umgekehrt hätte
+   es sie aufgehellt. Und `contrast` steht über 1, nicht darunter: ein Wert
+   unter 1 zieht alles zur Mitte, und genau das war der Fehler zuvor — die
+   Karte wurde ein flaues Mittelgrau statt dunkel. */
 .map__tiles.is-dark {
-  filter: grayscale(1) invert(1) brightness(0.9) contrast(0.9);
+  filter: grayscale(1) invert(1) contrast(1.2) brightness(0.45);
 }
 
 .map__tile {
@@ -2343,102 +2356,132 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   color: var(--text-muted);
 }
 
-/* Skizze: bewusst schlicht. Sie zeigt Lage und Abstand, keinen Grundriss —
-   alles Weitere wäre geraten und würde mehr Vertrauen wecken als verdient. */
-.xfer__svg {
-  display: block;
-  width: 100%;
-  max-width: 380px;
-  height: auto;
-  background: var(--surface-inset);
-  border-radius: var(--radius-xs);
+/* --- Die Karte im Umstiegsplan --------------------------------------
+   Dieselbe Karte wie überall sonst, nur im Bahnhofsmodus: Kacheln als
+   Untergrund, ziehen und zoomen, dazu ein Umschalter für die Ebene. Flacher
+   als die Routenkarte — sie sitzt in einem aufklappbaren Kasten.
+   ------------------------------------------------------------------- */
+.xfer__map {
+  margin: 0.5rem 0 0.4rem;
+  padding: 0.3rem;
+  box-shadow: none;
 }
 
-/* Bahnsteige als Balken in ihrer echten Lage. Unbeteiligte blass, damit
-   Ankunfts- und Abfahrtsgleis sofort ins Auge fallen. */
-.xfer__plat-line {
+.xfer__map .map__viewport { height: 280px; }
+
+@media (max-width: 640px) {
+  .xfer__map .map__viewport { height: 230px; }
+}
+
+/* --- Bahnsteige und Laufweg auf der Karte ---------------------------- */
+
+.map__platform {
   fill: none;
   stroke: var(--text-muted);
   stroke-width: 7;
   stroke-linecap: round;
-  opacity: 0.3;
+  stroke-linejoin: round;
+  opacity: 0.5;
 }
 
-.xfer__plat circle { fill: var(--text-muted); opacity: 0.45; }
+.map__platform.is-from { stroke: var(--accent); opacity: 1; }
+.map__platform.is-to   { stroke: var(--green);  opacity: 1; }
 
-/* Gleisnummer auf einem Schild, wie auf einem Bahnhofsplan. */
-.xfer__plat-tag {
-  fill: var(--surface-card);
-  stroke: var(--border-strong);
-  stroke-width: 1;
-}
-
-.xfer__plat text {
+.map__platform-tag {
   font-family: var(--font-mono);
-  font-size: 8px;
-  fill: var(--text-muted);
-}
-
-.xfer__plat.is-from .xfer__plat-line { stroke: var(--accent); opacity: 1; }
-.xfer__plat.is-to   .xfer__plat-line { stroke: var(--green);  opacity: 1; }
-.xfer__plat.is-from circle { fill: var(--accent); opacity: 1; }
-.xfer__plat.is-to circle { fill: var(--green); opacity: 1; }
-
-.xfer__plat.is-from .xfer__plat-tag { stroke: var(--accent); }
-.xfer__plat.is-to .xfer__plat-tag { stroke: var(--green); }
-.xfer__plat.is-from text { fill: var(--accent); font-weight: 600; }
-.xfer__plat.is-to text { fill: var(--green); font-weight: 600; }
-
-/* Der Laufweg: durchgezogen mit hellem Untergrund, damit er auch über einem
-   Bahnsteigbalken lesbar bleibt. Die Richtung sagen die Pfeilspitzen — eine
-   gestrichelte Linie allein lässt offen, wo der Weg anfängt. */
-.xfer__walk-casing {
-  fill: none;
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--text);
+  paint-order: stroke;
   stroke: var(--map-casing);
-  stroke-width: 8;
-  stroke-linecap: round;
+  stroke-width: 3px;
   stroke-linejoin: round;
 }
 
-.xfer__walk {
+.map__platform-tag.is-from { fill: var(--accent); }
+.map__platform-tag.is-to   { fill: var(--green); }
+
+/* Was auf einer anderen Ebene liegt, bleibt sichtbar, tritt aber zurück —
+   sonst verliert man beim Umschalten die Orientierung, weil das halbe Bild
+   verschwindet. */
+.map__platform.is-other-level,
+.map__platform-tag.is-other-level { opacity: 0.16; }
+
+.map__walk {
   fill: none;
   stroke: var(--accent);
-  stroke-width: 4;
+  stroke-width: 5;
   stroke-linecap: round;
   stroke-linejoin: round;
-  opacity: 0.85;
+  paint-order: stroke;
 }
 
-.xfer__walk-arrow { fill: var(--surface-card); }
+.map__walk.is-other-level {
+  stroke-width: 3;
+  opacity: 0.22;
+  stroke-dasharray: 5 5;
+}
 
-.xfer__walk-end {
+.map__walk-end {
   fill: var(--surface-card);
   stroke-width: 3;
 }
 
-.xfer__walk-end.is-start { stroke: var(--accent); }
-.xfer__walk-end.is-end { stroke: var(--green); fill: var(--green); }
+.map__walk-end.is-start { stroke: var(--accent); }
+.map__walk-end.is-end { stroke: var(--green); fill: var(--green); }
 
-/* Hinweis auf Treppe oder Aufzug, dort wo er liegt. */
-.xfer__mark-bg {
-  fill: var(--surface-card);
-  stroke: var(--border-strong);
-  stroke-width: 1;
-}
-
-.xfer__mark-icon {
-  fill: none;
-  stroke: var(--text);
-  stroke-width: 1.6;
-  stroke-linecap: round;
+/* Treppe oder Aufzug, dort wo er liegt. */
+.map__walk-mark {
+  font-size: 15px;
+  font-weight: 700;
+  fill: var(--text);
+  paint-order: stroke;
+  stroke: var(--map-casing);
+  stroke-width: 4px;
   stroke-linejoin: round;
 }
 
-.xfer__mark-text {
+/* --- Ebenenumschalter ------------------------------------------------
+   Unten links, gegenüber den Zoomknöpfen — wie in den Apps der Bahnen, wo
+   man ihn dort erwartet.
+   ------------------------------------------------------------------- */
+.map__levels {
+  position: absolute;
+  left: 0.5rem;
+  top: 0.5rem;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.map__level-btn {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.map__level-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+.map__level-btn:disabled { opacity: 0.3; cursor: default; }
+
+.map__level-value {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 0.78rem;
   font-weight: 600;
-  fill: var(--text);
+  text-align: center;
+  padding: 0.1rem 0.45rem;
+  border-block: 1px solid var(--border);
+  color: var(--accent);
 }
 
 .leg__alt-take {

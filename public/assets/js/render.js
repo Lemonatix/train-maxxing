@@ -7,6 +7,7 @@
  */
 
 import { typeOf } from './data/trains.js';
+import { trainLabel, RouteMap } from './map.js';
 import { formatDuration, formatTime, formatPrice, priceOrigin, counterValue, fxInfo } from './scoring.js';
 
 /**
@@ -308,8 +309,9 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
     chip.classList.add(type.longDistance ? 'chip--fern' : 'chip--nah');
     if (type.night) chip.classList.add('chip--night');
 
-    const num = leg.trainNumber || leg.line || '';
-    chip.textContent = num ? `${type.label} ${num}` : type.label;
+    // Beschriftung aus einer Hand: im Nahverkehr die Linie, im Fernverkehr
+    // die Zugnummer - siehe trainLabel().
+    chip.textContent = trainLabel({ ...leg, category: type.label });
 
     // Fahrzeugmodell direkt am Chip, wenn wir es kennen.
     const ce = entry.comfortPerLeg.find((c) => c.leg === leg);
@@ -587,305 +589,31 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
   }
   out.push(line);
 
-  out.push(transferSvg(platforms, a, b, route));
+  // EINE KARTE, keine Skizze.
+  //
+  // Vorher war das ein SVG mit ein paar Balken darauf: massstäblich zwar,
+  // aber ohne Bezug zu irgendetwas, nicht zoombar, und ein Umstieg über
+  // mehrere Ebenen lag darin als ein Strich übereinander. Jetzt dieselbe
+  // Karte wie überall sonst — Kacheln als Untergrund, ziehen und zoomen,
+  // und ein Umschalter für die Ebene.
+  const mapEl = el('div', 'map xfer__map');
+  out.push(mapEl);
+
+  // Erst anhängen, dann bauen: die Karte misst ihren Kasten aus, und der ist
+  // ausserhalb des Dokuments null Pixel gross.
+  queueMicrotask(() => {
+    if (!mapEl.isConnected) return;
+    const map = new RouteMap(mapEl, { mode: 'station' });
+    map.build();
+    map.setStation({ platforms, from: a, to: b, route });
+  });
+
   out.push(el('p', 'xfer__source',
     'Bahnhofsplan aus OpenStreetMap. Gemessen wird von Bahnsteigmitte zu '
     + 'Bahnsteigmitte — wo genau der Wagen hält, weiss der Fahrplan nicht. '
     + 'Der Weg folgt den dort erfassten Fusswegen und Treppen; Wartezeiten am '
     + 'Aufzug sind nicht enthalten.'));
   return out;
-}
-
-/**
- * Dafür sorgen, dass eine Punktmenge mindestens `minM` Meter überspannt.
- *
- * Nur wenn sie kleiner ist, und dann um ihren Mittelpunkt herum. Die Form
- * bleibt sonst unangetastet: ein anteiliger Rand würde einen langen, schmalen
- * Laufweg quadratisch machen, und beim massstabsgetreuen Einpassen bliebe
- * dann die halbe Bildbreite leer — die Skizze wurde dadurch kleiner statt
- * grösser.
- */
-function atLeastSpan(points, minM) {
-  if (points.length === 0) return points;
-
-  let laMin = 90, laMax = -90, loMin = 180, loMax = -180;
-  for (const [la, lo] of points) {
-    if (la < laMin) laMin = la;
-    if (la > laMax) laMax = la;
-    if (lo < loMin) loMin = lo;
-    if (lo > loMax) loMax = lo;
-  }
-
-  const mProLat = 110540;
-  const mProLon = 111320 * Math.cos((((laMin + laMax) / 2) * Math.PI) / 180);
-  const fehltLa = Math.max(0, minM - (laMax - laMin) * mProLat) / 2 / mProLat;
-  const fehltLo = Math.max(0, minM - (loMax - loMin) * mProLon) / 2 / mProLon;
-  if (fehltLa === 0 && fehltLo === 0) return points;
-
-  return [
-    ...points,
-    [laMin - fehltLa, loMin - fehltLo],
-    [laMax + fehltLa, loMax + fehltLo],
-  ];
-}
-
-/**
- * Bahnhofsskizze mit Umsteigeweg — nach dem Vorbild der SBB-App.
- *
- * Alles ist massstäblich und gedreht auf die Längsachse des Bahnhofs, sonst
- * läge ein Nord-Süd-Bahnhof hochkant im Kasten. Als Achse dienen die beiden
- * am weitesten auseinanderliegenden Punkte; bei einem länglichen Gebilde wie
- * einem Bahnhof ist das genau die Richtung der Gleise.
- *
- * Gezeichnet wird in dieser Reihenfolge, damit nichts Wichtiges verdeckt wird:
- * Bahnsteige, dann der Weg, dann Start/Ziel und die Hinweise auf Treppen.
- */
-function transferSvg(platforms, a, b, route) {
-  const NS = 'http://www.w3.org/2000/svg';
-
-  // AUSSCHNITT: der Laufweg, nicht der Bahnhof.
-  //
-  // Ein grosser Bahnhof ist vierhundert Meter lang. Passt er ganz ins Bild,
-  // ist der Umsteigeweg ein Strich von zwei Zentimetern irgendwo darin — und
-  // die Frage, um die es geht ("wo muss ich lang"), bleibt unbeantwortet.
-  // Massgebend ist deshalb der Weg selbst, zusammen mit den beiden Gleisen,
-  // um die es geht. Die übrigen Bahnsteige werden weiterhin gezeichnet, als
-  // Orientierung; was nicht in den Ausschnitt passt, schneidet das SVG ab.
-  // Der WEG bestimmt den Ausschnitt, nicht die Bahnsteige: die sind
-  // vierhundert Meter lang, und nimmt man sie ganz mit, ist der Weg wieder
-  // ein Strich in der Ecke. Nur wo kein Weg bekannt ist, bleiben die beiden
-  // Gleise als Anhaltspunkt.
-  let focus = route?.path?.length > 1 ? [...route.path] : [];
-  if (focus.length === 0) {
-    for (const p of [a, b]) {
-      if (p.shape?.length) focus.push(...p.shape);
-      else focus.push([p.lat, p.lon]);
-    }
-  }
-
-  // Untergrenze: ein Umstieg von fünf Metern sähe sonst aus wie ein Blick
-  // durchs Mikroskop. Rand braucht es keinen — den zieht die Skizze weiter
-  // unten selbst ein (`pad`).
-  focus = atLeastSpan(focus, 60);
-
-  // Alle Punkte - gebraucht für die Umrechnung, nicht für den Ausschnitt.
-  const all = [];
-  for (const p of platforms) {
-    if (p.shape?.length) all.push(...p.shape);
-    else all.push([p.lat, p.lon]);
-  }
-  if (route?.path?.length) all.push(...route.path);
-  if (all.length < 2 || focus.length < 2) {
-    return el('p', 'xfer__note', 'Zu wenig Geodaten für eine Skizze.');
-  }
-
-  const lat0 = focus[0][0];
-  const lon0 = focus[0][1];
-  const toM = ([la, lo]) => [
-    (lo - lon0) * 111320 * Math.cos((lat0 * Math.PI) / 180),
-    (la - lat0) * 110540,
-  ];
-  const pts = focus.map(toM);
-
-  // Längsachse über das am weitesten entfernte Punktepaar. Bei vielen Punkten
-  // reicht eine Stichprobe — quadratisch über tausende Punkte wäre verschwendet.
-  const sample = pts.length > 120
-    ? pts.filter((_, i) => i % Math.ceil(pts.length / 120) === 0)
-    : pts;
-  let ax = 1, ay = 0, best = -1;
-  for (let i = 0; i < sample.length; i++) {
-    for (let j = i + 1; j < sample.length; j++) {
-      const dx = sample[j][0] - sample[i][0];
-      const dy = sample[j][1] - sample[i][1];
-      const d = dx * dx + dy * dy;
-      if (d > best) { best = d; const len = Math.sqrt(d) || 1; ax = dx / len; ay = dy / len; }
-    }
-  }
-
-  const project = ([x, y]) => [x * ax + y * ay, -x * ay + y * ax];
-  const proj = pts.map(project);
-  const uMin = Math.min(...proj.map((p) => p[0]));
-  const uMax = Math.max(...proj.map((p) => p[0]));
-  const vMin = Math.min(...proj.map((p) => p[1]));
-  const vMax = Math.max(...proj.map((p) => p[1]));
-
-  const W = 340, H = 190, pad = 22;
-  // Gleicher Massstab in beide Richtungen, sonst stimmen die Proportionen nicht.
-  const scale = Math.min(
-    (uMax - uMin) > 1 ? (W - 2 * pad) / (uMax - uMin) : Infinity,
-    (vMax - vMin) > 1 ? (H - 2 * pad) / (vMax - vMin) : Infinity
-  );
-  const sc = Number.isFinite(scale) ? scale : 1;
-  const offU = (W - (uMax - uMin) * sc) / 2;
-  const offV = (H - (vMax - vMin) * sc) / 2;
-  const px = (ll) => {
-    const [u, v] = project(toM(ll));
-    return [offU + (u - uMin) * sc, offV + (v - vMin) * sc];
-  };
-
-  const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.setAttribute('class', 'xfer__svg');
-  svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label',
-    `Bahnhofsplan: Weg von Gleis ${a.tracks.join('/')} zu Gleis ${b.tracks.join('/')}`);
-
-  const node = (name, attrs, cls) => {
-    const n = document.createElementNS(NS, name);
-    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
-    if (cls) n.setAttribute('class', cls);
-    return n;
-  };
-
-  // --- Bahnsteige -----------------------------------------------------
-  // Liegt ein Punkt noch im Bild? Seit der Ausschnitt dem Laufweg folgt,
-  // reichen die meisten Bahnsteige darüber hinaus.
-  const drin = ([x, y]) => x >= -40 && y >= -40 && x <= W + 40 && y <= H + 40;
-
-  for (const p of platforms) {
-    const role = p === a ? ' is-from' : p === b ? ' is-to' : '';
-    const eckpunkte = (p.shape?.length ? p.shape : [[p.lat, p.lon]]).map(px);
-    // Bahnsteige weit ausserhalb gar nicht erst zeichnen.
-    if (!eckpunkte.some(drin)) continue;
-
-    const g = node('g', {}, 'xfer__plat' + role);
-
-    if (p.shape?.length > 1) {
-      const d = eckpunkte
-        .map((xy, k) => `${k === 0 ? 'M' : 'L'}${xy.map((v) => v.toFixed(1)).join(' ')}`)
-        .join(' ');
-      g.append(node('path', { d }, 'xfer__plat-line'));
-    } else {
-      const [x, y] = eckpunkte[0];
-      g.append(node('circle', { cx: x.toFixed(1), cy: y.toFixed(1), r: 3 }));
-    }
-
-    // Gleisnummer als Schild — dort, wo der Bahnsteig ins Bild kommt, nicht
-    // an seinem Anfang: der liegt jetzt oft ausserhalb, und das Schild klebte
-    // dann am Rand oder fehlte ganz.
-    const [lx, ly] = eckpunkte.find(drin) ?? eckpunkte[0];
-    const text = p.tracks.join('/');
-    const w = 9 + text.length * 5.2;
-    g.append(node('rect', {
-      x: (lx - w / 2).toFixed(1), y: (ly - 15).toFixed(1),
-      width: w.toFixed(1), height: 12, rx: 3,
-    }, 'xfer__plat-tag'));
-    const t = node('text', { x: lx.toFixed(1), y: (ly - 6).toFixed(1), 'text-anchor': 'middle' });
-    t.textContent = text;
-    g.append(t);
-
-    svg.append(g);
-  }
-
-  // --- Weg ------------------------------------------------------------
-  const path = route?.path || [];
-  if (path.length > 1) {
-    const screen = path.map(px);
-    const d = screen
-      .map(([x, y], k) => `${k === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`)
-      .join(' ');
-
-    svg.append(node('path', { d }, 'xfer__walk-casing'));
-    svg.append(node('path', { d }, 'xfer__walk'));
-
-    // Laufrichtung: Pfeilspitzen in gleichmässigen Abständen auf der Linie.
-    // Ohne sie sieht man den Weg, aber nicht, wo er anfängt.
-    for (const [x, y, angle] of arrowsAlong(screen, 26)) {
-      svg.append(node('path', {
-        d: 'M-3.4,-2.6 L3,0 L-3.4,2.6 Z',
-        transform: `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${angle.toFixed(0)})`,
-      }, 'xfer__walk-arrow'));
-    }
-
-    // Start und Ziel als Punkte, wie in der SBB-App.
-    for (const [i, cls] of [[0, 'is-start'], [screen.length - 1, 'is-end']]) {
-      const [x, y] = screen[i];
-      svg.append(node('circle', {
-        cx: x.toFixed(1), cy: y.toFixed(1), r: 4.5,
-      }, 'xfer__walk-end ' + cls));
-    }
-
-    // Hinweise auf Treppen und Aufzüge dort, wo sie liegen.
-    for (const m of route.marks || []) {
-      const p0 = screen[Math.min(m.at, screen.length - 1)];
-      if (!p0) continue;
-      svg.append(levelBadge(node, p0, m));
-    }
-  }
-
-  return svg;
-}
-
-/**
- * Pfeilspitzen entlang eines Linienzugs, etwa alle `step` Pixel.
- *
- * @returns {Array<[number, number, number]>} x, y und Winkel in Grad
- */
-function arrowsAlong(points, step) {
-  // Gesamtlänge zuerst: ein kurzer Weg soll trotzdem eine Pfeilspitze
-  // bekommen, sonst fehlt gerade bei "einmal über den Bahnsteig" die
-  // Richtungsangabe. Bei kurzen Wegen wird der Abstand entsprechend gestaucht.
-  let total = 0;
-  for (let i = 0; i < points.length - 1; i++) {
-    total += Math.hypot(points[i + 1][0] - points[i][0], points[i + 1][1] - points[i][1]);
-  }
-  if (total < 6) return [];
-
-  const gap = Math.min(step, total / 2);
-
-  const out = [];
-  let carry = gap / 2;   // nicht direkt am Startpunkt beginnen
-
-  for (let i = 0; i < points.length - 1; i++) {
-    const [x1, y1] = points[i];
-    const [x2, y2] = points[i + 1];
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len = Math.hypot(dx, dy);
-    if (len < 0.01) continue;
-
-    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
-    for (let d = carry; d < len; d += gap) {
-      out.push([x1 + (dx * d) / len, y1 + (dy * d) / len, angle]);
-    }
-    // Rest über die Segmentgrenze hinweg mitnehmen, damit der Abstand stimmt.
-    carry = ((carry - len) % gap + gap) % gap;
-  }
-  return out;
-}
-
-/** Schild an einer Treppe oder einem Aufzug: Symbol plus Ebene. */
-function levelBadge(node, [x, y], mark) {
-  const g = node('g', { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)})` }, 'xfer__mark');
-
-  // Ebene aus dem OSM-Tag: "-1;0" heisst, hier wird zwischen -1 und 0
-  // gewechselt. Steht nichts drin, bleibt es beim Symbol allein.
-  const level = String(mark.level || '').split(/[;,]/).filter(Boolean).pop() || '';
-  const w = level ? 34 : 20;
-
-  g.append(node('rect', { x: -w / 2, y: -9, width: w, height: 18, rx: 9 }, 'xfer__mark-bg'));
-
-  // Treppe als Stufenlinie, Aufzug als Pfeil nach oben und unten. Bewusst
-  // gezeichnet statt als Zeichen: Symbolschriften sind je nach System
-  // unterschiedlich breit oder fehlen ganz.
-  const icon = mark.kind === 'elevator'
-    ? 'M0,-5 L0,5 M-3,-2 L0,-5 L3,-2 M-3,2 L0,5 L3,2'
-    : 'M-6,4 L-3,4 L-3,1 L0,1 L0,-2 L3,-2 L3,-5 L6,-5';
-  g.append(node('path', {
-    d: icon,
-    transform: `translate(${level ? -w / 2 + 9 : 0} 0)`,
-  }, 'xfer__mark-icon'));
-
-  if (level) {
-    const t = node('text', { x: w / 2 - 9, y: 4, 'text-anchor': 'middle' }, 'xfer__mark-text');
-    t.textContent = level;
-    g.append(t);
-  }
-
-  const title = node('title', {});
-  title.textContent = mark.kind === 'elevator' ? 'Aufzug' : 'Treppe';
-  g.append(title);
-  return g;
 }
 
 /** Differenz zweier ISO-Zeitpunkte in Minuten, null wenn unbekannt. */
@@ -960,8 +688,7 @@ function renderLegs(journey, entry, state, actions) {
     row.append(line1);
 
     const info = el('div', 'leg__train');
-    const num = leg.trainNumber || leg.line || '';
-    info.append(el('span', 'leg__cat', num ? `${type.label} ${num}` : type.label));
+    info.append(el('span', 'leg__cat', trainLabel({ ...leg, category: type.label })));
     info.append(el('span', 'leg__long', type.long));
     info.append(el('span', 'leg__dur', formatDuration(leg.durationMin)));
 

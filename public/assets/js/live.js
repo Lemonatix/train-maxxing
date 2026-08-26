@@ -26,7 +26,7 @@
  */
 
 import { api } from './api.js';
-import { geometryOf } from './map.js';
+import { geometryOf, trainLabel } from './map.js';
 import { spliceJourney } from './scoring.js';
 
 const REFRESH_MS = 30_000;
@@ -839,8 +839,7 @@ export class LiveTracker {
     const box = el('section', 'live__leg');
 
     const head = el('div', 'live__leg-head');
-    const num = leg.trainNumber || leg.line || '';
-    head.append(el('span', 'live__leg-name', `${leg.category || 'Zug'} ${num}`.trim()));
+    head.append(el('span', 'live__leg-name', trainLabel(leg)));
 
     const badge = el('span', 'live__delay');
     if (!data) {

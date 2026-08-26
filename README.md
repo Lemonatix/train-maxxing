@@ -256,9 +256,34 @@ Fahrplanquellen wissen das nicht, OpenStreetMap teilweise schon.
 Grosse Bahnhöfe sind dort oft **innen kartiert** — München Hbf mit über 600
 Fusswegen und Treppen samt Ebenenangabe. `?action=platforms&from=8&to=14` baut
 daraus ein Wegenetz, sucht mit Dijkstra den Weg zwischen den beiden Gleisen und
-liefert Länge, geschätzte Gehzeit und ob Treppen dabei sind. Gezeichnet wird
-eine massstäbliche Skizze: alle Bahnsteige als Balken in ihrer echten Lage,
-Ankunfts- und Abfahrtsgleis farbig, der Laufweg als gestrichelte Linie darüber.
+liefert Länge, geschätzte Gehzeit und ob Treppen dabei sind.
+
+**Gezeigt wird das als Karte, nicht als Skizze.** Vorher war es ein eigenes SVG
+mit ein paar Balken darauf: massstäblich zwar, aber ohne Bezug zu irgendetwas,
+nicht zoombar — und ein Umstieg über mehrere Ebenen lag darin als ein Strich
+übereinander, in dem sich Bahnsteig, Unterführung und Halle nicht unterscheiden
+liessen. Vorbild für den Ersatz ist die SBB-App: eine Karte, auf den Umstieg
+gezoomt, mit einem Umschalter für die Ebene.
+
+Es ist dieselbe Kartenkomponente wie überall sonst, nur im **Bahnhofsmodus**
+(`new RouteMap(el, { mode: 'station' })`) — Kacheln als Untergrund, ziehen und
+zoomen inklusive. Das spart eine zweite Kartenmaschinerie; die SBB nimmt dafür
+das MapLibre-SDK, hier reichen die vorhandenen `<img>`-Kacheln mit SVG darüber.
+
+**Der Ebenenumschalter** braucht eine Angabe, die es vorher nicht gab: zu
+welcher Ebene jeder Punkt des Weges gehört. `StationPlan` gibt sie jetzt als
+`levels` neben `path` zurück. Sie zu bestimmen ist Stückwerk — ein Wegknoten
+kann zu mehreren Ebenen gehören (eine Treppe trägt in OSM beide, die sie
+verbindet), und viele Wege tragen gar keine Angabe. Deshalb wird von vorne
+durchgegangen und die zuletzt sichere Ebene mitgeführt: passt sie noch zur
+Auswahl des nächsten Punktes, bleibt sie; sonst wechselt sie. Anfang und Ende
+bekommen die Ebene ihres Bahnsteigs — die kennt OSM meist, auch wo sie an den
+Wegen fehlt.
+
+Was auf einer anderen Ebene liegt, verschwindet nicht, sondern wird blass
+gezeichnet: sonst verliert man beim Umschalten die Orientierung, weil das halbe
+Bild wegfällt. Gibt es nur eine Ebene, bleibt der Umschalter ganz weg, statt
+untätig herumzustehen.
 
 Für München Hbf, Gleis 8 → 14: *„Rund 645 m Fussweg, etwa 9 min."* Gemessen
 wird von Bahnsteigmitte zu Bahnsteigmitte — siehe unten. Zum Vergleich: die DB
@@ -532,6 +557,39 @@ ein. Wichtig: Das Skript braucht `type="module"`.
 ---
 
 ## Wie die Bewertung funktioniert
+
+### Wie ein Zug heisst
+
+Im Fernverkehr ist die **Zugnummer** der Name: ein ICE 593 fährt heute so und
+morgen anders, und genau so steht es an der Anzeigetafel. Im Nahverkehr ist es
+umgekehrt — dort steht die **Linie** angeschrieben, und die Zugnummer ist eine
+interne Betriebsnummer, die auf keiner Tafel auftaucht.
+
+Die App zeigte lange die Nummer, auch im Nahverkehr: aus einer S 11 wurde
+„S 20318". Der Grund lag im HAFAS-Feld, das gelesen wurde. HAFAS liefert für
+dieselbe Fahrt:
+
+```
+name  = "S 33 (Zug-Nr. 20326)"     nameS = "S 33"
+prodCtx.num  = "20326"             prodCtx.line = "33"
+```
+
+Genommen wurde bisher der *längere* der beiden Namen — eine Regel, die im
+Fernverkehr richtig ist (dort steht die Nummer mal nur im einen, mal nur im
+anderen) und im Nahverkehr genau danebengreift. Jetzt gilt:
+
+- `prodCtx.line` gesetzt → **die Linie** benennt den Zug (`S 33`, `RE 48`).
+  Trägt die Linie die Gattung schon in sich (`RE3`), wird sie nicht doppelt
+  davorgesetzt.
+- `prodCtx.line` leer → Gattung plus Zugnummer (`ICE 593`).
+- Der Zusatz „(Zug-Nr. …)" fliegt aus dem Produktnamen; er ist eine
+  Anzeigehilfe von HAFAS und gehört in keine Beschriftung.
+
+Ein Nebeneffekt, der Arbeit gemacht hat: `sameTrain()` verglich zwei Meldungen
+über ihre **Beschriftung**. Das ging, solange die Nummer darin stand — mit der
+Linie nicht mehr, denn auf der S 33 sind zu jeder Zeit mehrere Züge unterwegs.
+Verglichen wird jetzt die Zugnummer, und nur wo keine vorliegt, der
+Produktname.
 
 ### Sortierung der Trefferliste
 
@@ -826,15 +884,34 @@ und keine Massenabfragen; eine Handvoll Kacheln je Seitenaufruf erfüllt das.
 **Die Karte ist schwarzweiss.** Der Hintergrund ist Hintergrund; Farbe gehört
 den Routen, den Zügen und den Baustellen darüber. Die OSM-Standardkacheln sind
 bunt — grüne Wälder, gelbe Strassen, blaue Flüsse —, und darüber gingen die
-farbigen Linien unter. Entsättigt bleibt die Orientierung erhalten (Siedlung,
-Wasser und Wald unterscheiden sich weiter in der Helligkeit), und die Linien
-stechen wieder heraus.
+farbigen Linien unter.
 
 **Dunkles Layout ohne zweite Quelle:** OSM hat keine dunklen Kacheln. Derselbe
 Filter erledigt das mit — `invert(1)` dreht Hell und Dunkel um. Einen
 `hue-rotate` braucht es nicht: nach dem Entsättigen ist nichts Farbiges mehr
-da, das sich verdrehen könnte. Der Filter liegt nur auf den Kacheln; das SVG
-mit Routen und Zügen darüber bleibt unangetastet.
+da, das sich verdrehen könnte.
+
+**Die Werte sind an der alten Quelle geeicht**, und das war nötig. Ein erster
+Versuch mit blossem Entsättigen sah schlechter aus als CARTO zuvor. Der Grund
+liess sich messen: über eine Stadt- und eine Landkachel gemittelt liegt CARTO
+„positron" bei einer Helligkeit von 0,92 und „dark matter" bei **0,05** — der
+erste Versuch landete im dunklen Layout bei **0,22**, einem flauen Mittelgrau
+statt einer dunklen Karte.
+
+Der Fehler steckte im `contrast` unter 1: das zieht alles zur Mitte und hellt
+die dunklen Flächen auf. Richtig ist das Gegenteil — Kontrast leicht **über**
+1, und die Helligkeit danach herunterskalieren:
+
+| | Filter | gemessen |
+|---|---|---|
+| hell | `grayscale(1) contrast(0.5) brightness(1.42)` | 0,91 (Ziel 0,92) |
+| dunkel | `grayscale(1) invert(1) contrast(1.2) brightness(0.45)` | 0,07 (Ziel 0,05) |
+
+Die Reihenfolge zählt: `brightness` steht **nach** `invert` und skaliert die
+umgedrehten Werte nach unten. Davor hätte es die Karte aufgehellt.
+
+Der Filter liegt nur auf den Kacheln; das SVG mit Routen und Zügen darüber
+bleibt unangetastet.
 
 Damit sieht ein fremder Server die IP-Adressen deiner Besucher — das ist der
 Preis für den Hintergrund. Wer das nicht will, setzt `TILES.url` auf `null`;

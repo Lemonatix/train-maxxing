@@ -87,7 +87,7 @@ final class StationPlan
     public static function route(array $platforms, array $ways, array $fromPlat, array $toPlat): array
     {
         $empty = ['found' => false, 'path' => [], 'metres' => null, 'minutes' => null,
-                  'steps' => false, 'marks' => [], 'adjacent' => false];
+                  'steps' => false, 'marks' => [], 'levels' => [], 'adjacent' => false];
         if ($ways === []) {
             return $empty;
         }
@@ -183,6 +183,7 @@ final class StationPlan
                 'minutes' => null,
                 'steps'   => false,
                 'marks'   => [],
+                'levels'  => [],
                 'adjacent' => true,
             ];
         }
@@ -257,9 +258,11 @@ final class StationPlan
         // daraus setzt die Anzeige die Hinweise entlang des Weges.
         $path  = [];
         $marks = [];
+        $keys  = [];
         $cur = $reached;
         while ($cur !== null) {
             $path[] = $nodes[$cur];
+            $keys[] = $cur;
             $meta = $prevMeta[$cur] ?? null;
             if ($meta !== null) {
                 // Index zaehlt noch rueckwaerts, wird unten gedreht.
@@ -268,6 +271,7 @@ final class StationPlan
             $cur = $prev[$cur] ?? null;
         }
         $path = array_reverse($path);
+        $keys = array_reverse($keys);
 
         $last = count($path) - 1;
         foreach ($marks as $i => $m) {
@@ -283,6 +287,15 @@ final class StationPlan
             }
             $bundled[] = $m;
         }
+
+        // Auf welcher EBENE liegt jeder Punkt des Weges?
+        //
+        // Die Anzeige braucht das, um den Weg stockwerkweise zeigen zu
+        // koennen: was auf der Ebene liegt, die man gerade ansieht, wird
+        // hervorgehoben, der Rest tritt zurueck. Ohne diese Angabe waere ein
+        // Umstieg ueber vier Ebenen ein einziger Strich, in dem sich
+        // Bahnsteig, Unterfuehrung und Halle ununterscheidbar ueberlagern.
+        $wegEbenen = self::pathLevels($keys, $levels, $fromPlat, $toPlat);
 
         // Anfahrt und Abgang gehoeren zum Weg - und damit auch in die
         // Zeichnung. Sonst begaenne der eingezeichnete Weg mitten im Bahnhof.
@@ -311,8 +324,55 @@ final class StationPlan
             'minutes' => round($beste / self::WALK_M_PER_MIN, 1),
             'steps'   => (bool) ($viaSteps[$reached] ?? false),
             'marks'   => $bundled,
+            'levels'  => $wegEbenen,
             'adjacent' => false,
         ];
+    }
+
+    /**
+     * Ebene je Wegpunkt, so gut es die Daten hergeben.
+     *
+     * Ein Wegknoten kann zu mehreren Ebenen gehoeren - eine Treppe traegt in
+     * OSM beide, die sie verbindet -, und viele Wege tragen gar keine Angabe.
+     * Deshalb wird von vorne durchgegangen und die zuletzt sichere Ebene
+     * mitgefuehrt: passt sie noch zur Auswahl des naechsten Punktes, bleibt
+     * sie stehen; sonst wechselt sie. So entsteht aus lueckenhaften Angaben
+     * ein durchgehender Verlauf, an dem sich ablesen laesst, wo es hinauf-
+     * oder hinuntergeht.
+     *
+     * Anfang und Ende bekommen die Ebene ihres Bahnsteigs - die kennt OSM
+     * meist, auch wo sie an den Wegen fehlt.
+     *
+     * @param string[] $keys   Knotenschluessel des Weges, in Reihenfolge
+     * @param array<string,array<string,bool>> $levels
+     * @return array<int,?float> je Punkt eine Ebene oder null
+     */
+    private static function pathLevels(array $keys, array $levels, array $fromPlat, array $toPlat): array
+    {
+        $von  = isset($fromPlat['level']) && $fromPlat['level'] !== null ? (float) $fromPlat['level'] : null;
+        $nach = isset($toPlat['level']) && $toPlat['level'] !== null ? (float) $toPlat['level'] : null;
+
+        $out = [];
+        $letzte = $von;
+        foreach ($keys as $k) {
+            $moeglich = array_keys($levels[$k] ?? []);
+            if ($moeglich === []) {
+                $out[] = $letzte;
+                continue;
+            }
+            if ($letzte !== null && in_array((string) $letzte, $moeglich, true)) {
+                $out[] = $letzte;      // die bekannte Ebene passt weiterhin
+                continue;
+            }
+            $letzte = (float) $moeglich[0];
+            $out[] = $letzte;
+        }
+
+        // Die beiden Bahnsteigmitten kommen in route() noch vorne und hinten
+        // dazu; ihre Ebene ist die des Bahnsteigs.
+        array_unshift($out, $von);
+        $out[] = $nach;
+        return $out;
     }
 
     /**

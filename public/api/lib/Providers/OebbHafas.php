@@ -598,6 +598,7 @@ final class OebbHafas
                 'lat'         => $pos['y'] / 1000000,
                 'lon'         => $pos['x'] / 1000000,
                 'category'    => trim((string) ($ctx['catOut'] ?? '')),
+                'line'        => self::lineName($ctx),
                 'trainNumber' => self::trainNumber($ctx, $name),
                 'name'        => $name,
                 'direction'   => trim((string) ($jny['dirTxt'] ?? '')),
@@ -700,6 +701,7 @@ final class OebbHafas
             'data'  => [
                 'category'    => trim((string) ($ctx['catOut'] ?? '')),
                 'categoryName' => trim((string) ($ctx['catOutL'] ?? '')),
+                'line'        => self::lineName($ctx),
                 'trainNumber' => self::trainNumber($ctx, $name),
                 'name'        => $name,
                 'direction'   => trim((string) ($jny['dirTxt'] ?? '')),
@@ -727,13 +729,36 @@ final class OebbHafas
      */
     private static function productName(array $prod): string
     {
-        $long  = trim((string) preg_replace('/\s+/u', ' ', (string) ($prod['name'] ?? '')));
-        $short = trim((string) preg_replace('/\s+/u', ' ', (string) ($prod['nameS'] ?? '')));
+        $saeubern = static function (string $v): string {
+            $v = trim((string) preg_replace('/\s+/u', ' ', $v));
+            // "S 33 (Zug-Nr. 20326)" -> "S 33". Der Klammerzusatz ist eine
+            // Anzeigehilfe von HAFAS und gehoert in keine Beschriftung: bei
+            // einer S-Bahn heisst der Zug nach seiner LINIE, und die
+            // Zugnummer steht ohnehin getrennt in `prodCtx.num`.
+            return trim((string) preg_replace('/\s*\((?:Zug-Nr\.|Zugnr\.?|Nr\.)[^)]*\)\s*$/ui', '', $v));
+        };
+
+        $long  = $saeubern((string) ($prod['name'] ?? ''));
+        $short = $saeubern((string) ($prod['nameS'] ?? ''));
 
         if ($long === '' || $short === '') {
             return $long !== '' ? $long : $short;
         }
         return strlen($long) >= strlen($short) ? $long : $short;
+    }
+
+    /**
+     * Liniennummer eines Produkts, sofern es eine Linie ist.
+     *
+     * Fernverkehr hat keine: ein ICE 593 faehrt heute so und morgen anders,
+     * die Nummer IST der Zug. Nahverkehr hat eine, und dort ist es umgekehrt -
+     * die Linie ist das, was am Bahnsteig angeschrieben steht und wonach
+     * gefragt wird. Zurueckgegeben wird, was HAFAS in `prodCtx.line` fuehrt:
+     * mal nur die Zahl ("33"), mal mit Gattung ("RE3").
+     */
+    private static function lineName(array $ctx): string
+    {
+        return trim((string) ($ctx['line'] ?? ''));
     }
 
     /**
@@ -806,7 +831,9 @@ final class OebbHafas
                     'geometry'     => $this->geometryOf($jny, $common),
                     'category'     => trim((string) ($ctx['catOut'] ?? '')),
                     'categoryName' => trim((string) ($ctx['catOutL'] ?? '')),
-                    'line'         => trim((string) ($ctx['line'] ?? $ctx['matchId'] ?? '')),
+                    'line'         => self::lineName($ctx) !== ''
+                        ? self::lineName($ctx)
+                        : trim((string) ($ctx['matchId'] ?? '')),
                     'trainNumber'  => self::trainNumber($ctx, $prodName),
                     'name'         => $prodName,
                     'direction'    => trim((string) ($jny['dirTxt'] ?? '')),
