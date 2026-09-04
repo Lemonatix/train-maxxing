@@ -1553,6 +1553,47 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   color: var(--amber);
 }
 
+/* Der Abschnitt, für den eine Meldung gilt - eine Zeile darunter, leiser
+   als die Meldung selbst: er beantwortet ein "wo?", nicht das "was?".
+
+   Ein Knopf, aber keiner, der wie einer aussieht: er sitzt IN einem
+   Fliesstext, und ein Rahmen darum machte aus der Meldung ein Formular.
+   Erkennbar bleibt er über die gepunktete Unterlinie und den Zeiger. */
+.train-panel__msg-scope {
+  display: block;
+  margin-top: 0.15rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.74rem;
+  color: inherit;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.train-panel__msg-scope:hover { opacity: 1; }
+
+/* Pünktlichkeit des Zuges. Dieselbe Farblogik wie das Verspätungsabzeichen
+   im Kopf, aber als Zeile statt als Plakette: es ist eine Einordnung, keine
+   Meldung über den Zustand von jetzt. */
+.train-panel__history {
+  margin: 0.5rem 0 0;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-xs);
+  background: var(--surface-inset);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.train-panel__history strong { font-family: var(--font-mono); font-weight: 500; }
+.train-panel__history[data-state="good"] strong { color: var(--green); }
+.train-panel__history[data-state="warn"] strong { color: var(--amber); }
+.train-panel__history[data-state="bad"]  strong { color: var(--rose); }
+
 .train-panel__stops {
   list-style: none;
   margin: 0.6rem 0 0;
@@ -1566,11 +1607,24 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   align-items: baseline;
   gap: 0.5rem;
   padding: 0.25rem 0;
+  /* Für die Hervorhebung aus flagStops(): sie soll aufblitzen und wieder
+     verschwinden, nicht als dauerhafte Markierung hängen bleiben. */
+  transition: background-color 0.25s ease;
   font-size: 0.85rem;
   border-bottom: 1px solid var(--border);
 }
 
 .train-panel__stop.is-cancelled { opacity: 0.5; text-decoration: line-through; }
+
+/* Der Abschnitt, auf den eine Meldung zeigt - gesetzt von flagStops().
+   Negative Ränder, damit die Fläche über die volle Listenbreite geht und
+   die Zeile dabei nicht springt. */
+.train-panel__stop.is-flagged {
+  margin: 0 -0.35rem;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+  background: var(--amber-soft);
+}
 
 .train-panel__time {
   flex: 0 0 auto;

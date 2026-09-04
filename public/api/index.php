@@ -24,6 +24,66 @@
 
 declare(strict_types=1);
 
+// --- Fehler gehören ins Log, nicht in die Antwort ------------------------
+//
+// Diese Datei liefert JSON. Eine einzige Warnung, die PHP direkt ausgibt,
+// steht damit MITTEN in der Antwort, und json_decode() im Browser scheitert
+// an einer Datei, die inhaltlich völlig in Ordnung wäre. Genau das ist
+// schon einmal passiert - siehe die curl_close()-Notiz in lib/Http.php.
+// Gemeldet wird weiterhin alles, nur eben ins Fehlerlog.
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
+// Ein Upstream darf länger brauchen, als PHP von Haus aus zulässt.
+//
+// http_timeout steht auf 25 Sekunden, und mehrere Handler rufen zwei
+// Quellen NACHEINANDER (Fahrplan bei der ÖBB, Preise bei der DB). Die
+// verbreitete Voreinstellung max_execution_time=30 reisst dem Skript dabei
+// mitten im zweiten Aufruf den Boden weg. 0 ("unbegrenzt") ist keine gute
+// Idee, weil ein hängender Socket dann einen Worker dauerhaft blockiert -
+// deshalb ein großzügiger, aber endlicher Wert.
+@set_time_limit(120);
+
+// Ausgabe puffern, damit der Notausgang unten eine halb geschriebene
+// Antwort noch verwerfen kann.
+ob_start();
+
+/**
+ * NOTAUSGANG: aus einem Fatal wieder gültiges JSON machen.
+ *
+ * try/catch weiter unten fängt Exceptions - aber kein überschrittenes
+ * Zeitlimit, keinen erschöpften Speicher und keinen Parse-Fehler. In diesen
+ * Fällen endete die Antwort bisher einfach mitten im Satz, und im Frontend
+ * stand nur "Das Backend hat keine gültige Antwort geliefert".
+ *
+ * Ein Flag, ob schon geantwortet wurde, braucht es nicht: ok() und fail()
+ * beenden das Skript, ein Fatal DANACH kann es also nicht geben. Steht bei
+ * Programmende ein Fatal im Fehlerspeicher, ist die Antwort garantiert
+ * unfertig.
+ */
+register_shutdown_function(static function (): void {
+    $e = error_get_last();
+    if ($e === null) {
+        return;
+    }
+    if (!in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        return;
+    }
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    if (!headers_sent()) {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(500);
+    }
+    echo json_encode(
+        ['ok' => false, 'error' => 'Die Anfrage konnte nicht zu Ende bearbeitet werden (Zeit- oder Speichergrenze).'],
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+    );
+});
+
 // Fallbacks für die mbstring-Extension. Auf produktiven Hostings ist sie
 // praktisch immer da; für schlanke lokale CLI-Setups ohne php-mbstring
 // können die Kernfunktionen aus mbstring hier durch strlen/strtolower
@@ -329,10 +389,31 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
         fail('Parameter "jid" fehlt.', 400);
     }
 
+    // Die Pünktlichkeitshistorie kommt NICHT in den Cache: sie wächst mit
+    // jedem beobachteten Zug, und aus einer gecachten Antwort wäre sie eine
+    // Minute lang veraltet. Sie ist ohnehin nur ein Dateilesevorgang, also
+    // wird sie auf beiden Wegen frisch angehängt.
+    //
+    // Vorher hing sie an $t, gecacht wurde aber $res['data'] - dieselbe
+    // Anfrage lieferte die Historie deshalb beim ersten Aufruf mit und
+    // sechzig Sekunden lang danach nicht mehr.
+    $historie = static function (array $t) use ($config): array {
+        $num = trim((string) ($t['trainNumber'] ?? ''));
+        $cat = trim((string) ($t['category'] ?? ''));
+        if ($num === '' || $cat === '') {
+            return $t;
+        }
+        $stats = (new Punctuality((string) $config['cache_dir']))->stats($cat, $num);
+        if ($stats !== null) {
+            $t['history'] = $stats;
+        }
+        return $t;
+    };
+
     $key    = 'jd:' . md5($jid);
     $cached = $cache->get($key, 60);
     if ($cached !== null) {
-        ok(['train' => $cached, 'cached' => true]);
+        ok(['train' => $historie($cached), 'cached' => true]);
     }
 
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
@@ -343,21 +424,21 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
     }
 
     // Beobachtete Verspätung in die eigene Statistik aufnehmen. So füllt
-    // sich die Historie mit der Nutzung, ohne dass jemand Daten einkaufen muss.
+    // sich die Historie mit der Nutzung, ohne dass jemand Daten einkaufen
+    // muss. Nur hier, nicht im Cache-Zweig: sonst zählte dieselbe Fahrt bei
+    // jedem Kartenklick erneut.
     $t = $res['data'];
     if (($t['hasRealtime'] ?? false) && ($t['trainNumber'] ?? '') !== '') {
-        $p = new Punctuality((string) $config['cache_dir']);
-        $p->record(
+        (new Punctuality((string) $config['cache_dir']))->record(
             (string) $t['category'],
             (string) $t['trainNumber'],
             (int) ($t['delay'] ?? 0),
             (string) (($t['stops'][0]['departure'] ?? null) ?? date('Y-m-d'))
         );
-        $t['history'] = $p->stats((string) $t['category'], (string) $t['trainNumber']);
     }
 
-    $cache->set($key, $res['data']);
-    ok(['train' => $t, 'cached' => false]);
+    $cache->set($key, $t);
+    ok(['train' => $historie($t), 'cached' => false]);
 }
 
 /**

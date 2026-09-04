@@ -1,0 +1,22 @@
+# Nach einem Update soll der Browser die neue Fassung nehmen, nicht die alte.
+#
+# WARUM NICHT "?v=123" AN DEN PFADEN, wie es sonst üblich ist: die Skripte
+# sind ES-Module und laden einander mit festen Pfaden nach
+# (`import { api } from './api.js'`). Eine Versionsnummer am Einstiegspunkt
+# erreicht diese Importe nie - app.js käme frisch vom Server, api.js weiter
+# aus dem Cache. Das ist SCHLIMMER als gar kein Cache-Busting, weil dann
+# zwei Stände gleichzeitig laufen und sich gegenseitig widersprechen.
+#
+# "no-cache" heisst nicht "nicht zwischenspeichern", sondern "vor der
+# Benutzung nachfragen". Der Browser behält die Datei und hängt beim
+# nächsten Aufruf ein If-None-Match an; solange sich nichts geändert hat,
+# antwortet der Server mit 304 und ohne Inhalt. Das kostet ein paar Bytes je
+# Datei und Seitenaufruf - und erspart das harte Neuladen nach jedem Upload,
+# an das ohnehin niemand denkt.
+#
+# Greift nur unter Apache. Die nginx-Entsprechung steht in der README.
+<IfModule mod_headers.c>
+    <FilesMatch "\.(html|js|css)$">
+        Header set Cache-Control "no-cache, must-revalidate"
+    </FilesMatch>
+</IfModule>

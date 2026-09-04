@@ -76,6 +76,10 @@ const state = {
   loadingEarlier: false,
   selectedIndex: 0,
   productCatalogue: [], // vom Backend geladen: [{id, label, hint}]
+  // Welcher Zuglauf gerade unter der Karte offen ist. Steht in der
+  // Teilen-URL, damit sich nicht nur eine Suche, sondern auch ein
+  // einzelner Zug verschicken lässt.
+  trainJid: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -134,6 +138,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Geteilte Suche direkt ausführen, damit der Empfänger nichts tun muss.
   if (shared) runSearch();
+
+  // Ein mitgeteilter Zuglauf hängt nicht an der Trefferliste - er braucht
+  // nur seine jid und darf deshalb sofort aufgehen, parallel zur Suche.
+  if (state.trainJid) showTrainDetails({ jid: state.trainJid });
 });
 
 // ======================================================================
@@ -171,8 +179,11 @@ function saveSettings() {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
+        // 'date' und 'time' fehlen mit Absicht: loadSettings() stellt sie
+        // nicht wieder her, beim Aufruf soll immer der aktuelle Zeitpunkt
+        // stehen. Sie zu schreiben legte nur eine tote Uhrzeit im Storage ab.
         mode: state.mode, from: state.from, to: state.to, via: state.via,
-        time: state.time, arrival: state.arrival, travelClass: state.travelClass,
+        arrival: state.arrival, travelClass: state.travelClass,
         minChange: state.minChange, minChangeMigrated: true,
         discounts: state.discounts, products: state.products,
         modelPrefs: state.modelPrefs, routePrefs: state.routePrefs,
@@ -233,7 +244,11 @@ function setupResize() {
   window.addEventListener('resize', () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
-      if (state.ranked.length > 0) map.render();
+      // Ohne Bedingung: die Karte steht von Anfang an da, auch ohne
+      // Treffer. Vorher blieb sie beim Skalieren des Fensters auf ihrer
+      // alten Pixelgröße stehen, bis die erste Suche lief. render()
+      // prüft selbst, ob überhaupt schon aufgebaut wurde.
+      map.render();
     }, 180);
   });
 }
@@ -790,13 +805,79 @@ function applyStateToForm() {
   renderVia();
 }
 
+/** Weicht der Feldinhalt von der gespeicherten Auswahl ab? */
+function needsLookup(sel, aktuell) {
+  return ($(sel)?.value.trim() || '') !== (aktuell?.name || '');
+}
+
+/**
+ * Bringt ein Bahnhofsfeld und die dahinterliegende Auswahl in Deckung.
+ *
+ * ZWEI FÄLLE, die vorher beide danebengingen:
+ *
+ *   NIE AUSGEWÄHLT — wer "München Hbf" vollständig tippt und Enter drückt,
+ *     hat den Bahnhof gemeint. Die Suche antwortete darauf mit "Bitte Start
+ *     und Ziel aus der Vorschlagsliste auswählen" und schickte einen zurück
+ *     zu der Liste, die man gerade weggeklickt hatte.
+ *
+ *   ÜBERSCHRIEBEN — im Feld stand "Zürich HB", gesucht wurde München, weil
+ *     noch die Auswahl von vorhin im Zustand lag. Das war das
+ *     unangenehmere von beiden: es sah aus, als hätte die Suche gearbeitet,
+ *     nur eben mit dem falschen Bahnhof. Deshalb zählt ab jetzt der
+ *     Feldinhalt, und eine Auswahl gilt nur so lange, wie sie dazu passt.
+ *
+ * Genommen wird der erste Treffer, weil die Ortssuche schon nach Relevanz
+ * sortiert - derselbe Eintrag, der oben in der Vorschlagsliste gestanden
+ * hätte. Der Feldinhalt wird danach auf den offiziellen Namen gezogen,
+ * damit sichtbar ist, wonach tatsächlich gesucht wird.
+ *
+ * @returns {Promise<?object>} der gewählte Ort, oder null
+ */
+async function resolveTyped(sel, aktuell) {
+  const input = $(sel);
+  const q = input?.value.trim() || '';
+  if (aktuell && q === aktuell.name) return aktuell;
+  // Leeres oder zu kurzes Feld: keine Auswahl, auch wenn noch eine dastand.
+  if (q.length < 2) return null;
+
+  try {
+    const res = await api.locations(q);
+    const hit = (res.locations || [])[0] || null;
+    if (hit) input.value = hit.name;
+    return hit;
+  } catch {
+    // Keine Verbindung zur Ortssuche - dann bleibt es bei der Meldung unten.
+    return null;
+  }
+}
+
 async function runSearch() {
   const status = $('#status');
   const results = $('#results-list');
 
+  // Erst die Felder auflösen, dann suchen. Passt alles schon zusammen,
+  // kostet das keinen einzigen Aufruf - resolveTyped() vergleicht nur.
+  if (needsLookup('#from', state.from) || needsLookup('#to', state.to)
+    || needsLookup('#via', state.via)) {
+    status.className = 'status status--busy';
+    status.textContent = 'Suche Bahnhöfe …';
+  }
+  const [von, nach, via] = await Promise.all([
+    resolveTyped('#from', state.from),
+    resolveTyped('#to', state.to),
+    resolveTyped('#via', state.via),
+  ]);
+  if (von !== state.from || nach !== state.to || via !== state.via) {
+    state.from = von;
+    state.to = nach;
+    state.via = via;
+    renderVia();
+    saveSettings();
+  }
+
   if (!state.from || !state.to) {
     status.className = 'status status--error';
-    status.textContent = 'Bitte Start und Ziel aus der Vorschlagsliste auswählen.';
+    status.textContent = 'Bitte Start und Ziel eintragen - am besten aus der Vorschlagsliste.';
     return;
   }
 
@@ -1349,6 +1430,10 @@ async function showTrainDetails(train) {
   panel.hidden = false;
   panel.replaceChildren();
 
+  // Der offene Zug gehört in die Adresszeile - siehe updateShareUrl().
+  state.trainJid = train.jid || null;
+  updateShareUrl();
+
   const head = document.createElement('div');
   head.className = 'train-panel__head';
 
@@ -1371,7 +1456,11 @@ async function showTrainDetails(train) {
   close.className = 'train-panel__close';
   close.textContent = '×';
   close.setAttribute('aria-label', 'Schließen');
-  close.addEventListener('click', () => { panel.hidden = true; });
+  close.addEventListener('click', () => {
+    panel.hidden = true;
+    state.trainJid = null;
+    updateShareUrl();
+  });
   head.append(close);
   panel.append(head);
 
@@ -1390,6 +1479,95 @@ async function showTrainDetails(train) {
     if (err.name === 'AbortError') return;
     status.textContent = 'Zuglauf nicht verfügbar: ' + err.message;
   }
+}
+
+/**
+ * Geltungsbereich einer Meldung, oder null.
+ *
+ * null heißt "gilt für den ganzen Lauf" - entweder weil HAFAS keinen
+ * Bereich mitliefert, oder weil er von der ersten bis zur letzten Station
+ * reicht. Dann wäre der Zusatz nur Rauschen.
+ *
+ * @returns {?{label: string, von: number, bis: number}}
+ */
+function messageScope(m, stops) {
+  if (!m || typeof m !== 'object') return null;
+  if (!Number.isInteger(m.from) || !Number.isInteger(m.to)) return null;
+
+  const von = Math.min(m.from, m.to);
+  const bis = Math.max(m.from, m.to);
+  if (von <= 0 && bis >= stops.length - 1) return null;
+
+  const a = stops[von]?.name;
+  const b = stops[bis]?.name;
+  if (!a || !b) return null;
+  return { label: a === b ? a : `${a} – ${b}`, von, bis };
+}
+
+let flagTimer = null;
+
+/**
+ * Hebt die Halte eines Abschnitts hervor und scrollt sie ins Bild.
+ *
+ * Die Markierung verschwindet nach ein paar Sekunden von selbst: sie
+ * beantwortet ein "wo ist das?" und soll nicht als dauerhafter Zustand
+ * stehen bleiben - sonst sieht der Zuglauf nach dem dritten Klick aus wie
+ * ein Textmarker-Unfall.
+ */
+function flagStops(panel, von, bis) {
+  clearTimeout(flagTimer);
+  const zuruecksetzen = () => {
+    for (const el of panel.querySelectorAll('.train-panel__stop.is-flagged')) {
+      el.classList.remove('is-flagged');
+    }
+  };
+  zuruecksetzen();
+
+  let erster = null;
+  for (let i = von; i <= bis; i++) {
+    const li = panel.querySelector(`.train-panel__stop[data-index="${i}"]`);
+    if (!li) continue;
+    li.classList.add('is-flagged');
+    erster ??= li;
+  }
+  // block:'nearest' scrollt nur die Halteliste, nicht die ganze Seite.
+  erster?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  flagTimer = setTimeout(zuruecksetzen, 4000);
+}
+
+/**
+ * Eine Zeile Pünktlichkeit, oder null wenn nichts bekannt ist.
+ *
+ * Die Quelle steht immer dabei: eine Näherung aus der Jahresstatistik des
+ * Betreibers ist etwas anderes als zwanzig eigene Messungen, und wer das
+ * verwechselt, hält eine Schätzung für eine Beobachtung.
+ */
+function renderTrainHistory(h) {
+  if (!h || typeof h !== 'object') return null;
+
+  const num = (v) => (typeof v === 'number' ? v.toFixed(1).replace('.', ',') : '?');
+  const quote = Math.round((h.rate ?? 0) * 100);
+
+  const p = document.createElement('p');
+  p.className = 'train-panel__history';
+  // Dieselben drei Stufen wie beim Verspätungsabzeichen darüber.
+  p.dataset.state = quote >= 80 ? 'good' : quote >= 60 ? 'warn' : 'bad';
+
+  const zahl = document.createElement('strong');
+  zahl.textContent = `${quote} % pünktlich`;
+  p.append(zahl);
+
+  const teile = [`Ø +${num(h.avg)} min`];
+  if (h.samples7d > 0) teile.push(`letzte 7 Tage Ø +${num(h.avg7d)} min`);
+  const eigene = `${h.samples} eigene ${h.samples === 1 ? 'Messung' : 'Messungen'}`;
+  teile.push(
+    h.source === 'own' ? eigene
+      : h.source === 'blend' ? `${eigene}, ergänzt um die Betreiber-Statistik`
+      : 'Näherung aus der Jahresstatistik des Betreibers'
+  );
+
+  p.append(document.createTextNode(' · ' + teile.join(' · ')));
+  return p;
 }
 
 function renderTrainPanel(panel, head, t) {
@@ -1424,12 +1602,46 @@ function renderTrainPanel(panel, head, t) {
   }
   head.append(badge);
 
+  // Meldungen kommen als { text, from, to } - `from`/`to` sind Haltindizes
+  // des Zuglaufs. Hier stand vorher das Objekt selbst im textContent, und
+  // im gelben Feld las man "[object Object]".
+  //
+  // Anders als in der Live-Ansicht wird hier nichts weggefiltert: das Panel
+  // zeigt den ganzen Lauf, also gehören auch dessen Meldungen dazu. Wo eine
+  // nur einen Abschnitt betrifft, steht der dabei - sonst sucht man den
+  // defekten Aufzug am falschen Bahnhof.
+  const gesehen = new Set();
   for (const m of t.messages || []) {
+    const text = typeof m === 'string' ? m : m?.text;
+    if (!text || gesehen.has(text)) continue;
+    gesehen.add(text);
+
     const p = document.createElement('p');
     p.className = 'train-panel__msg';
-    p.textContent = m;
+    p.textContent = text;
+
+    const bereich = messageScope(m, t.stops || []);
+    if (bereich) {
+      // Anklickbar: der Abschnitt steht über einer Halteliste, die
+      // gescrollt werden muss. Ein Klick bringt den betroffenen Teil ins
+      // Bild und hebt ihn kurz hervor - sonst zählt man Bahnhofsnamen ab.
+      const wo = document.createElement('button');
+      wo.type = 'button';
+      wo.className = 'train-panel__msg-scope';
+      wo.textContent = bereich.label;
+      wo.title = 'Im Zuglauf zeigen';
+      wo.addEventListener('click', () => flagStops(panel, bereich.von, bereich.bis));
+      p.append(wo);
+    }
     panel.append(p);
   }
+
+  // PÜNKTLICHKEIT. Das Backend führt die Statistik ohnehin mit - jeder
+  // Aufruf dieses Panels trägt selbst einen Messwert bei. Sie nur zu
+  // sammeln und nie zu zeigen wäre schade, und hier steht sie am richtigen
+  // Ort: man hat den Zug angetippt, um zu erfahren, woran man mit ihm ist.
+  const hist = renderTrainHistory(t.history);
+  if (hist) panel.append(hist);
 
   const list = document.createElement('ol');
   list.className = 'train-panel__stops';
@@ -1441,9 +1653,11 @@ function renderTrainPanel(panel, head, t) {
       : d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
   };
 
-  for (const s of t.stops || []) {
+  (t.stops || []).forEach((s, i) => {
     const li = document.createElement('li');
     li.className = 'train-panel__stop';
+    // Der Index ist der, auf den sich from/to einer Meldung beziehen.
+    li.dataset.index = String(i);
     if (s.cancelled) li.classList.add('is-cancelled');
 
     const time = document.createElement('span');
@@ -1458,7 +1672,6 @@ function renderTrainPanel(panel, head, t) {
       const rt = document.createElement('span');
       rt.className = 'train-panel__real';
       rt.textContent = real;
-      time.after?.(rt);
       li.append(time, rt);
     } else {
       li.append(time);
@@ -1482,7 +1695,7 @@ function renderTrainPanel(panel, head, t) {
       li.append(d);
     }
     list.append(li);
-  }
+  });
 
   panel.append(list);
 }
@@ -1800,6 +2013,10 @@ function updateShareUrl() {
   if (state.products.length) p.set('vm', state.products.join(','));
   if (state.mode === 'nerd') p.set('modus', 'nerd');
   if (state.via) { p.set('via', state.via.id); p.set('viaName', state.via.name); }
+  // Der offene Zuglauf. HAFAS baut die jid pro Antwort neu auf, sie taugt
+  // also nicht als dauerhafte Kennung eines Zuges - für den Reisetag hält
+  // sie aber, und länger will man so einen Link ohnehin nicht verschicken.
+  if (state.trainJid) p.set('zug', state.trainJid);
 
   history.replaceState(null, '', '?' + p.toString());
 }
@@ -1823,6 +2040,7 @@ function applyShareUrl() {
   if (p.get('abos')) state.discounts = p.get('abos').split(',').filter(Boolean);
   if (p.get('vm')) state.products = p.get('vm').split(',').filter(Boolean);
   if (p.get('modus') === 'nerd') state.mode = 'nerd';
+  if (p.get('zug')) state.trainJid = p.get('zug');
 
   return true;
 }

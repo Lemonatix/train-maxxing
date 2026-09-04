@@ -159,6 +159,8 @@ sind davon nicht betroffen.
    ```
    train/
    ├── index.html
+   ├── .htaccess       ← Browser-Cache (nicht vergessen, Punktdateien
+   │                     blendet mancher FTP-Client aus)
    ├── check.php
    ├── assets/
    └── api/
@@ -183,20 +185,24 @@ sind davon nicht betroffen.
 
 5. Fertig: `https://deine-domain.tld/train/`
 
-### Nach einem Update: Browser-Cache beachten
+### Nach einem Update: Browser-Cache
 
-Die JavaScript-Dateien haben keine Versionsnummer im Namen. Lädst du eine neue
-Fassung hoch, halten Browser die alte oft noch fest — dann fehlen neue
-Funktionen scheinbar. Beim Testen ist mir genau das passiert.
+Erledigt `public/.htaccess`. Die Datei setzt für `.html`, `.js` und `.css`
+den Header `Cache-Control: no-cache, must-revalidate` — der Browser behält
+die Dateien, fragt aber vor jeder Benutzung kurz nach, ob sie noch aktuell
+sind. Hat sich nichts geändert, antwortet der Server mit `304` und ohne
+Inhalt; das kostet ein paar Bytes und erspart das harte Neuladen nach jedem
+Upload.
 
-Zwei Wege: einmal hart neu laden (`Strg`+`Shift`+`R`), oder in `index.html` an
-die Skript- und Stylesheet-Pfade eine Version hängen und sie bei jedem Update
-hochzählen:
+**Warum nicht `?v=2` an den Pfaden**, wie es oft empfohlen wird: die Skripte
+sind ES-Module und laden einander mit festen Pfaden nach
+(`import { api } from './api.js'`). Eine Versionsnummer am Einstiegspunkt
+erreicht diese Importe nie — `app.js` käme frisch vom Server, `api.js` weiter
+aus dem Cache. Damit laufen zwei Stände gleichzeitig, und das ist schlimmer
+als gar kein Cache-Busting.
 
-```html
-<link rel="stylesheet" href="assets/css/style.css?v=2">
-<script type="module" src="assets/js/app.js?v=2"></script>
-```
+Voraussetzung ist Apache mit `mod_headers`. Fehlt beides, hilft weiterhin nur
+einmal hart neu laden (`Strg`+`Shift`+`R`) — die nginx-Fassung steht unten.
 
 ### Voraussetzungen
 
@@ -207,10 +213,12 @@ hochzählen:
 ### nginx statt Apache?
 
 Die mitgelieferten `.htaccess`-Dateien schützen `api/cache/` und `api/lib/` vor
-direktem Zugriff. Unter nginx wirken sie **nicht** — trag dort stattdessen ein:
+direktem Zugriff und regeln den Browser-Cache. Unter nginx wirken sie
+**nicht** — trag dort stattdessen ein:
 
 ```nginx
 location ~ ^/train/api/(cache|lib)/ { deny all; }
+location ~* \.(html|js|css)$ { add_header Cache-Control "no-cache, must-revalidate"; }
 ```
 
 ---
@@ -987,6 +995,13 @@ Meldung trägt seither ihren Geltungsbereich mit, und die Anzeige schneidet ihn
 gegen das eigene Teilstück. Aus den drei Meldungen wurde eine
 („Umgekehrte Reihung", die für den ganzen Lauf gilt).
 
+Im **Zug-Panel an der Karte** wird dagegen bewusst nichts geschnitten: dort
+steht der ganze Lauf, also gehören auch dessen Meldungen dazu. Statt zu filtern
+steht der Geltungsbereich als zweite Zeile unter der Meldung
+(„Krimml Bahnhof – Mittersill Bahnhof") und ist anklickbar — der Klick holt die
+betroffenen Halte in der Liste ins Bild und hebt sie kurz hervor. Sonst sucht
+man den defekten Aufzug am falschen Bahnhof.
+
 Gedeckelt wird deshalb erst **nach** dem Schneiden: würde der Server schon bei
 drei abschneiden, fiele womöglich die relevante Meldung zugunsten einer aus
 Villach weg. Dazu, unverändert: was in dieser Verfolgung schon einmal stand,
@@ -1473,6 +1488,12 @@ Betreiber-Jahresstatistik (noch keine eigenen Messungen)" oder „eigene Messung
 ergänzt um Betreiber-Statistik". Als pünktlich gilt unter 6 Minuten, wie im
 Bahnverkehr üblich.
 
+Gezeigt wird sie an zwei Stellen: an der Verbindung (dort der **schwächste**
+Abschnitt, denn eine Verbindung ist so pünktlich wie ihr unpünktlichster Zug)
+und im **Zug-Panel an der Karte**. Die zweite Stelle liegt nahe, weil genau
+dieser Aufruf selbst einen Messwert beisteuert — die Statistik wächst mit dem
+Hinsehen.
+
 Gespeichert wird als JSON je Zug unter `api/cache/punctuality/` — kein
 Datenbankserver nötig.
 
@@ -1622,6 +1643,12 @@ Der Knopf **„Suche teilen"** legt die komplette Suche in der Adresszeile ab �
 Orte, Datum, Zeit, Abos, Verkehrsmittel, Modus. Auf dem Telefon öffnet sich das
 native Teilen-Menü, sonst landet der Link in der Zwischenablage. Wer ihn öffnet,
 bekommt die Suche automatisch ausgeführt.
+
+Ist unter der Karte gerade ein **Zuglauf** offen, hängt er als `&zug=<jid>` mit
+dran und geht beim Empfänger von selbst wieder auf — parallel zur Suche, denn
+er braucht nur seine Kennung. Die hält allerdings nicht ewig: HAFAS baut die
+`jid` je Antwort neu auf, verlässlich ist sie für den Reisetag. Länger will man
+so einen Link ohnehin nicht verschicken.
 
 ### Verkehrsmittel filtern
 
@@ -1836,6 +1863,7 @@ Buchungslink hängt an jeder Verbindung.
 ```
 public/
 ├── index.html                    Oberfläche
+├── .htaccess                     Browser-Cache: immer revalidieren
 ├── check.php                     Selbsttest für den Webspace
 ├── assets/
 │   ├── css/style.css             Alle Farben als CSS-Variablen
@@ -1959,6 +1987,29 @@ Der Haken sitzt in `Http::request()` und ordnet den Dienst über den **Host**
 der URL zu. Das ist Absicht: an den Aufrufstellen zu haken hätte genau die
 Provider verpasst, um die es geht — Overpass baut sich seinen HTTP-Client
 selbst, und der nächste Provider tut es wieder.
+
+### Die API liefert immer JSON — auch wenn sie stirbt
+
+Eine einzige Zeile, die PHP direkt ausgibt, steht **mitten** in der Antwort,
+und `json_decode()` im Browser scheitert an einer Datei, die inhaltlich völlig
+in Ordnung wäre. Genau das ist schon passiert: eine Deprecation-Warnung von
+`curl_close()` machte auf PHP 8.5 jeden einzelnen Aufruf unbrauchbar. Deshalb
+steht am Anfang von `api/index.php`:
+
+- `display_errors = 0` und `log_errors = 1` — gemeldet wird weiterhin alles,
+  nur eben ins Fehlerlog statt in die Antwort.
+- `set_time_limit(120)`. Das Upstream-Timeout liegt bei 25 Sekunden, und
+  mehrere Handler fragen zwei Quellen **nacheinander** (Fahrplan bei der ÖBB,
+  Preise bei der DB). Die verbreitete Voreinstellung `max_execution_time=30`
+  riss dem Skript mitten im zweiten Aufruf den Boden weg. Nicht `0`: ein
+  hängender Socket blockierte damit dauerhaft einen Worker.
+- Ein `register_shutdown_function` als **Notausgang**. Das `try/catch` um den
+  Router fängt Exceptions, aber kein überschrittenes Zeitlimit, keinen
+  erschöpften Speicher und keinen Parse-Fehler. Steht bei Programmende ein
+  Fatal im Fehlerspeicher, ist die Antwort garantiert unfertig — sie wird
+  verworfen und durch ein gültiges `{"ok":false,…}` mit HTTP 500 ersetzt.
+  Ein Flag „schon geantwortet?" braucht es nicht: `ok()` und `fail()` beenden
+  das Skript, ein Fatal danach kann es also nicht geben.
 
 ## Cache vorwärmen (optional, Cron)
 

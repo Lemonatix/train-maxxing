@@ -67,13 +67,27 @@ final class Cache
     /**
      * Entfernt abgelaufene Dateien. Wird gelegentlich (1% der Requests) aufgerufen,
      * damit der Ordner auf Dauer nicht vollläuft.
+     *
+     * AUCH DIE .tmp-DATEIEN: set() schreibt erst nach <hash>.json.<zufall>.tmp
+     * und benennt dann um. Klappt das Umbenennen nicht - volle Platte,
+     * fehlende Rechte -, blieb die Übergangsdatei liegen, und das Muster
+     * *.json fand sie nie wieder. Da der Cache-Ordner in .gitignore steht,
+     * wäre das niemandem aufgefallen. Sie bekommen eine kürzere Frist als
+     * die Nutzdaten: nach einer Stunde schreibt garantiert niemand mehr an
+     * ihnen, und eine noch laufende Anfrage darf man nicht abräumen.
      */
     public function gc(int $maxAge = 86400): void
     {
         if ($this->dir === null) {
             return;
         }
-        $files = @glob($this->dir . '/*.json');
+        $this->sweep(@glob($this->dir . '/*.json'), $maxAge);
+        $this->sweep(@glob($this->dir . '/*.tmp'), 3600);
+    }
+
+    /** @param string[]|false $files */
+    private function sweep($files, int $maxAge): void
+    {
         if ($files === false) {
             return;
         }

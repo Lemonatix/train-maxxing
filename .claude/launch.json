@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "omnirail",
+      "runtimeExecutable": "php",
+      "runtimeArgs": ["-d", "max_execution_time=90", "-S", "127.0.0.1:8787", "-t", "public"],
+      "port": 8787
+    }
+  ]
+}
