@@ -120,6 +120,16 @@ pruefe('… auch als EC',
   modelOf(strecke('EC', ['Zürich HB', 'München Hbf'])).model.id, 'astoro');
 pruefe('… und auf dem Teilstück ab Memmingen',
   modelOf(strecke('ECE', ['Memmingen', 'München Hbf'], { direction: 'Zürich HB' })).model.id, 'astoro');
+pruefe('… und auf einem Teilstück, das nur die Richtung nennt',
+  modelOf(zug({
+    category: 'EC', from: { name: 'Memmingen' }, to: { name: 'Lindau-Reutin' },
+    direction: 'Zürich HB', stops: [{ name: 'Memmingen' }, { name: 'Lindau-Reutin' }],
+  })).model.id, 'astoro');
+pruefe('aber der EC München–Innsbruck wird NICHT mitgefangen',
+  modelOf(zug({
+    category: 'EC', from: { name: 'München Hbf' }, to: { name: 'Innsbruck Hbf' },
+    direction: 'Bologna', stops: [{ name: 'München Hbf' }, { name: 'Kufstein' }],
+  })).model, null);
 pruefe('ECE sonst bleibt der Giruno',
   modelOf(strecke('ECE', ['Frankfurt(Main)Hbf', 'Basel SBB', 'Milano Centrale'])).model.id, 'giruno');
 pruefe('Gäubahn Stuttgart–Zürich ist der IC 2',
@@ -195,6 +205,86 @@ pruefe('trainPosition läuft durch (fängt fehlende Importe)', (() => {
   const p = t.trainPosition();
   return p !== null && p.estimated === false;
 })(), true);
+
+// … und derselbe Fall noch einmal für den ANDEREN Zweig. Genau daran ist
+// der erste Test vorbeigelaufen: er fand eine gemeldete Position und kehrte
+// zurück, bevor die Hochrechnung (und damit snapToLine) je drankam. Zwei
+// Zweige, zwei Aufrufe.
+pruefe('trainPosition rechnet auch ohne gemeldete Position hoch', (() => {
+  const jetzt = Date.now();
+  const vorhin = new Date(jetzt - 600_000).toISOString();
+  const gleich = new Date(jetzt + 600_000).toISOString();
+  const t = tracker([{
+    leg: zug({
+      trainNumber: '599', category: 'ICE',
+      departure: vorhin, arrival: gleich,
+      from: { name: 'A' }, to: { name: 'B' },
+      geometry: [[48.0, 11.0], [48.25, 11.3], [48.5, 11.5]],
+      stops: [
+        { name: 'A', lat: 48.0, lon: 11.0, departure: vorhin },
+        { name: 'B', lat: 48.5, lon: 11.5, arrival: gleich },
+      ],
+    }),
+    data: null,
+  }]);
+  t.map = { liveTrains: [] };          // nichts gemeldet -> Hochrechnung
+  const p = t.trainPosition();
+  return p !== null && p.estimated === true && Number.isFinite(p.lat);
+})(), true);
+
+// ---------------------------------------------------------------------
+console.log('\nImporte — benutzt, aber nicht geholt?');
+
+// ZWEIMAL ist genau dieser Fehler durchgerutscht: `sameTrain` und
+// `snapToLine` wurden in live.js benutzt, ohne importiert zu sein. Beides
+// fiel beim Laden nicht auf — ESM meckert nur bei einem kaputten Import,
+// nicht bei einem fehlenden —, und `node --check` sieht es nie. Der Aufruf
+// stand jeweils in einem Zweig, den man nur unterwegs im Zug erreicht.
+//
+// Statt darauf zu hoffen, dass jeder Zweig einen Test bekommt, prüft das
+// hier die Regel selbst: Was ein Nachbarmodul exportiert und hier als
+// nacktes Wort vorkommt, muss auch importiert sein.
+{
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const wurzel = new URL('../public/assets/js/', import.meta.url);
+  const dateien = [
+    ...readdirSync(wurzel).filter((f) => f.endsWith('.js')).map((f) => f),
+    ...readdirSync(new URL('data/', wurzel)).filter((f) => f.endsWith('.js')).map((f) => 'data/' + f),
+  ];
+
+  const quelle = Object.fromEntries(dateien.map((f) =>
+    [f, readFileSync(new URL(f, wurzel), 'utf8')]));
+
+  // Was exportiert jedes Modul?
+  const exporte = {};
+  for (const [f, txt] of Object.entries(quelle)) {
+    exporte[f] = [...txt.matchAll(/^export\s+(?:async\s+)?(?:function|const|class)\s+([A-Za-z_$][\w$]*)/gm)]
+      .map((m) => m[1]);
+  }
+
+  const fehlend = [];
+  for (const [f, txt] of Object.entries(quelle)) {
+    // Kommentare raus, sonst zählt Prosa als Benutzung.
+    const code = txt.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(?<!:)\/\/.*$/gm, '');
+    const importiert = new Set(
+      [...code.matchAll(/import\s*\{([^}]*)\}/g)]
+        .flatMap((m) => m[1].split(',').map((x) => x.trim().split(/\s+as\s+/).pop()))
+    );
+
+    for (const [andere, namen] of Object.entries(exporte)) {
+      if (andere === f) continue;
+      for (const name of namen) {
+        if (importiert.has(name)) continue;
+        // Als nacktes Wort benutzt (nicht nach einem Punkt)?
+        if (!new RegExp(`(?<![.\\w$])${name}\\s*\\(`).test(code)) continue;
+        // Lokal selbst definiert? Dann ist es ein anderes Ding.
+        if (new RegExp(`(?:function|const|let|var|class)\\s+${name}\\b`).test(code)) continue;
+        fehlend.push(`${f}: ${name} (aus ${andere})`);
+      }
+    }
+  }
+  pruefe('jedes benutzte Modul-Export ist auch importiert', fehlend, []);
+}
 
 // ---------------------------------------------------------------------
 console.log(`\n${gesamt - fehlgeschlagen} von ${gesamt} bestanden.`);

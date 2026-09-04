@@ -27,7 +27,7 @@
 
 import { api } from './api.js';
 // sameTrain war benutzt, aber nie importiert — siehe trainPosition().
-import { geometryOf, trainLabel, sameTrain } from './map.js';
+import { geometryOf, trainLabel, sameTrain, snapToLine } from './map.js';
 import { spliceJourney } from './scoring.js';
 import { typeOf } from './data/trains.js';
 
@@ -1044,13 +1044,35 @@ export class LiveTracker {
     head.append(badge);
     box.append(head);
 
-    // MELDUNGEN GEBÜNDELT. Eine Baustellenmeldung hängt oft an jedem
-    // Abschnitt einer Verbindung und ist mehrere Sätze lang; ungefiltert
-    // stand unter jedem Zug dieselbe Textwand. Die erste steht da, der Rest
-    // wartet zugeklappt — und was in dieser Verfolgung schon einmal gezeigt
-    // wurde, kommt kein zweites Mal.
-    const neu = (data?.messages || []).filter((m) => !this.gezeigteMeldungen.has(m));
-    for (const m of neu) this.gezeigteMeldungen.add(m);
+    // Ohne nachgeladenen Zuglauf die Halte aus der Suche - die tragen zwar
+    // seltener Ist-Zeiten, sagen aber immerhin, wo es langgeht.
+    const stops = data?.stops?.length ? data.stops : (leg.stops || []);
+
+    // MELDUNGEN: NUR VOM EIGENEN ABSCHNITT, und nur einmal.
+    //
+    // Ein Zuglauf reicht weiter als die eigene Fahrt. Auf München–Freiburg
+    // standen unter dem ICE ein defekter Aufzug in Salzburg und ein nicht
+    // barrierefreier Bahnsteig in Villach — beides richtig, beides Hunderte
+    // Kilometer entfernt, weil derselbe Zug dort vorher entlangkam. Jede
+    // Meldung bringt deshalb ihren Geltungsbereich mit; hier wird er gegen
+    // das eigene Teilstück geschnitten.
+    const [vonIdx, bisIdx] = LiveTracker.ownSection(leg, stops);
+    const neu = [];
+    for (const m of data?.messages || []) {
+      const text = typeof m === 'string' ? m : m?.text;
+      if (!text || this.gezeigteMeldungen.has(text)) continue;
+
+      // Meldung ohne Verortung gilt für den ganzen Lauf, also auch für uns.
+      if (vonIdx >= 0 && typeof m === 'object'
+        && Number.isInteger(m.from) && Number.isInteger(m.to)
+        && (Math.max(m.from, m.to) < vonIdx || Math.min(m.from, m.to) > bisIdx)) {
+        continue;
+      }
+
+      this.gezeigteMeldungen.add(text);
+      neu.push(text);
+      if (neu.length >= 3) break;
+    }
 
     if (neu.length > 0) {
       const erste = el('p', 'live__leg-msg', neu[0]);
@@ -1069,9 +1091,6 @@ export class LiveTracker {
       box.append(mehr);
     }
 
-    // Ohne nachgeladenen Zuglauf die Halte aus der Suche - die tragen zwar
-    // seltener Ist-Zeiten, sagen aber immerhin, wo es langgeht.
-    const stops = data?.stops?.length ? data.stops : (leg.stops || []);
     if (stops.length) box.append(this.renderStops(leg, stops));
     return box;
   }
@@ -1083,18 +1102,29 @@ export class LiveTracker {
    * Basel wären das Dutzende Halte, von denen die meisten nichts mit der
    * eigenen Reise zu tun haben.
    */
-  renderStops(leg, all) {
+  /**
+   * Welchen Teil des Zuglaufs fährt man selbst?
+   *
+   * Ein ICE von Graz nach Münster hat vierunddreißig Halte; wer in München
+   * einsteigt und in Mannheim aussteigt, fährt sieben davon. Die Grenzen
+   * braucht nicht nur die Halteliste, sondern auch die Meldungsauswahl —
+   * deshalb steht das hier für sich.
+   *
+   * @returns {[number, number]} Indizes in `all`, oder [-1, -1]
+   */
+  static ownSection(leg, all) {
     const idOf = (s) => String(s.id || '');
-    let from = leg.from?.id
-      ? all.findIndex((s) => idOf(s) === String(leg.from.id))
-      : -1;
-    let to = leg.to?.id
-      ? all.findIndex((s) => idOf(s) === String(leg.to.id))
-      : -1;
-    // Ohne ID-Treffer über den Namen versuchen, sonst den ganzen Lauf zeigen.
+    let from = leg.from?.id ? all.findIndex((s) => idOf(s) === String(leg.from.id)) : -1;
+    let to = leg.to?.id ? all.findIndex((s) => idOf(s) === String(leg.to.id)) : -1;
+    // Ohne ID-Treffer über den Namen versuchen.
     if (from < 0) from = all.findIndex((s) => s.name === leg.from?.name);
     if (to < 0) to = all.findIndex((s) => s.name === leg.to?.name);
-    const slice = from >= 0 && to > from ? all.slice(from, to + 1) : all;
+    return from >= 0 && to > from ? [from, to] : [-1, -1];
+  }
+
+  renderStops(leg, all) {
+    const [from, to] = LiveTracker.ownSection(leg, all);
+    const slice = from >= 0 ? all.slice(from, to + 1) : all;
 
     const list = el('ol', 'live__stops');
     const now = Date.now();

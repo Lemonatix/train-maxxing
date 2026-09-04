@@ -336,10 +336,10 @@ steht — und an einem Bahnsteig mit vier Abschnitten ist „gegenüber" auch ni
 **Der Ausschnitt richtet sich nach den beiden Gleisen — sonst nichts.**
 Liegen sie nebeneinander, wird es sehr eng, und genau das ist richtig: die
 Frage lautet „wo genau", nicht „wie sieht der Bahnhof aus". Gemessen an drei
-Umstiegen: benachbarte Gleise landen bei 20 m Maßstab, weiter auseinander
-liegende bei 50 m. Eine Untergrenze von 20 m verhindert nur den Grenzfall,
-dass zwei Punkte praktisch aufeinanderliegen und die Karte bis an die
-Zoomgrenze heranfährt.
+Umstiegen. Die Untergrenze liegt bei **50 m**: bei zwanzig steht die
+Maßstabsleiste noch auf „20 m", und der Ausschnitt ist so eng, dass ausser
+den beiden Punkten nichts mehr zu sehen ist. Eine Stufe weiter draussen sind
+die Nachbargleise mit im Bild, und man weiss, wo man steht.
 
 **Die Markierung sitzt auf dem GLEIS, nicht auf dem Bahnsteig.** Ein
 Bahnsteig zwischen Gleis 2 und 3 hat seinen Schwerpunkt genau zwischen beiden
@@ -940,7 +940,7 @@ vorher gar nicht drin: die Verbindung sah aus wie jede andere. Das Abzeichen
 steht ganz vorn in der Zeile, noch vor Verspätung und knappem Umstieg — die
 sind dann ohnehin gegenstandslos.
 
-#### Drei Sorten Rauschen, die als „Meldung" durchgingen
+#### Vier Sorten Rauschen, die als „Meldung" durchgingen
 
 Unter jedem Abschnitt hingen alle Meldungen des Zuglaufs, ungefiltert und in
 voller Länge. Nachgesehen, was HAFAS dort tatsächlich liefert:
@@ -949,12 +949,15 @@ voller Länge. Nachgesehen, was HAFAS dort tatsächlich liefert:
 |---|---|---|
 | `type='A'` | „Klimaanlage", „Rollstuhlstellplatz", „Fahrradmitnahme begrenzt möglich" | **Ausstattung**, keine Meldung |
 | `code='ZN'` | „Loreley", „Wilder Kaiser", „ICE International" | **Zugname**, als Meldung sinnlos |
-| HIM-Volltext | mehrere Absätze Behördendeutsch | **zu viel**, und an jedem Abschnitt derselbe |
+| HIM-Volltext | mehrere Absätze, jede betroffene Linie einzeln | **zu viel** — die fette Kopfzeile reicht |
+| Meldungen von woanders | „Aufzug in Salzburg defekt" auf München–Freiburg | **nicht auf der eigenen Strecke** |
 
-Die ersten beiden fliegen jetzt raus. Vom HIM-Text bleibt der erste **tragende**
-Satz, gedeckelt auf 130 Zeichen — `summarise()` wirft dabei auch die Formelware
-weg („Wir bitten um Verständnis", „Bitte beachten Sie die Aushänge"). An einem
-echten Bauarbeitstext gemessen:
+Die ersten beiden fliegen raus. Vom HIM bleibt **nur die Kopfzeile** — das,
+was in der Bahn-App fett dasteht; der Fliesstext darunter zählt jede betroffene
+Linie und jede S-Bahn einzeln auf und hilft niemandem, der im Zug sitzt. Fehlt
+die Kopfzeile, tritt der erste tragende Satz des Textes an ihre Stelle, gekürzt
+auf 130 Zeichen — `summarise()` wirft dabei die Formelware weg („Wir bitten um
+Verständnis", „Bitte beachten Sie die Aushänge"):
 
 ```
 [284 Zeichen] Wegen Bauarbeiten kommt es im Streckenabschnitt zwischen Köln
@@ -966,9 +969,28 @@ echten Bauarbeitstext gemessen:
               Messe/Deutz und Köln Hbf zu Fahrplanänderungen.
 ```
 
-Dazu, unverändert: was in dieser Verfolgung schon einmal stand, kommt kein
-zweites Mal; die erste Meldung steht da, der Rest wartet zugeklappt; und
-höchstens drei je Zug.
+**Der vierte Punkt war der ärgerlichste.** Ein Zuglauf reicht weiter als die
+eigene Fahrt. Auf **München–Freiburg** standen unter dem ICE 118:
+
+```
+Bahnsteig 91/92 in Villach Hbf nicht barrierefrei
+Technische Störung des Personenlift in Salzburg Hbf - Aufgang Schallmoos
+```
+
+Beides richtig, beides mehrere hundert Kilometer entfernt — derselbe ICE kommt
+aus Graz und war dort vorher entlanggefahren. Der Zuglauf hat 34 Halte, gefahren
+werden davon sieben.
+
+HAFAS verortet jede Meldung in `fLocX`/`tLocX`. Das sind allerdings Indizes in
+die **Ortsliste**, nicht in die Halteliste — der Umweg geht über den Namen. Jede
+Meldung trägt seither ihren Geltungsbereich mit, und die Anzeige schneidet ihn
+gegen das eigene Teilstück. Aus den drei Meldungen wurde eine
+(„Umgekehrte Reihung", die für den ganzen Lauf gilt).
+
+Gedeckelt wird deshalb erst **nach** dem Schneiden: würde der Server schon bei
+drei abschneiden, fiele womöglich die relevante Meldung zugunsten einer aus
+Villach weg. Dazu, unverändert: was in dieser Verfolgung schon einmal stand,
+kommt kein zweites Mal; die erste steht da, der Rest wartet zugeklappt.
 
 Die Verfolgung **überlebt Neuladen und neue Suchen**: die Verbindung liegt unter
 `train-maxxing:tracked` im localStorage und wird beim Start wieder aufgenommen,
@@ -1120,6 +1142,20 @@ Gesucht wird in den **Halten**, nicht nur in Start und Ziel: ein EC
 München–Zürich, den man erst ab Memmingen benutzt, ist derselbe Zug. Ohne
 `between` genügt die Gattung allein. Eine Regel gehört nur dorthin, wenn dort
 tatsächlich nur ein Fahrzeugtyp verkehrt; geraten wird nicht.
+
+**Dieselbe Fahrt heisst je nach Quelle anders.** Der EC/ECE München–Zürich
+läuft bei der DB als **ECE**, bei ÖBB und SBB als **EC**. Wer nur eine der
+beiden Gattungen einträgt, bekommt das Fahrzeug je nach Fahrplanquelle mal
+angezeigt und mal nicht — die Regel führt deshalb beide.
+
+**Und die Muster nennen mehr als die Endpunkte.** Ein Abschnitt
+Memmingen–Lindau ist derselbe Zug, aber weder „München" noch „Zürich" kommt
+darin vor; nur die Richtung nennt einen der beiden. Mit „Zürich *oder* St.
+Gallen" auf der einen und „München *oder* Lindau *oder* Memmingen …" auf der
+anderen Seite passt jedes Teilstück. Was damit nicht geht: ein Abschnitt, der
+ganz auf deutscher Seite liegt *und* Richtung München fährt — dort steht in den
+Daten nichts Schweizerisches. Lieber diese Lücke als ein geratenes Fahrzeug:
+sonst würde der EC München–Innsbruck mitgefangen, und genau das prüft ein Test.
 
 **Die Reihenfolge zählt: die erste passende Regel gewinnt.** Deshalb stehen die
 streckenscharfen Regeln oben und die pauschalen unten. Andersherum ist es schon
@@ -1876,13 +1912,20 @@ in der App:
 | `modelOf` beim ECE Zürich–München | Regelreihenfolge verdreht → falsches Fahrzeug |
 | `trainLabel` im Nahverkehr | Zugnummer statt Linie → „S 20318" |
 | `findCancellation` | Ausfall gar nicht bemerkt, keine Alternativen |
-| `trainPosition` | `sameTrain` benutzt, nie importiert |
+| `trainPosition` | `sameTrain` und `snapToLine` benutzt, nie importiert |
 
 Der letzte ist der Grund, warum dort auch `LiveTracker` vorkommt, obwohl der
 keine reine Funktion ist: **ein fehlender Import fällt beim Laden des Moduls
 nicht auf**, sondern erst beim Aufruf — und diese Zeile lief nur, wenn man
-tatsächlich im Zug sass. `node --check` sieht so etwas nie. Nur ein Aufruf
-fängt es.
+tatsächlich im Zug sass. `node --check` sieht so etwas nie.
+
+Und er ist **zweimal** passiert: erst `sameTrain`, dann `snapToLine`. Der Test
+für den ersten lief am zweiten vorbei, weil `trainPosition()` zwei Zweige hat —
+gemeldete Position und Hochrechnung — und der Test nur den ersten erreichte.
+Deshalb gibt es jetzt zusätzlich eine **statische Prüfung**: was ein
+Nachbarmodul exportiert und in einer Datei als nacktes Wort vorkommt, muss dort
+auch importiert sein. Damit ist der Fehlertyp zu, ohne dass jeder Zweig einen
+eigenen Test braucht.
 
 Beide Tests sind gegen die echten Fehler gegengeprüft: dreht man die
 Regelreihenfolge zurück oder entfernt den Import wieder, schlagen sie fehl.

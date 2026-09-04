@@ -141,9 +141,30 @@ export const FLEET_RULES = [
   // ihm ein Fahrzeug angedichtet, das dort nicht verkehrt — genau das ist
   // hier schon einmal passiert.
   {
+    // BEIDE GATTUNGEN. Dieselbe Fahrt heisst je nach Quelle verschieden: die
+    // DB führt sie als ECE, die ÖBB und die SBB als EC. Wer nur eine der
+    // beiden einträgt, bekommt das Fahrzeug je nach Fahrplanquelle mal
+    // angezeigt und mal nicht.
+    //
+    // UND MEHR ALS DIE ENDPUNKTE: In den Mustern stehen auch die Halte
+    // dazwischen. Ein Abschnitt Memmingen–Lindau ist derselbe Zug, aber
+    // weder „München" noch „Zürich" kommt darin vor — nur die Richtung nennt
+    // einen der beiden. Mit „Zürich ODER St. Gallen" auf der einen und
+    // „München ODER Lindau ODER Memmingen …" auf der anderen Seite passt
+    // jedes Teilstück. Eine Verwechslung ist dabei nicht zu befürchten: ein
+    // EC über Lindau ist genau dieser Zug.
+    //
+    // WAS DAMIT NICHT GEHT: ein Abschnitt, der ganz auf deutscher Seite
+    // liegt UND Richtung München fährt (Lindau–München). Dort steht in den
+    // Daten schlicht nichts Schweizerisches — weder in den Halten noch in
+    // der Richtung. Lieber diese Lücke als ein Fahrzeug, das geraten ist:
+    // der EC München–Innsbruck würde sonst mitgefangen.
     model: 'astoro',
     categories: ['EC', 'ECE'],
-    between: [/z(ü|ue)rich/i, /m(ü|ue)nchen/i],
+    between: [
+      /(z(ü|ue)rich|st\.?\s?gallen|winterthur|wil sg)/i,
+      /(m(ü|ue)nchen|lindau|memmingen|kempten|bregenz|buchloe)/i,
+    ],
     note: 'Zürich–München verkehrt seit der Elektrifizierung über Lindau '
       + 'durchgehend mit dem ETR 610 (Astoro).',
   },

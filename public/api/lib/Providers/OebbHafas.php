@@ -691,41 +691,54 @@ final class OebbHafas
         // Meldungen (Bauarbeiten, Störungen) sind für die Anzeige nützlich —
         // aber nur, wenn sie das auch wirklich sind.
         //
-        // DREI SORTEN RAUSCHEN kamen hier ungefiltert durch:
+        // VIER SORTEN RAUSCHEN kamen hier ungefiltert durch:
         //
         //   type 'A'  — die AUSSTATTUNG des Zuges. "Klimaanlage",
         //     "Rollstuhlstellplatz", "Fahrradmitnahme begrenzt möglich".
-        //     Unter jedem Regionalzug stand genau das und sonst nichts, wo
-        //     man Störungen erwartet.
         //
-        //   code 'ZN' — der ZUGNAME. "Loreley", "Wilder Kaiser",
-        //     "ICE International". Als Meldung gelesen ergibt das keinen Sinn.
+        //   code 'ZN' — der ZUGNAME. "Wörthersee", "Loreley". Als Meldung
+        //     gelesen ergibt das keinen Sinn.
         //
-        //   der volle HIM-TEXT — mehrere Absätze Behördendeutsch je Meldung,
-        //     und dieselbe Meldung hängt an jedem Abschnitt der Verbindung.
-        //     Davon bleibt jetzt der erste tragende Satz, gedeckelt auf
-        //     MAX_TEXT Zeichen; summarise() wirft dabei auch die Formelware
-        //     ("Wir bitten um Verständnis") weg.
+        //   der volle HIM-TEXT — die Kopfzeile ist der Kern, der Fliesstext
+        //     zählt danach jede betroffene Linie und jede S-Bahn einzeln auf.
+        //     Genommen wird deshalb ausschliesslich die Kopfzeile; nur wenn
+        //     die fehlt, tritt der gekürzte Fliesstext an ihre Stelle.
         //
-        // Was übrig bleibt, ist die Auskunft, wegen der man hinsieht.
+        //   MELDUNGEN VON WOANDERS — das grösste Ärgernis. Ein Zuglauf ist
+        //     länger als die eigene Fahrt: Auf München–Freiburg standen ein
+        //     defekter Aufzug in Salzburg und ein nicht barrierefreier
+        //     Bahnsteig in Villach, weil derselbe ICE dort vorher entlangkam.
+        //
+        // Gegen das Letzte trägt jede Meldung jetzt ihren GELTUNGSBEREICH mit
+        // (`from`/`to` als Haltindex). HAFAS liefert ihn in fLocX/tLocX —
+        // allerdings als Index in die Ortsliste, nicht in die Halteliste,
+        // deshalb der Umweg über den Namen. Wer nur ein Teilstück fährt,
+        // bekommt in der Anzeige auch nur dessen Meldungen.
+        $haltIndex = [];
+        foreach ($stops as $i => $st) {
+            $haltIndex[$st['name']] ??= $i;
+        }
+        $ortAlsHalt = static function ($locX) use ($locL, $haltIndex): ?int {
+            $name = (string) (($locL[$locX] ?? [])['name'] ?? '');
+            return $name === '' ? null : ($haltIndex[$name] ?? null);
+        };
+
         $messages = [];
+        $gesehen  = [];
         foreach (($jny['msgL'] ?? []) as $m) {
             $rem = ($common['remL'] ?? [])[$m['remX'] ?? -1] ?? null;
             $him = ($common['himL'] ?? [])[$m['himX'] ?? -1] ?? null;
 
             if ($him !== null) {
-                $kopf = Text::plain((string) ($him['head'] ?? ''));
-                $lang = Text::plain((string) ($him['text'] ?? ''));
-                // Die Kopfzeile ist meist schon der Kern. Ist sie leer oder
-                // selbst ellenlang, tritt der gekürzte Fliesstext an ihre Stelle.
-                $txt = $kopf !== '' && mb_strlen($kopf) <= self::MAX_TEXT
-                    ? $kopf
-                    : self::summarise($lang !== '' ? $lang : $kopf, '');
-            } else {
-                if ($rem === null) {
-                    continue;
+                // Nur die Kopfzeile - das ist das, was fett dasteht.
+                $txt = Text::plain((string) ($him['head'] ?? ''));
+                if ($txt === '') {
+                    $txt = self::summarise(Text::plain((string) ($him['text'] ?? '')), '');
+                } elseif (mb_strlen($txt) > self::MAX_TEXT) {
+                    $txt = mb_substr($txt, 0, self::MAX_TEXT - 1) . '…';
                 }
-                if (($rem['type'] ?? '') === 'A') {
+            } else {
+                if ($rem === null || ($rem['type'] ?? '') === 'A') {
                     continue;
                 }
                 if (strtoupper((string) ($rem['code'] ?? '')) === 'ZN') {
@@ -734,9 +747,16 @@ final class OebbHafas
                 $txt = self::summarise(Text::plain((string) ($rem['txtN'] ?? '')), '');
             }
 
-            if ($txt !== '' && !in_array($txt, $messages, true)) {
-                $messages[] = $txt;
+            if ($txt === '' || isset($gesehen[$txt])) {
+                continue;
             }
+            $gesehen[$txt] = true;
+
+            $messages[] = [
+                'text' => $txt,
+                'from' => $ortAlsHalt($m['fLocX'] ?? -1),
+                'to'   => $ortAlsHalt($m['tLocX'] ?? -1),
+            ];
         }
 
         return [
@@ -754,8 +774,11 @@ final class OebbHafas
                 'hasRealtime' => $hasRealtime,
                 'cancelled'   => (bool) ($jny['isCncl'] ?? false),
                 'stops'       => $stops,
-                // Drei reichen. Wer mehr braucht, findet sie beim Betreiber.
-                'messages'    => array_slice($messages, 0, 3),
+                // Grosszügiger als das, was am Ende dasteht: gefiltert wird
+                // erst in der Anzeige, und zwar auf das eigene Teilstück.
+                // Würden wir hier schon deckeln, fiele womöglich die
+                // relevante Meldung zugunsten einer aus Villach weg.
+                'messages'    => array_slice($messages, 0, 12),
             ],
         ];
     }

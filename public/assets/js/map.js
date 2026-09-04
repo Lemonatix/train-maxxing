@@ -21,11 +21,13 @@ const NS = 'http://www.w3.org/2000/svg';
 /**
  * Kleinster Ausschnitt des Bahnhofsplans, in Metern.
  *
- * Nur ein Notnagel für den Fall, dass Ankunfts- und Abfahrtsgleis fast
- * denselben Punkt haben — sonst zöge die Karte bis an die Zoomgrenze heran.
- * Ansonsten bestimmen die beiden Gleise den Ausschnitt selbst.
+ * Fünfzig, nicht zwanzig: bei zwanzig steht die Maßstabsleiste noch auf
+ * „20 m", und der Ausschnitt ist so eng, dass er ausser den beiden Punkten
+ * nichts mehr zeigt. Eine Stufe weiter draussen sieht man die Nachbargleise
+ * mit und weiss, wo man steht. Liegen die beiden Gleise weiter auseinander,
+ * bestimmen sie den Ausschnitt weiterhin selbst.
  */
-const MIN_STATION_SPAN_M = 20;
+const MIN_STATION_SPAN_M = 50;
 
 /**
  * Kachelquelle: OpenStreetMap, direkt.
