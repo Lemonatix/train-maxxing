@@ -5,50 +5,109 @@
  * DREI FAELLE:
  *
  * 1. ECHTPREIS PUR (source 'db')
- *    Die DB hat den Preis geliefert und die gewaehlten BahnCards bereits
+ *    Die DB hat den Preis geliefert und die gewählten BahnCards bereits
  *    eingerechnet. Nichts zu tun.
  *
  * 2. ECHTPREIS + ABO-KORREKTUR (source 'db+abo')
  *    Die DB kennt Halbtax, GA, Vorteilscard, KlimaTicket, GA Night und
  *    Deutschlandticket NICHT und ignoriert sie stillschweigend. Liegt ein
- *    Echtpreis vor und ist so ein Abo gewaehlt, rechnen wir den Rabattfaktor
+ *    Echtpreis vor und ist so ein Abo gewählt, rechnen wir den Rabattfaktor
  *    aus unserem Modell und wenden ihn auf den echten Preis an. Die Basis ist
- *    also hart, nur der Abo-Anteil ist geschaetzt.
+ *    also hart, nur der Abo-Anteil ist geschätzt.
  *
  * 3. REINE SCHAETZUNG (source 'estimate')
- *    Kein Echtpreis verfuegbar. Distanz mal Richtwert pro Land, dann Abos.
+ *    Kein Echtpreis verfügbar. Distanz mal Richtwert pro Land, dann Abos.
  *
- * Faelle 2 und 3 sind als "estimated" markiert und werden nie als
+ * Fälle 2 und 3 sind als "estimated" markiert und werden nie als
  * verbindlicher Preis dargestellt.
  */
 final class Fares
 {
-    /** Richtwerte Normalpreis 2. Klasse pro km, in EUR. */
-    private const RATE_PER_KM = [
-        'ch'      => 0.30,
-        'de'      => 0.24,
-        'at'      => 0.19,
-        'default' => 0.24,
+    /**
+     * Preiskurve je Land: preis = a * km^b, EUR, 2. Klasse, ohne Abo.
+     *
+     * DEGRESSIV, NICHT LINEAR. Bahntarife werden mit der Entfernung
+     * billiger - in Deutschland gemessen von 31 ct/km bei 40 km auf 11 ct/km
+     * bei 800 km. Ein fester Kilometersatz kann das nicht abbilden: er passt
+     * entweder kurze oder lange Strecken, nie beide. Vorher galt 0,24 EUR/km
+     * für Deutschland, und Freiburg-Berlin kam damit auf 118 statt 90 EUR.
+     *
+     * KALIBRIERT AN ECHTEN PREISEN, gemessen am 2026-09-04 über 85 Angebote
+     * der DB zu 19 Relationen zwischen 37 und 808 km, zwei Wochen im Voraus:
+     *
+     *   de   mittlerer Fehler 18 % (vorher 22 %)
+     *   ch   mittlerer Fehler  8 % (vorher 28 %)
+     *
+     * Der Rest ist beim deutschen Sparpreis nicht wegzurechnen: er hängt an
+     * der Auslastung, nicht nur an der Entfernung. Stuttgart-Karlsruhe gab es
+     * am Messtag für 6,99 EUR und für 36,20 EUR - dieselbe Strecke, derselbe
+     * Tag. In der Schweiz ist der Preis dagegen eine reine Funktion der
+     * Entfernung, und entsprechend genau trifft die Kurve dort.
+     *
+     * OESTERREICH IST NICHT GEMESSEN. Die DB verkauft innerhalb Österreichs
+     * nicht (jede Anfrage kommt ohne Preis zurück), und das HAFAS der ÖBB
+     * liefert zwar 'trfRes', aber ohne Betrag. Die Werte hier sind die
+     * deutsche Kurve, etwas günstiger gestellt. Wer sie besser kennt: 'a'
+     * skaliert den Preis, 'b' die Degression (kleiner = stärker fallend).
+     *
+     *   spar  Faktor auf die Kurve für den früh gebuchten Preis
+     *   flex  Faktor für den vollen, umtauschbaren Preis
+     *   min   Mindestpreis - unter einem Kurzstreckenticket geht nichts
+     */
+    private const RATE_CURVE = [
+        'ch'      => ['a' => 0.4964, 'b' => 0.8746, 'spar' => 0.85, 'flex' => 1.00, 'min' => 3.00],
+        'de'      => ['a' => 1.0508, 'b' => 0.6766, 'spar' => 1.00, 'flex' => 1.55, 'min' => 2.20],
+        'at'      => ['a' => 0.9500, 'b' => 0.6900, 'spar' => 1.00, 'flex' => 1.45, 'min' => 2.40],
+        'default' => ['a' => 1.0508, 'b' => 0.6766, 'spar' => 1.00, 'flex' => 1.55, 'min' => 2.50],
     ];
 
-    private const BASE_FEE = [
-        'ch'      => 3.00,
-        'de'      => 2.50,
-        'at'      => 2.00,
-        'default' => 2.50,
-    ];
-
-    private const SAVER_FACTOR      = 0.55;
     private const FIRST_CLASS_FACTOR = 1.7;
-    private const DETOUR_FACTOR     = 1.25;
 
     /**
-     * Gattungen des Nahverkehrs. Entscheidend fuer das Deutschlandticket,
+     * Zuschlag auf die Luftlinie zwischen den Halten, wenn keine Polylinie
+     * vorliegt. Nachgemessen an sechs Relationen: die Haltekette liegt bei
+     * 80-90 % der Tarifentfernung, mit 1,25 landet man bei 100-112 %.
+     */
+    private const DETOUR_FACTOR = 1.25;
+
+    /**
+     * Korrektur auf die Polylinienlänge. Sie liegt im Mittel bei 97,5 % der
+     * Tarifentfernung - die Stützpunkte schneiden jede Kurve minimal ab.
+     */
+    private const POLYLINE_CORRECTION = 1.025;
+
+    /**
+     * Ohne Sparpreis kein Preisband. Im reinen Nahverkehr gibt es weder
+     * kontingentierte Sparangebote noch einen Flexpreis-Aufschlag: was am
+     * Automaten steht, ist der Preis. Nachgemessen an sieben deutschen
+     * Nahverkehrsrelationen - jede lieferte fünf Angebote, und alle fünf
+     * hatten denselben Betrag. Eine Spanne von 45 % vorzugaukeln wäre dort
+     * schlicht falsch.
+     *
+     * WAS DAFUER STREUT, ist die Region: München-Augsburg kostet 21,30 EUR,
+     * Hannover-Braunschweig bei gleicher Entfernung 15,00 EUR. Das sind
+     * Verbundtarife, keine Entfernungstarife - eine eigene Kurve dafür
+     * wurde geprüft und wieder verworfen, sie war nur drei Prozentpunkte
+     * besser als die allgemeine (22 statt 25 % mittlerer Fehler) und hätte
+     * eine Genauigkeit vorgetäuscht, die es nicht gibt.
+     */
+    private const LOCAL_SAVER = 0.95;
+    private const LOCAL_FLEX  = 1.00;
+
+    /**
+     * Gattungen des Nahverkehrs. Entscheidend für das Deutschlandticket,
      * das im Fernverkehr nicht gilt.
+     *
+     * MIT DABEI die Sammelkürzel, die die Fahrplandaten für alles führen,
+     * was nicht die DB selbst fährt: DPN (ÖBB-HAFAS) und DRB (bahn.de)
+     * stehen für "Nahverkehr in privater Hand" - die HLB-Regionalbahn
+     * Frankfurt-Gießen kommt genau so herein. Ohne sie fiel jeder dieser
+     * Züge aus dem Deutschlandticket heraus, obwohl es dort gilt.
      */
     private const LOCAL_CATEGORIES = [
-        'RE', 'RB', 'R', 'IRE', 'REX', 'S', 'SB', 'STR', 'TRAM', 'U', 'BUS',
+        'RE', 'RB', 'R', 'IRE', 'MEX', 'REX', 'S', 'SB', 'STR', 'TRAM', 'U', 'BUS',
         'SEV', 'RS', 'ATZ', 'NBS', 'WFB', 'ERB', 'BRB', 'ALX', 'M', 'AKN',
+        'DPN', 'DRB', 'NBE', 'VIA', 'HLB', 'ME', 'NWB', 'EVB', 'OLA', 'VBG', 'WEG',
     ];
 
     /**
@@ -58,7 +117,7 @@ final class Fares
      *   factor      Restpreis-Faktor (0.0 = frei, 0.5 = halber Preis)
      *   saverFactor abweichender Faktor auf Sparpreise (BahnCard 50: nur 25 %)
      *   categories  nur diese Gattungen (null = alle)
-     *   hours       Zeitfenster [von, bis) in Stunden, ueber Mitternacht erlaubt
+     *   hours       Zeitfenster [von, bis) in Stunden, über Mitternacht erlaubt
      *   maxClass    gilt nur bis zu dieser Wagenklasse
      *   viaDb       true, wenn die DB-Angebots-API das Abo selbst einrechnet
      */
@@ -74,7 +133,7 @@ final class Fares
         'ga-night' => [
             'country' => 'ch', 'factor' => 0.00, 'label' => 'GA Night',
             'hours' => [19, 5], 'maxClass' => 2,
-            'note' => 'Frei zwischen 19 und 5 Uhr, 2. Klasse. Heisst bei jungen Reisenden seven25.',
+            'note' => 'Frei zwischen 19 und 5 Uhr, 2. Klasse. Heißt bei jungen Reisenden seven25.',
         ],
         'bc25' => [
             'country' => 'de', 'factor' => 0.75, 'label' => 'BahnCard 25',
@@ -95,16 +154,16 @@ final class Fares
         ],
         'vorteilscard' => [
             'country' => 'at', 'factor' => 0.55, 'label' => 'VORTEILScard',
-            'note' => '45 % auf dem oesterreichischen Streckenanteil.',
+            'note' => '45 % auf dem österreichischen Streckenanteil.',
         ],
         'klimaticket' => [
             'country' => 'at', 'factor' => 0.00, 'label' => 'KlimaTicket',
-            'note' => 'Oesterreichischer Streckenanteil ist frei.',
+            'note' => 'Österreichischer Streckenanteil ist frei.',
         ],
     ];
 
     /**
-     * Ergaenzt eine Verbindung um Preisinformationen.
+     * Ergänzt eine Verbindung um Preisinformationen.
      *
      * @param string[] $discounts Abo-IDs
      */
@@ -113,25 +172,25 @@ final class Fares
         $segments = self::segments($journey);
         $hasReal  = isset($journey['price']) && ($journey['price']['estimated'] ?? true) === false;
 
-        // Abos, die die DB nicht kennt und die wir selbst rechnen muessen.
+        // Abos, die die DB nicht kennt und die wir selbst rechnen müssen.
         $ownDiscounts = array_values(array_filter(
             $discounts,
             static fn($d) => isset(self::DISCOUNTS[$d]) && (self::DISCOUNTS[$d]['viaDb'] ?? false) === false
         ));
 
         if ($segments === []) {
-            return $journey; // ohne Geodaten koennen wir nichts sagen
+            return $journey; // ohne Geodaten können wir nichts sagen
         }
 
-        // --- Fall 1: Echtpreis, keine eigenen Abos noetig ---
+        // --- Fall 1: Echtpreis, keine eigenen Abos nötig ---
         if ($hasReal && $ownDiscounts === []) {
             return $journey;
         }
 
         // --- Fall 2: Echtpreis vorhanden, fehlende Abos rechnerisch anwenden ---
         if ($hasReal) {
-            // WICHTIG: Der Echtpreis enthaelt die BahnCard bereits. Wuerden wir
-            // hier mit allen Abos rechnen, zoege der Rabatt ein zweites Mal.
+            // WICHTIG: Der Echtpreis enthält die BahnCard bereits. Würden wir
+            // hier mit allen Abos rechnen, zöge der Rabatt ein zweites Mal.
             // Der Faktor darf also nur aus den Abos kommen, die die DB nicht kennt.
             $base  = self::price($segments, [], $travelClass);
             $own   = self::price($segments, $ownDiscounts, $travelClass);
@@ -139,7 +198,7 @@ final class Fares
 
             $real = (float) $journey['price']['amount'];
 
-            // Fuer die Anzeige: was die DB eingerechnet hat plus was wir ergaenzt haben.
+            // Für die Anzeige: was die DB eingerechnet hat plus was wir ergänzt haben.
             $dbLabels = [];
             foreach ($discounts as $d) {
                 if (isset(self::DISCOUNTS[$d]) && (self::DISCOUNTS[$d]['viaDb'] ?? false) === true) {
@@ -164,14 +223,14 @@ final class Fares
             return $journey;
         }
 
-        // --- Fall 3: reine Schaetzung, hier zaehlen alle Abos ---
+        // --- Fall 3: reine Schätzung, hier zählen alle Abos ---
         $withAbo = self::price($segments, $discounts, $travelClass);
 
         $journey['price'] = [
             'amount'      => round($withAbo['saver'], 2),
             'amountMax'   => round($withAbo['flex'], 2),
             'currency'    => 'EUR',
-            'type'        => $withAbo['covered'] ? 'Durch Abo gedeckt' : 'Schaetzung',
+            'type'        => $withAbo['covered'] ? 'Durch Abo gedeckt' : 'Schätzung',
             'source'      => 'estimate',
             'estimated'   => true,
             'basedOnReal' => false,
@@ -185,25 +244,36 @@ final class Fares
     }
 
     /**
-     * Preis fuer eine Segmentliste unter Beruecksichtigung der Abos.
+     * Preis für eine Segmentliste unter Berücksichtigung der Abos.
+     *
+     * JE LAND EINMAL DIE KURVE, nicht je Teilstück. Das ist der Grund, warum
+     * hier nicht einfach über die Segmente summiert wird: `a * km^b` ist
+     * nicht additiv. Eine Fahrt von 600 km in zwanzig Halte-Abschnitte
+     * zerlegt und je Abschnitt bepreist ergäbe ein Vielfaches des richtigen
+     * Preises — der Sinn der Degression ist ja gerade, dass der einundfünf-
+     * zigste Kilometer weniger kostet als der erste.
+     *
+     * Die Abos wirken deshalb als ANTEIL: je Land wird ausgerechnet, welcher
+     * Teil der Strecke wie stark rabattiert ist, und der Landespreis
+     * entsprechend gekürzt. Deckt das GA den Schweizer Anteil vollständig,
+     * fällt er ganz weg; deckt das GA Night die Hälfte davon, die Hälfte.
      *
      * @param array<int,array{country:string,km:float,category:string,start:?int,end:?int,dTicket:bool}> $segments
      * @param string[] $discounts
      */
     private static function price(array $segments, array $discounts, int $travelClass): array
     {
-        $flex       = 0.0;
-        $saver      = 0.0;
-        $perCountry = [];
+        $perCountry = [];   // Land -> km
+        $gewichtet  = [];   // Land -> km * Zahlfaktor (flex bzw. spar)
         $applied    = [];
-        $paidKm     = [];
+        $nurNah     = true;
 
         foreach ($segments as $seg) {
-            $c    = $seg['country'];
-            $rate = self::RATE_PER_KM[$c] ?? self::RATE_PER_KM['default'];
+            $c = $seg['country'] !== '' ? $seg['country'] : 'default';
 
-            $segFlex  = $seg['km'] * $rate;
-            $segSaver = $segFlex * self::SAVER_FACTOR;
+            if (!in_array(strtoupper($seg['category']), self::LOCAL_CATEGORIES, true)) {
+                $nurNah = false;
+            }
 
             $bestFlex  = 1.0;
             $bestSaver = 1.0;
@@ -218,9 +288,9 @@ final class Fares
                     continue;
                 }
 
-                // Zeitlich begrenzte Abos koennen ein Teilstueck nur anteilig
-                // decken: faehrt der Zug von 18:45 bis 19:15, gilt das GA Night
-                // fuer die Haelfte der Strecke.
+                // Zeitlich begrenzte Abos können ein Teilstück nur anteilig
+                // decken: fährt der Zug von 18:45 bis 19:15, gilt das GA Night
+                // für die Hälfte der Strecke.
                 $ruleFlex  = 1.0 - $share * (1.0 - $rule['factor']);
                 $ruleSaver = 1.0 - $share * (1.0 - ($rule['saverFactor'] ?? $rule['factor']));
 
@@ -231,21 +301,32 @@ final class Fares
                 }
             }
 
-            $flex  += $segFlex * $bestFlex;
-            $saver += $segSaver * $bestSaver;
-
-            $perCountry[$c] = ($perCountry[$c] ?? 0) + $seg['km'];
-            $paidKm[$c]     = ($paidKm[$c] ?? 0.0) + ($bestFlex < 0.001 ? 0.0 : $seg['km']);
+            $perCountry[$c]        = ($perCountry[$c] ?? 0.0) + $seg['km'];
+            $gewichtet[$c]['flex'] = ($gewichtet[$c]['flex'] ?? 0.0) + $seg['km'] * $bestFlex;
+            $gewichtet[$c]['spar'] = ($gewichtet[$c]['spar'] ?? 0.0) + $seg['km'] * $bestSaver;
         }
 
-        // Grundgebuehr einmal pro beteiligtem Land, sofern dort ueberhaupt
-        // etwas zu zahlen ist.
-        foreach ($paidKm as $c => $km) {
-            if ($km > 0.5) {
-                $base   = self::BASE_FEE[$c] ?? self::BASE_FEE['default'];
-                $flex  += $base;
-                $saver += $base * self::SAVER_FACTOR;
+        $flex  = 0.0;
+        $saver = 0.0;
+
+        foreach ($perCountry as $c => $km) {
+            if ($km < 0.5) {
+                continue;
             }
+            $kurve = self::RATE_CURVE[$c] ?? self::RATE_CURVE['default'];
+            $voll  = max($kurve['min'], $kurve['a'] * ($km ** $kurve['b']));
+
+            // Anteil der Strecke, der noch zu zahlen ist.
+            $anteilFlex = $gewichtet[$c]['flex'] / $km;
+            $anteilSpar = $gewichtet[$c]['spar'] / $km;
+
+            // Spar- und Flexpreis gibt es nur im Fernverkehr. Eine reine
+            // Nahverkehrsfahrt hat einen Preis, keine Spanne.
+            $flexFaktor = $nurNah ? self::LOCAL_FLEX  : $kurve['flex'];
+            $sparFaktor = $nurNah ? self::LOCAL_SAVER : $kurve['spar'];
+
+            $flex  += $voll * $flexFaktor * $anteilFlex;
+            $saver += $voll * $sparFaktor * $anteilSpar;
         }
 
         if ($travelClass === 1) {
@@ -264,8 +345,8 @@ final class Fares
     }
 
     /**
-     * Anteil eines Teilstuecks, auf den ein Abo wirkt: 0 = gar nicht,
-     * 1 = vollstaendig. Nur zeitlich begrenzte Abos liegen dazwischen.
+     * Anteil eines Teilstücks, auf den ein Abo wirkt: 0 = gar nicht,
+     * 1 = vollständig. Nur zeitlich begrenzte Abos liegen dazwischen.
      */
     private static function ruleShare(array $rule, array $seg, int $travelClass): float
     {
@@ -281,14 +362,14 @@ final class Fares
     }
 
     /**
-     * Anteil der Fahrzeit eines Teilstuecks, der im taeglichen Zeitfenster
-     * [$fromH, $toH) liegt. Ohne Zeitangabe gilt das Fenster als nicht erfuellt.
+     * Anteil der Fahrzeit eines Teilstücks, der im täglichen Zeitfenster
+     * [$fromH, $toH) liegt. Ohne Zeitangabe gilt das Fenster als nicht erfüllt.
      *
-     * Hier steckt der Unterschied zwischen "Zug faehrt um 17:00 in Muenchen ab"
+     * Hier steckt der Unterschied zwischen "Zug fährt um 17:00 in München ab"
      * und "Zug ist ab 19:00 in der Schweiz": das GA Night deckt den Schweizer
-     * Teil, obwohl die Verbindung deutlich frueher startet. Massgeblich ist
+     * Teil, obwohl die Verbindung deutlich früher startet. Maßgeblich ist
      * also nie die Abfahrt der Verbindung, sondern die Uhrzeit auf dem
-     * jeweiligen Teilstueck.
+     * jeweiligen Teilstück.
      *
      * $start und $end sind Ortszeit-Sekunden (siehe localTs).
      */
@@ -297,17 +378,17 @@ final class Fares
         if ($start === null) {
             return 0.0;
         }
-        // Ohne brauchbare Ankunftszeit pruefen wir den Zeitpunkt der Abfahrt.
+        // Ohne brauchbare Ankunftszeit prüfen wir den Zeitpunkt der Abfahrt.
         $end = ($end !== null && $end > $start) ? $end : $start + 60;
         $len = $end - $start;
 
         $from = $fromH * 3600;
         $to   = $toH * 3600;
         if ($to <= $from) {
-            $to += 86400; // Fenster laeuft ueber Mitternacht
+            $to += 86400; // Fenster läuft über Mitternacht
         }
 
-        // Das Fenster jedes beruehrten Tages mit der Fahrzeit schneiden.
+        // Das Fenster jedes berührten Tages mit der Fahrzeit schneiden.
         $inside = 0;
         $day    = intdiv($start, 86400) * 86400 - 86400;
         for (; $day <= $end; $day += 86400) {
@@ -317,14 +398,14 @@ final class Fares
         return min(1.0, $inside / $len);
     }
 
-    /** Prueft Land, Gattung und Wagenklasse. Die Uhrzeit klaert ruleShare(). */
+    /** Prüft Land, Gattung und Wagenklasse. Die Uhrzeit klärt ruleShare(). */
     private static function ruleApplies(array $rule, array $seg, int $travelClass): bool
     {
         if ($rule['country'] !== $seg['country']) {
             return false;
         }
 
-        // Kleinere Zahl heisst hoehere Klasse: maxClass 2 schliesst die
+        // Kleinere Zahl heißt höhere Klasse: maxClass 2 schließt die
         // 1. Klasse aus, nicht umgekehrt.
         if (isset($rule['maxClass']) && $travelClass < $rule['maxClass']) {
             return false;
@@ -347,13 +428,13 @@ final class Fares
     /**
      * Zerlegt die Reise in Segmente mit Land, Distanz, Gattung und Fahrzeit.
      *
-     * Grundlage sind die Zwischenhalte, die jeweils einen Laendercode tragen.
-     * Damit wird Wien-Muenchen korrekt als ~317 km AT plus ~145 km DE gerechnet
-     * statt pauschal halbiert - fuer GA, KlimaTicket und BahnCard 100 der
+     * Grundlage sind die Zwischenhalte, die jeweils einen Ländercode tragen.
+     * Damit wird Wien-München korrekt als ~317 km AT plus ~145 km DE gerechnet
+     * statt pauschal halbiert - für GA, KlimaTicket und BahnCard 100 der
      * Unterschied zwischen "frei" und "voller Preis".
      *
-     * Jedes Teilstueck traegt die Uhrzeit, zu der es tatsaechlich befahren
-     * wird. Nur so faellt der Schweizer Teil eines um 17:00 in Muenchen
+     * Jedes Teilstück trägt die Uhrzeit, zu der es tatsächlich befahren
+     * wird. Nur so fällt der Schweizer Teil eines um 17:00 in München
      * gestarteten ECE ins Zeitfenster des GA Night.
      *
      * @return array<int,array{country:string,km:float,category:string,start:?int,end:?int,dTicket:bool}>
@@ -380,19 +461,32 @@ final class Fares
                 $points = [$from, $to];
             }
 
+            // ENTFERNUNG: erst die Luftlinie von Halt zu Halt, dann so
+            // skaliert, dass die Summe dem tatsächlich gefahrenen Weg
+            // entspricht. Warum zweistufig: die Halte tragen den Ländercode
+            // und die Uhrzeit, die Polylinie nicht - für die Aufteilung auf
+            // Länder und Zeitfenster brauchen wir also die Halte, für die
+            // Gesamtlänge aber die Schiene.
             $n   = count($points) - 1;
             $kms = [];
             $any = false;
+            $roh = 0.0;
             for ($i = 0; $i < $n; $i++) {
                 $a  = $points[$i];
                 $b  = $points[$i + 1];
                 $km = self::haversine($a['lat'] ?? null, $a['lon'] ?? null, $b['lat'] ?? null, $b['lon'] ?? null);
 
-                $kms[$i] = $km === null ? null : $km * self::DETOUR_FACTOR;
+                $kms[$i] = $km;
                 $any     = $any || $km !== null;
+                $roh    += $km ?? 0.0;
             }
 
-            // Ohne Koordinaten (z.B. DB-Daten) aus der Fahrzeit schaetzen.
+            $faktor = self::scaleFactor($leg, $roh);
+            foreach ($kms as $i => $km) {
+                $kms[$i] = $km === null ? null : $km * $faktor;
+            }
+
+            // Ohne Koordinaten (z.B. DB-Daten) aus der Fahrzeit schätzen.
             if (!$any) {
                 $km = max(0, (int) ($leg['durationMin'] ?? 0)) * 1.5;
                 if ($km > 0) {
@@ -433,10 +527,54 @@ final class Fares
     }
 
     /**
+     * Womit die Luftlinien-Kette eines Abschnitts auf die gefahrene
+     * Entfernung hochgerechnet wird.
+     *
+     * ZWEI WEGE, und der erste ist deutlich besser:
+     *
+     * 1. DIE POLYLINIE. HAFAS liefert den tatsächlichen Streckenverlauf mit
+     *    (getPolyline). Ihre Länge ist der gefahrene Weg - nachgemessen an
+     *    sechs Relationen liegt sie zwischen 94 % und 101 % der amtlichen
+     *    Tarifentfernung, im Mittel bei 97,5 %. Der Rest ist die Ungenauigkeit
+     *    der Stützpunkte; POLYLINE_CORRECTION gleicht ihn aus.
+     *
+     * 2. DIE HALTEKETTE mal DETOUR_FACTOR. Die Rückfallebene, wenn keine
+     *    Polylinie da ist (DB-Fahrpläne liefern keine). Die Luftlinie
+     *    zwischen zwei Halten schneidet jeden Bogen ab, deshalb der Zuschlag.
+     *    Nachgemessen liegt das Ergebnis zwischen 100 % und 112 % der
+     *    Tarifentfernung - brauchbar, aber gut doppelt so ungenau.
+     *
+     * Früher galt Weg 2 immer. München-Berlin kam damit auf 753 statt
+     * 623 km, und der geschätzte Preis war entsprechend zu hoch.
+     */
+    private static function scaleFactor(array $leg, float $rohKm): float
+    {
+        $geo = $leg['geometry'] ?? null;
+        if (is_array($geo) && count($geo) > 1 && $rohKm > 0.5) {
+            $poly = 0.0;
+            for ($i = 0, $n = count($geo) - 1; $i < $n; $i++) {
+                $km = self::haversine(
+                    $geo[$i][0] ?? null, $geo[$i][1] ?? null,
+                    $geo[$i + 1][0] ?? null, $geo[$i + 1][1] ?? null
+                );
+                $poly += $km ?? 0.0;
+            }
+
+            // Eine Polylinie, die kürzer als die Luftlinie zwischen den
+            // Halten ist, kann nicht stimmen - dann lieber die Rückfallebene.
+            if ($poly >= $rohKm * 0.98) {
+                return ($poly * self::POLYLINE_CORRECTION) / $rohKm;
+            }
+        }
+
+        return self::DETOUR_FACTOR;
+    }
+
+    /**
      * Ein Zeitpunkt je Halt, in Ortszeit-Sekunden.
      *
      * Fehlende Zwischenzeiten - nicht jeder Anbieter liefert sie - werden
-     * ueber die Distanz zwischen den bekannten Nachbarn interpoliert. Fuer die
+     * über die Distanz zwischen den bekannten Nachbarn interpoliert. Für die
      * Frage "wo ist der Zug um 19:00" reicht das allemal.
      *
      * @param array<int,array<string,mixed>> $points
@@ -449,8 +587,8 @@ final class Fares
         $times = [];
 
         foreach ($points as $i => $p) {
-            // Am Startpunkt zaehlt die Abfahrt, sonst die Ankunft: das ist
-            // jeweils der Zeitpunkt, an dem das Teilstueck beginnt bzw. endet.
+            // Am Startpunkt zählt die Abfahrt, sonst die Ankunft: das ist
+            // jeweils der Zeitpunkt, an dem das Teilstück beginnt bzw. endet.
             $iso = $i === 0
                 ? ($p['departure'] ?? $p['arrival'] ?? null)
                 : ($p['arrival'] ?? $p['departure'] ?? null);
@@ -460,7 +598,7 @@ final class Fares
         $times[0]      ??= self::localTs($leg['departure'] ?? null);
         $times[$n - 1] ??= self::localTs($leg['arrival'] ?? null);
 
-        // Kumulierte Distanz als Stuetzstelle der Interpolation.
+        // Kumulierte Distanz als Stützstelle der Interpolation.
         $cum = [0.0];
         for ($i = 0; $i < $n - 1; $i++) {
             $cum[$i + 1] = $cum[$i] + ($kms[$i] ?? 0.0);
@@ -486,7 +624,7 @@ final class Fares
                 }
             }
             if ($a === null || $b === null) {
-                continue; // ohne Anker keine sinnvolle Schaetzung
+                continue; // ohne Anker keine sinnvolle Schätzung
             }
 
             $span = $cum[$b] - $cum[$a];
@@ -532,7 +670,7 @@ final class Fares
             return;
         }
 
-        // Grenzquerung ohne Zwischenhalt: haelftig teilen, auch zeitlich.
+        // Grenzquerung ohne Zwischenhalt: hälftig teilen, auch zeitlich.
         $mid = ($start !== null && $end !== null) ? (int) round(($start + $end) / 2) : null;
 
         $out[] = $make($cFrom, $km / 2, $start, $mid ?? $end);
@@ -542,7 +680,7 @@ final class Fares
     /**
      * ISO-Zeitstempel als Sekunden in Ortszeit: Unixzeit plus Zonenoffset.
      *
-     * Damit laesst sich die Tageszeit vor Ort ohne Zonenrechnerei aus dem
+     * Damit lässt sich die Tageszeit vor Ort ohne Zonenrechnerei aus dem
      * Rest modulo 86400 lesen - genau das braucht das Zeitfenster.
      */
     private static function localTs(?string $iso): ?int
@@ -572,7 +710,7 @@ final class Fares
         return $r * 2 * atan2(sqrt($a), sqrt(1 - $a));
     }
 
-    /** Katalog fuer das Frontend. */
+    /** Katalog für das Frontend. */
     public static function catalogue(): array
     {
         $out = [];

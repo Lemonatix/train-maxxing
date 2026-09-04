@@ -21,7 +21,7 @@ import { routesOf, autoRoutesOf, speedScore } from './data/routes.js';
 
 /**
  * Durchschnittlicher Komfort einer Verbindung, gewichtet nach Fahrzeit.
- * Fussweg- und Wartezeiten zaehlen nicht mit.
+ * Fußweg- und Wartezeiten zählen nicht mit.
  */
 export function comfortOf(journey, modelPrefs) {
   const legs = (journey.legs || []).filter((l) => l.mode === 'train');
@@ -38,7 +38,7 @@ export function comfortOf(journey, modelPrefs) {
 
     weighted += res.comfort * minutes;
     total += minutes;
-    perLeg.push({ leg, comfort: res.comfort, model: res.model, certainty: res.certainty });
+    perLeg.push({ leg, comfort: res.comfort, model: res.model, certainty: res.certainty, note: res.note });
     hits.push(...res.hits);
   }
 
@@ -49,7 +49,7 @@ export function comfortOf(journey, modelPrefs) {
   };
 }
 
-/** Preis einer Verbindung als Zahl, oder null. Bei Schaetzungen der untere Wert. */
+/** Preis einer Verbindung als Zahl, oder null. Bei Schätzungen der untere Wert. */
 export function priceOf(journey) {
   const p = journey.price;
   if (!p) return null;
@@ -58,14 +58,14 @@ export function priceOf(journey) {
 }
 
 /**
- * Bewertet alle Verbindungen und gibt sie sortiert zurueck.
+ * Bewertet alle Verbindungen und gibt sie sortiert zurück.
  *
  * @param {Array}  journeys
  * @param {Object} opts
  * @param {'normal'|'nerd'} opts.mode
  * @param {Object} opts.modelPrefs  Modell-ID -> Bonus (-5 … +5)
  * @param {Object} opts.routePrefs  Strecken-ID -> Bonus (-5 … +5), Nerd
- * @param {number} opts.speedWeight  Gewicht fuer unbenannte Strecken (0 … 5)
+ * @param {number} opts.speedWeight  Gewicht für unbenannte Strecken (0 … 5)
  * @param {Object} opts.weights     {price,duration,changes} (Normal)
  */
 export function rank(journeys, opts) {
@@ -94,11 +94,11 @@ export function rank(journeys, opts) {
     };
   });
 
-  // Eine ausdrueckliche Sortierung schlaegt beide Bewertungsmodelle: wer
-  // "nach Preis" waehlt, will eine Preisliste sehen und keine Empfehlung
+  // Eine ausdrückliche Sortierung schlägt beide Bewertungsmodelle: wer
+  // "nach Preis" wählt, will eine Preisliste sehen und keine Empfehlung
   // und auch keine Gruppierung nach Streckenvarianten. Deshalb steht das
   // hier vor dem Nerd-Zweig - und `group` wird nicht gesetzt, damit die
-  // Liste ohne Variantenueberschriften durchlaeuft.
+  // Liste ohne Variantenüberschriften durchläuft.
   if (sort === 'price' || sort === 'departure') {
     return sortExplicitly(enriched, sort);
   }
@@ -136,12 +136,12 @@ export function rank(journeys, opts) {
 /**
  * Sortierung nach einem einzelnen, benannten Kriterium.
  *
- * `price`     - guenstigste zuerst. Verbindungen ohne Preis wandern ans Ende
+ * `price`     - günstigste zuerst. Verbindungen ohne Preis wandern ans Ende
  *               statt an den Anfang: eine fehlende Angabe ist kein Nullpreis.
  * `departure` - chronologisch. Die Suche liefert die Verbindungen ab der
- *               gewaehlten Zeit, nach unten wird es also spaeter.
+ *               gewählten Zeit, nach unten wird es also später.
  *
- * `score` bleibt die Position in der Liste, damit sich das Feld verhaelt wie
+ * `score` bleibt die Position in der Liste, damit sich das Feld verhält wie
  * in den anderen Modellen: kleiner ist weiter oben.
  */
 function sortExplicitly(enriched, sort) {
@@ -149,7 +149,7 @@ function sortExplicitly(enriched, sort) {
 
   const cmp = sort === 'price'
     ? (a, b) => {
-        // null ist kein Preis, sondern eine Luecke - ans Ende damit.
+        // null ist kein Preis, sondern eine Lücke - ans Ende damit.
         if (a.price == null && b.price == null) return byDeparture(a, b);
         if (a.price == null) return 1;
         if (b.price == null) return -1;
@@ -165,28 +165,28 @@ function sortExplicitly(enriched, sort) {
 /**
  * Nerd-Sortierung: nach Routenvariante gruppieren.
  *
- * Innerhalb einer Gruppe zaehlen zuerst die Umstiege und erst danach die
- * Reisezeit - so bleibt die Zeit unabhaengig und wird nicht gegen Komfort
+ * Innerhalb einer Gruppe zählen zuerst die Umstiege und erst danach die
+ * Reisezeit - so bleibt die Zeit unabhängig und wird nicht gegen Komfort
  * oder Umstiege verrechnet. Die Gruppen selbst ordnet die Streckenbewertung.
  */
 function rankByRoute(enriched, routePrefs, speedWeight = 0) {
   for (const e of enriched) {
     const named = routesOf(e.journey);
     // Was die Korridorliste nicht abdeckt, wird aus dem gemessenen Tempo
-    // ergaenzt - sonst faellt die Bewertung ausserhalb von CH/DE/AT einfach aus.
+    // ergänzt - sonst fällt die Bewertung außerhalb von CH/DE/AT einfach aus.
     const auto = autoRoutesOf(e.journey, named);
     e.routes = [...named, ...auto];
 
     // Anteilig gewichtet: eine bevorzugte Strecke, auf der die halbe Fahrt
-    // stattfindet, zaehlt doppelt so viel wie eine, die nur kurz beruehrt wird.
+    // stattfindet, zählt doppelt so viel wie eine, die nur kurz berührt wird.
     e.routeScore = named.reduce(
       (sum, hit) => sum + (routePrefs[hit.route.id] || 0) * hit.share,
       0
     );
 
-    // Unbenannte Strecken haben keinen eigenen Regler. Sie zaehlen ueber
+    // Unbenannte Strecken haben keinen eigenen Regler. Sie zählen über
     // das gemessene Tempo, skaliert mit einem einzigen Gewicht - so bleibt
-    // die Schaetzung als das erkennbar, was sie ist.
+    // die Schätzung als das erkennbar, was sie ist.
     if (speedWeight > 0) {
       e.routeScore += auto.reduce(
         (sum, hit) => sum + speedScore(hit.route.speed) * hit.share * (speedWeight / 5),
@@ -207,7 +207,7 @@ function rankByRoute(enriched, routePrefs, speedWeight = 0) {
   }
 
   for (const g of groups.values()) {
-    // Wenigste Umstiege zuerst, dann die kuerzere Fahrt, dann der
+    // Wenigste Umstiege zuerst, dann die kürzere Fahrt, dann der
     // angenehmere Zug. Preis spielt hier bewusst keine Rolle mehr.
     g.entries.sort((a, b) =>
       a.changes - b.changes ||
@@ -240,7 +240,7 @@ function rankByRoute(enriched, routePrefs, speedWeight = 0) {
         index: gi,
         size: g.entries.length,
         first: i === 0,
-        // Wie viel laenger als die schnellste Option DIESER Variante.
+        // Wie viel länger als die schnellste Option DIESER Variante.
         slowerThanBest: e.durationMin - g.durationMin,
       };
       out.push(e);
@@ -256,10 +256,10 @@ function rankByRoute(enriched, routePrefs, speedWeight = 0) {
  * Erste Wahl sind die erkannten Strecken - "über den Gotthard-Basistunnel"
  * ist die Auskunft, die jemanden interessiert. Greift keine, behelfen wir
  * uns mit dem Halt in der Mitte der Reise: der unterscheidet zwei Wege
- * zuverlaessig genug, ohne dass jede Kleinigkeit eine eigene Gruppe aufmacht.
+ * zuverlässig genug, ohne dass jede Kleinigkeit eine eigene Gruppe aufmacht.
  */
 function variantOf(entry) {
-  // Kurz angeschnittene Strecken sagen nichts ueber den Weg aus. Gepflegte
+  // Kurz angeschnittene Strecken sagen nichts über den Weg aus. Gepflegte
   // Korridore haben Vorrang: "über den Gotthard-Basistunnel" ist eine
   // bessere Auskunft als "über Arth-Goldau – Bellinzona".
   const relevant = entry.routes.filter((h) => h.share >= 0.1);
@@ -268,7 +268,7 @@ function variantOf(entry) {
 
   if (named.length > 0) {
     // Die Kennung braucht alle Strecken, damit zwei Wege nicht in derselben
-    // Gruppe landen. Die Beschriftung nimmt nur die beiden praegendsten -
+    // Gruppe landen. Die Beschriftung nimmt nur die beiden prägendsten -
     // routesOf() liefert nach Fahrzeitanteil sortiert.
     const id = [...named].map((r) => r.id).sort().join('+');
     const shown = named.slice(0, 2).map((r) => r.label);
@@ -343,14 +343,14 @@ export function spliceJourney(journey, cutIndex, option) {
     transferRisk: firstNew?.transferRisk ?? journey.transferRisk,
     minTransferLive: null,
     rerouted: true,
-    // Der Weg zurueck. Immer die URSPRUENGLICHE Verbindung, nicht die
-    // vorherige Zwischenstufe: sonst entstuende beim mehrfachen Umdisponieren
+    // Der Weg zurück. Immer die URSPRUENGLICHE Verbindung, nicht die
+    // vorherige Zwischenstufe: sonst entstünde beim mehrfachen Umdisponieren
     // eine Kette, die sich in den localStorage fortpflanzt.
     original: journey.original || journey,
   };
 }
 
-/** Kennzeichnet die jeweils beste Verbindung je Kategorie fuer die Badges. */
+/** Kennzeichnet die jeweils beste Verbindung je Kategorie für die Badges. */
 export function highlights(ranked) {
   if (!ranked || ranked.length === 0) return {};
 

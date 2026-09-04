@@ -1,12 +1,12 @@
 <?php
 /**
- * Duenner cURL-Wrapper.
+ * Dünner cURL-Wrapper.
  *
- * Gibt bewusst NIE eine Exception zurueck, sondern immer ein Array mit
+ * Gibt bewusst NIE eine Exception zurück, sondern immer ein Array mit
  * status/body/error. So kann jeder Provider selbst entscheiden, ob ein
  * Fehlschlag fatal ist oder ob degradiert weitergearbeitet wird.
  *
- * Nicht final: fuer Tests darf eine Ableitung getJson/postJson ueberschreiben
+ * Nicht final: für Tests darf eine Ableitung getJson/postJson überschreiben
  * und ohne echtes Netzwerk arbeiten. Zur Laufzeit gibt es dennoch nur diese
  * eine Ausprägung.
  */
@@ -17,7 +17,7 @@ class Http
      *
      * HINTERGRUND: Die DB setzt Akamai Bot Manager ein, der den TLS-ClientHello
      * auswertet (JA3-Fingerprint). Mit der Standard-Cipher-Reihenfolge von
-     * cURL/OpenSSL antwortet bahn.de mit 403 "OPS_BLOCKED" - unabhaengig von
+     * cURL/OpenSSL antwortet bahn.de mit 403 "OPS_BLOCKED" - unabhängig von
      * IP, User-Agent und allen anderen Headern. Setzt man diese Reihenfolge,
      * geht dieselbe Anfrage durch.
      *
@@ -28,15 +28,15 @@ class Http
         . 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:'
         . 'ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305';
 
-    /** TLS 1.3 wird in cURL ueber eine eigene Option gesetzt. */
+    /** TLS 1.3 wird in cURL über eine eigene Option gesetzt. */
     private const TLS13_CIPHERS = 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256';
 
     private int $timeout;
     private bool $browserTls;
 
     /**
-     * @param bool $browserTls Browser-Cipher-Reihenfolge verwenden. Fuer die
-     *                         DB zwingend, fuer andere Hosts unschaedlich.
+     * @param bool $browserTls Browser-Cipher-Reihenfolge verwenden. Für die
+     *                         DB zwingend, für andere Hosts unschädlich.
      */
     public function __construct(int $timeout = 25, bool $browserTls = false)
     {
@@ -57,7 +57,7 @@ class Http
     public function request(string $method, string $url, array $headers = [], ?string $body = null): array
     {
         if (!function_exists('curl_init')) {
-            return $this->fail('cURL ist auf diesem Server nicht verfuegbar.');
+            return $this->fail('cURL ist auf diesem Server nicht verfügbar.');
         }
 
         $ch = curl_init();
@@ -81,7 +81,7 @@ class Http
         ]);
 
         if ($this->browserTls) {
-            // TLS-1.2-Suiten: von OpenSSL/cURL ueberall unterstuetzt.
+            // TLS-1.2-Suiten: von OpenSSL/cURL überall unterstützt.
             curl_setopt($ch, CURLOPT_SSL_CIPHER_LIST, self::TLS12_CIPHERS);
             // TLS 1.3 braucht cURL >= 7.61 mit OpenSSL >= 1.1.1. Fehlt die
             // Konstante, bleibt es bei der Standardreihenfolge - dann greift
@@ -98,7 +98,11 @@ class Http
         $raw    = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $err    = curl_error($ch);
-        curl_close($ch);
+        // Kein curl_close(): seit PHP 8.0 wirkungslos, seit 8.5 gibt es dafür
+        // eine Deprecation-Warnung. Die landete mitten in der JSON-Antwort und
+        // machte damit JEDEN API-Aufruf auf PHP 8.5 unbrauchbar. Das Handle
+        // räumt der Garbage Collector auf.
+        unset($ch);
 
         if ($raw === false) {
             return $this->fail($err !== '' ? $err : 'Unbekannter Netzwerkfehler', $status);

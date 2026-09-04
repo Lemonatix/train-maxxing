@@ -1,36 +1,36 @@
 <?php
 /**
- * Grosse Baustellen in Deutschland (DB InfraGO, strecken.info).
+ * Große Baustellen in Deutschland (DB InfraGO, strecken.info).
  *
- * WOZU: Die OeBB-Quelle in OebbHafas::works() ist oesterreichlastig -
- * nachgemessen ueber 500 Meldungen: 452 mit oesterreichischem, 17 mit
+ * WOZU: Die ÖBB-Quelle in OebbHafas::works() ist österreichlastig -
+ * nachgemessen über 500 Meldungen: 452 mit österreichischem, 17 mit
  * deutschem Anfangsbahnhof, und nach Kategorie- und Dauerfilter bleibt aus
- * Deutschland praktisch nichts uebrig. Fuer eine Uebersicht "wo wird im Netz
- * gerade gross gebaut" ist das die falsche Haelfte des Bildes.
+ * Deutschland praktisch nichts übrig. Für eine Übersicht "wo wird im Netz
+ * gerade groß gebaut" ist das die falsche Hälfte des Bildes.
  *
  * DIESE QUELLE ist das Verzeichnis der DB InfraGO, das hinter strecken.info
- * (seit dem Umzug: strecken-info.de) steckt. Sie liefert fuer ganz
+ * (seit dem Umzug: strecken-info.de) steckt. Sie liefert für ganz
  * Deutschland: betroffener Abschnitt mit Namen und Koordinaten, Zeitraum,
- * Art der Arbeiten, Streckennummer und Schwere der Einschraenkung.
+ * Art der Arbeiten, Streckennummer und Schwere der Einschränkung.
  *
  * WAS DAVON GEZEIGT WIRD: nur TOTALSPERRUNGEN, und davon nur die, die
  * mindestens eine Woche dauern. Alles andere ist Betriebsalltag - allein an
- * naechtlichen Sperrpausen liefert die Quelle ueber viertausend Eintraege in
- * dreissig Tagen.
+ * nächtlichen Sperrpausen liefert die Quelle über viertausend Einträge in
+ * dreißig Tagen.
  *
  * ZWEI EIGENHEITEN, die beim Anbinden Arbeit gemacht haben:
  *
  *   REVISION. Jede Anfrage muss den Stand nennen, auf den sie sich bezieht.
- *   Die Weboberflaeche bekommt ihn beim Start mitgeliefert; einen Endpunkt,
- *   der ihn allein zurueckgibt, gibt es nicht. Die Zahl waechst monoton, und
- *   der Server nimmt ein Fenster von einigen hundert Staenden an. Deshalb
- *   wird der zuletzt gueltige Stand gemerkt und bei Bedarf gesucht - siehe
+ *   Die Weboberfläche bekommt ihn beim Start mitgeliefert; einen Endpunkt,
+ *   der ihn allein zurückgibt, gibt es nicht. Die Zahl wächst monoton, und
+ *   der Server nimmt ein Fenster von einigen hundert Ständen an. Deshalb
+ *   wird der zuletzt gültige Stand gemerkt und bei Bedarf gesucht - siehe
  *   findRevision().
  *
  *   KOORDINATEN in EPSG:3857 (Web-Mercator-Metern), nicht in Grad.
  *
  * FAIRER UMGANG: Die Antwort umfasst je nach Zeitraum mehrere Megabyte.
- * Deshalb wird stuendlich gecacht (wie die uebrigen Baustellendaten), der
+ * Deshalb wird stündlich gecacht (wie die übrigen Baustellendaten), der
  * Zeitraum eng gehalten und beim Suchen des Standes mit einer minimalen
  * Abfrage gearbeitet.
  */
@@ -50,7 +50,7 @@ final class StreckenInfo
      */
     private const REVISION_SEED = 3520724;
 
-    /** Ab wie vielen Tagen eine Sperrung als grosse Baustelle gilt. */
+    /** Ab wie vielen Tagen eine Sperrung als große Baustelle gilt. */
     private const MIN_DAYS = 7;
 
     /** Ergebnis einer Revisionsprobe - siehe probeRevision(). */
@@ -59,7 +59,7 @@ final class StreckenInfo
     private const REV_TOO_NEW = 2;
     private const REV_ERROR   = 3;
 
-    /** Mehr Eintraege braucht keine Uebersicht - und die Antwort bleibt klein. */
+    /** Mehr Einträge braucht keine Übersicht - und die Antwort bleibt klein. */
     private const MAX_WORKS = 60;
 
     private Http $http;
@@ -74,10 +74,10 @@ final class StreckenInfo
     }
 
     /**
-     * Grosse Baustellen in Deutschland.
+     * Große Baustellen in Deutschland.
      *
-     * Gibt dieselbe Struktur zurueck wie OebbHafas::works(), damit beide
-     * Quellen in einer Liste stehen koennen.
+     * Gibt dieselbe Struktur zurück wie OebbHafas::works(), damit beide
+     * Quellen in einer Liste stehen können.
      *
      * @return array{ok:bool,error:?string,data:array}
      */
@@ -85,7 +85,7 @@ final class StreckenInfo
     {
         $rev = $this->findRevision();
         if ($rev === null) {
-            return ['ok' => false, 'error' => 'strecken.info: kein gueltiger Stand ermittelbar', 'data' => []];
+            return ['ok' => false, 'error' => 'strecken.info: kein gültiger Stand ermittelbar', 'data' => []];
         }
 
         $res = $this->request($rev, self::REGIONEN, max(1, $days) * 24, true);
@@ -97,12 +97,12 @@ final class StreckenInfo
     }
 
     /**
-     * Rohdaten zu Baustellen im Format der uebrigen Quellen.
+     * Rohdaten zu Baustellen im Format der übrigen Quellen.
      *
-     * ZUSAMMENFASSEN: Ein Bauvorhaben zerfaellt in der Quelle in viele
-     * Einzeleintraege - je Richtung, je Abschnitt, je Zeitfenster. Sie
-     * teilen sich den Praefix der `baustellenID` vor dem Punkt: aus 66
-     * Eintraegen "1E79F.x" wird ein Vorhaben. Ohne diese Buendelung stuende
+     * ZUSAMMENFASSEN: Ein Bauvorhaben zerfällt in der Quelle in viele
+     * Einzeleinträge - je Richtung, je Abschnitt, je Zeitfenster. Sie
+     * teilen sich den Präfix der `baustellenID` vor dem Punkt: aus 66
+     * Einträgen "1E79F.x" wird ein Vorhaben. Ohne diese Bündelung stünde
      * dieselbe Baustelle zwanzigmal in der Liste.
      *
      * @param array<int,array> $roh
@@ -134,9 +134,9 @@ final class StreckenInfo
             }
 
             // Innerhalb eines Vorhabens gewinnt der Eintrag mit dem LAENGSTEN
-            // Abschnitt: er beschreibt, was tatsaechlich gesperrt ist. Der
-            // laengste Zeitraum wird getrennt davon ueber alle Eintraege
-            // gebildet - die Teilsperrungen loesen einander ab.
+            // Abschnitt: er beschreibt, was tatsächlich gesperrt ist. Der
+            // längste Zeitraum wird getrennt davon über alle Einträge
+            // gebildet - die Teilsperrungen lösen einander ab.
             $laenge = self::metres($a, $z);
             $vorhanden = $projekte[$id] ?? null;
 
@@ -180,7 +180,7 @@ final class StreckenInfo
             }
         }
 
-        // Die laengsten zuerst, dann kappen.
+        // Die längsten zuerst, dann kappen.
         usort($projekte, static function (array $x, array $y): int {
             $dx = strtotime($x['end']) - strtotime($x['start']);
             $dy = strtotime($y['end']) - strtotime($y['start']);
@@ -194,7 +194,15 @@ final class StreckenInfo
         return $projekte;
     }
 
-    /** Ein Satz, der sagt, was dort passiert. */
+    /**
+     * Ein Satz, der sagt, was dort passiert.
+     *
+     * Die Art der Arbeiten behält ihre Schreibweise: "Totalsperrung -
+     * Brückenarbeiten" sind zwei Substantive, und im Deutschen werden die
+     * großgeschrieben. Früher stand hier ein lcfirst() - das stammt aus der
+     * Zeit, als der Satz nur im Tooltip hing; im aufgeklappten Kasten der
+     * Baustellenliste liest er sich als Satz, und dort fiel es auf.
+     */
     private static function beschreibung(array $b): string
     {
         $art = trim((string) ($b['arbeiten'] ?? ''));
@@ -202,7 +210,7 @@ final class StreckenInfo
 
         $teile = ['Totalsperrung'];
         if ($art !== '') {
-            $teile[] = mb_strtolower($art[0]) === $art[0] ? $art : lcfirst($art);
+            $teile[] = $art;
         }
         $satz = implode(' — ', $teile);
         return $nr === '' ? $satz . '.' : $satz . ' (Strecke ' . $nr . ').';
@@ -247,20 +255,20 @@ final class StreckenInfo
     /**
      * Den aktuellen Datenstand ermitteln.
      *
-     * Die Weboberflaeche bekommt ihn beim Start mitgeliefert; ein Endpunkt,
-     * der ihn allein liefert, existiert nicht. Der Server verraet aber bei
+     * Die Weboberfläche bekommt ihn beim Start mitgeliefert; ein Endpunkt,
+     * der ihn allein liefert, existiert nicht. Der Server verrät aber bei
      * jeder Anfrage, in WELCHE RICHTUNG man suchen muss:
      *
-     *   "Angefragte Revision 3520724 zu alt"        -> hoeher
+     *   "Angefragte Revision 3520724 zu alt"        -> höher
      *   "Revision 3530000 existiert noch nicht"     -> tiefer
      *
      * Genau diese Unterscheidung fehlte anfangs, und deshalb fand die Suche
      * gar nichts: jeder Fehlschlag galt als "zu neu", also lief sie sofort
-     * nach unten - waehrend der gemerkte Stand in Wirklichkeit veraltet war
-     * und es nach oben gegangen waere. Die deutschen Baustellen blieben
+     * nach unten - während der gemerkte Stand in Wirklichkeit veraltet war
+     * und es nach oben gegangen wäre. Die deutschen Baustellen blieben
      * dadurch stumm aus, sobald der hinterlegte Ausgangswert alt genug war.
      *
-     * Der zuletzt gueltige Stand wird gemerkt; im Normalfall bleibt es bei
+     * Der zuletzt gültige Stand wird gemerkt; im Normalfall bleibt es bei
      * einer einzigen kleinen Abfrage.
      */
     private function findRevision(): ?int
@@ -277,7 +285,7 @@ final class StreckenInfo
             return null;   // Dienst antwortet nicht - nicht weitersuchen
         }
 
-        // Ein Fenster finden, in dem der gueltige Stand liegen muss.
+        // Ein Fenster finden, in dem der gültige Stand liegen muss.
         $unten = $start;
         $oben  = null;
 
@@ -302,7 +310,7 @@ final class StreckenInfo
             }
         } else {
             // Der gemerkte Stand liegt in der Zukunft - kommt vor, wenn die
-            // Gegenseite ihre Zaehlung zuruecksetzt.
+            // Gegenseite ihre Zählung zurücksetzt.
             $oben  = $start;
             $unten = max(1, $start - 4194304);
         }
@@ -312,7 +320,7 @@ final class StreckenInfo
         }
 
         // Halbieren, bis eine Probe im Fenster landet. Das Fenster ist ein
-        // paar hundert Staende breit, deshalb geht das schnell.
+        // paar hundert Stände breit, deshalb geht das schnell.
         for ($i = 0; $i < 24 && $oben - $unten > 1; $i++) {
             $mitte = intdiv($unten + $oben, 2);
             $q = $this->probeRevision($mitte);
@@ -335,7 +343,7 @@ final class StreckenInfo
     /**
      * Nimmt der Server diesen Stand an - und wenn nicht, warum?
      *
-     * Kleinstmoegliche Anfrage: eine Region, eine Stunde, nur
+     * Kleinstmögliche Anfrage: eine Region, eine Stunde, nur
      * Totalsperrungen. Die Antwort ist damit ein paar Kilobyte statt
      * mehrerer Megabyte.
      */

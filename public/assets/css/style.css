@@ -431,7 +431,7 @@ input[type="number"], select {
 
 /* Das aufgeklappte Menü eines <select> wird vom System gezeichnet. Es erbt
    die Textfarbe vom Element, seinen Hintergrund malt es aber selbst — im
-   dunklen Theme steht damit fast weisser Text auf einem hellen Menü und ist
+   dunklen Theme steht damit fast weißer Text auf einem hellen Menü und ist
    nicht lesbar. Beide Werte deshalb ausdrücklich setzen.
    color-scheme sorgt zusätzlich dafür, dass Scrollbalken und Rahmen des
    Menüs zum Theme passen. */
@@ -444,7 +444,7 @@ select optgroup {
 }
 
 /* Auch die markierte Zeile muss deckend bleiben: eine transparente Tönung
-   liesse den Grund des Systemmenüs wieder durchscheinen — genau der Fehler,
+   ließe den Grund des Systemmenüs wieder durchscheinen — genau der Fehler,
    den die Regeln darüber beheben. */
 select option:checked {
   background-color: var(--field-bg-hover);
@@ -655,7 +655,7 @@ body[data-mode="nerd"] .nerd-only { display: block; }
 /*
  * Schieberegler komplett selbst gezeichnet.
  *
- * Mit blossem `accent-color` zeichnet jedes Betriebssystem seinen eigenen
+ * Mit bloßem `accent-color` zeichnet jedes Betriebssystem seinen eigenen
  * Regler — unter Windows einen flachen grauen Balken mit rechteckigem
  * Griff, der neben den runden Feldern und Knöpfen hier wie aus einem
  * anderen Programm aussieht. Ab hier gilt überall dasselbe: dünne
@@ -1091,8 +1091,8 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   background: var(--bg-deep);
   cursor: grab;
   touch-action: none;          /* eigene Gestensteuerung */
-  /* Nur Layout und Paint eindaemmen - "strict" wuerde auch die Groesse
-     eindaemmen und das Nachladen der Kacheln verhindern. */
+  /* Nur Layout und Paint eindämmen - "strict" würde auch die Größe
+     eindämmen und das Nachladen der Kacheln verhindern. */
   contain: layout paint;
 }
 
@@ -1101,18 +1101,18 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .map__tiles { position: absolute; inset: 0; }
 .map__tiles.is-off { display: none; }
 
-/* --- Die Karte ist schwarzweiss ------------------------------------
+/* --- Die Karte ist schwarzweiß ------------------------------------
    Der Hintergrund ist Hintergrund. Farbe gehört den Routen, den Zügen und
-   den Baustellen darüber; eine Karte mit grünen Wäldern, gelben Strassen
+   den Baustellen darüber; eine Karte mit grünen Wäldern, gelben Straßen
    und blauen Flüssen nimmt ihnen die Aufmerksamkeit und macht das Bild
    unruhig. Entsättigt bleibt die Orientierung erhalten — Siedlung, Wasser
    und Wald unterscheiden sich weiter in der Helligkeit — und die farbigen
    Linien stechen wieder heraus.
 
    Die Werte sind an der alten Kachelquelle geeicht, die vorher hier stand.
-   Nachgemessen an derselben Kachel (Zuerich, Zoomstufe 13) liegt CARTO
+   Nachgemessen an derselben Kachel (Zürich, Zoomstufe 13) liegt CARTO
    „positron" bei einer mittleren Helligkeit von 0,92 und „dark matter" bei
-   0,05. Ein erster Versuch mit blossem Entsaettigen landete im dunklen
+   0,05. Ein erster Versuch mit bloßem Entsättigen landete im dunklen
    Layout bei 0,22 — ein flaues Mittelgrau statt einer dunklen Karte, und
    genau das sah schlechter aus als vorher. Mit diesen Werten: 0,91 hell,
    0,051 dunkel.
@@ -1200,7 +1200,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   stroke-width: 18;
   cursor: pointer;
   /* Ohne "stroke" greift der Standardwert visiblePainted - der ignoriert
-     durchsichtige Striche, und die unsichtbare Klickflaeche faengt nichts. */
+     durchsichtige Striche, und die unsichtbare Klickfläche fängt nichts. */
   pointer-events: stroke;
 }
 
@@ -1229,9 +1229,9 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   pointer-events: none;
 }
 
-/* Die aktive Route wird zuletzt gezeichnet und liegt damit obenauf. Wuerde
-   sie auch Klicks fangen, liesse sich auf gemeinsamen Abschnitten keine
-   andere Route mehr auswaehlen - sie ist bereits gewaehlt, also durchlassen. */
+/* Die aktive Route wird zuletzt gezeichnet und liegt damit obenauf. Würde
+   sie auch Klicks fangen, ließe sich auf gemeinsamen Abschnitten keine
+   andere Route mehr auswählen - sie ist bereits gewählt, also durchlassen. */
 .map__route.is-active .map__hit { pointer-events: none; }
 
 .map__route:hover .map__line { stroke: var(--text); opacity: 0.8; }
@@ -1734,7 +1734,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .live__progress--wait { background: var(--surface-inset); color: var(--text-muted); }
 .live__progress-rest { color: var(--text-dim); }
 
-/* --- Gefaehrdeter Anschluss ----------------------------------------- */
+/* --- Gefährdeter Anschluss ----------------------------------------- */
 
 .live__risk {
   margin-top: 0.6rem;
@@ -1761,7 +1761,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .live__options { display: flex; flex-direction: column; gap: 0.35rem; }
 
-/* Jede Alternative ist ein Vorschlag zum Antippen, kein Fliesstext. */
+/* Jede Alternative ist ein Vorschlag zum Antippen, kein Fließtext. */
 .live__option {
   display: flex;
   flex-wrap: wrap;
@@ -1834,7 +1834,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   border-radius: var(--radius-xs);
   font-size: 0.76rem;
   color: var(--text-dim);
-  /* Die Meldungen sind meist dreiteilig ("Was ist los", "Grund", "Was heisst
+  /* Die Meldungen sind meist dreiteilig ("Was ist los", "Grund", "Was heißt
      das"). Text.php erhält die Absätze als Umbrüche — ohne pre-line würden
      sie hier wieder zu einem Klumpen zusammenfallen. */
   white-space: pre-line;
@@ -1931,7 +1931,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .group-head__count { font-size: 0.75rem; color: var(--text-muted); }
 
-/* Befahrene Strecken am Fuss der Detailansicht. */
+/* Befahrene Strecken am Fuß der Detailansicht. */
 .route-hits {
   display: flex;
   flex-wrap: wrap;
@@ -2119,7 +2119,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .badge--variant { background: var(--surface-inset); color: var(--text-dim); }
 .badge--rerouted { background: var(--amber-soft); color: var(--amber); }
 
-/* Die Kennzeichnung ist zugleich der Weg zurueck. */
+/* Die Kennzeichnung ist zugleich der Weg zurück. */
 .badge--undo {
   display: inline-flex;
   align-items: baseline;
@@ -2227,7 +2227,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 /* --- Echtzeit in der Trefferliste ------------------------------------ */
 
 /* Weicht die Ist-Zeit ab, steht der Fahrplanwert durchgestrichen daneben.
-   Beides zu zeigen ist wichtiger als Platz zu sparen: sonst weiss man nicht,
+   Beides zu zeigen ist wichtiger als Platz zu sparen: sonst weiß man nicht,
    ob man die alte oder die neue Zeit vor sich hat. */
 .journey__time--planned,
 .leg__time--planned {
@@ -2254,7 +2254,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .leg__transfer--risky { background: var(--rose-soft); color: var(--rose); }
 .leg__transfer--tight { background: var(--amber-soft); color: var(--amber); }
 
-/* Rueckfallebene: sitzt direkt unter der Umstiegswarnung und ist bewusst
+/* Rückfallebene: sitzt direkt unter der Umstiegswarnung und ist bewusst
    ruhiger gehalten - eine Information, keine zweite Warnung. */
 .leg__fallback {
   display: flex;
@@ -2374,7 +2374,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   .xfer__map .map__viewport { height: 230px; }
 }
 
-/* --- Bahnsteige und Laufweg auf der Karte ---------------------------- */
+/* --- Bahnsteige auf der Karte ----------------------------------------- */
 
 .map__platform {
   fill: none;
@@ -2408,21 +2408,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .map__platform.is-other-level,
 .map__platform-tag.is-other-level { opacity: 0.16; }
 
-.map__walk {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  paint-order: stroke;
-}
-
-.map__walk.is-other-level {
-  stroke-width: 3;
-  opacity: 0.22;
-  stroke-dasharray: 5 5;
-}
-
+/* Ankunfts- und Abfahrtspunkt auf der Bahnsteigmitte. */
 .map__walk-end {
   fill: var(--surface-card);
   stroke-width: 3;
@@ -2430,17 +2416,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .map__walk-end.is-start { stroke: var(--accent); }
 .map__walk-end.is-end { stroke: var(--green); fill: var(--green); }
-
-/* Treppe oder Aufzug, dort wo er liegt. */
-.map__walk-mark {
-  font-size: 15px;
-  font-weight: 700;
-  fill: var(--text);
-  paint-order: stroke;
-  stroke: var(--map-casing);
-  stroke-width: 4px;
-  stroke-linejoin: round;
-}
 
 /* --- Ebenenumschalter ------------------------------------------------
    Unten links, gegenüber den Zoomknöpfen — wie in den Apps der Bahnen, wo
@@ -2715,7 +2690,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   color: var(--text-muted);
 }
 
-/* --- MVG-Stoerungsticker (nur Muenchen, per JS eingeblendet) ------- */
+/* --- MVG-Störungsticker (nur München, per JS eingeblendet) ------- */
 
 .mvg-ticker-mount {
   margin-top: 1.5rem;
@@ -2809,9 +2784,61 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
    Spaltenbreite die INHALTSBREITE, und ein 300 Zeichen langer Meldungstext
    zog die Zeile weit über den Rand der Seite hinaus. Mit ihr bleibt das
    Raster in seinen Grenzen und der Text bricht um. */
+/* Die Baustellenzeile ist ein aufklappbarer Kasten. Das Raster sitzt
+   deshalb an der Kopfzeile, nicht mehr am Listenelement. */
 .works__list .mvg-ticker__item {
+  display: block;
+  padding: 0;
+}
+
+.works__summary {
+  display: grid;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  gap: 0.5rem;
   align-items: baseline;
+  padding: 0.45rem 0 0.45rem 1rem;
+  cursor: pointer;
+  list-style: none;
+  position: relative;
+}
+
+.works__summary::-webkit-details-marker { display: none; }
+
+/* Dasselbe Dreieck wie an den Ländergruppen — hier eine Ebene tiefer. */
+.works__summary::before {
+  content: '▸';
+  position: absolute;
+  left: 0;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  transition: transform 0.15s;
+}
+
+.works__detail[open] > .works__summary::before { transform: rotate(90deg); }
+
+.works__summary:hover { color: var(--accent); }
+
+.works__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0 0 0.6rem 1rem;
+}
+
+.works__text {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.works__meta {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
 }
 
 /* --- Baustellen nach Land ------------------------------------------- */
@@ -2868,8 +2895,8 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .works__more:hover { border-color: var(--accent); color: var(--accent); }
 
-/* Der Meldungstext füllt höchstens zwei Zeilen. Was nicht hineinpasst, endet
-   mit "…" — der vollständige Text steht als Tooltip an der Zeile. */
+/* Der Meldungskopf füllt in der Kopfzeile höchstens zwei Zeilen. Was nicht
+   hineinpasst, endet mit "…"; der ganze Text steht im aufgeklappten Kasten. */
 .works__title {
   min-width: 0;
   display: -webkit-box;
@@ -2899,7 +2926,9 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   .works__map .map__viewport { height: 220px; }
 }
 
-/* Der Abschnitt ist anklickbar und springt auf der Karte dorthin. */
+/* Springt auf der Karte zum Abschnitt. Steht im aufgeklappten Kasten - in
+   der Kopfzeile wäre er ein Knopf im Knopf und würde beim Aufklappen
+   mitgetroffen. */
 .works__jump {
   padding: 0.1rem 0.4rem;
   border: 1px solid var(--border);
@@ -2927,13 +2956,12 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   .works__section { white-space: normal; }
 
   /* Auf dem Telefon untereinander statt in drei Spalten: nebeneinander
-     blieben für den Abschnitt keine dreissig Pixel. */
-  .works__list .mvg-ticker__item {
+     blieben für den Abschnitt keine dreißig Pixel. */
+  .works__summary {
     grid-template-columns: minmax(0, 1fr);
     gap: 0.25rem;
   }
 
-  .works__jump { justify-self: start; }
 }
 
 .mvg-ticker__until {
@@ -2959,7 +2987,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 }
 
 /* Wo der tatsächliche Streckenverlauf bekannt ist, wird die Linie
-   durchgezogen: sie zeigt dann die Schiene und nicht mehr bloss, welche
+   durchgezogen: sie zeigt dann die Schiene und nicht mehr bloß, welche
    beiden Betriebsstellen betroffen sind. */
 .map__work-line.is-exact {
   stroke-dasharray: none;
@@ -3019,7 +3047,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
  * Was dabei verloren geht, wird hier einzeln zurückgeholt, denn genau das
  * war der Einwand beim ersten Versuch:
  *
- *   - der Wert sass oben links statt mittig -> `display: flex` mit
+ *   - der Wert saß oben links statt mittig -> `display: flex` mit
  *     `align-items: center` stellt ihn wieder mittig auf die Zeilenhöhe;
  *   - das Kalender- bzw. Uhrsymbol fehlte -> es kommt als eingebettetes
  *     SVG zurück, gezeichnet in der Textfarbe des Feldes;
@@ -3060,7 +3088,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .row--options input[type="date"]::-webkit-datetime-edit,
 .row--options input[type="time"]::-webkit-datetime-edit {
   padding: 0;
-  /* Bei sehr grosser Systemschrift lieber die Jahreszahl anschneiden als
+  /* Bei sehr großer Systemschrift lieber die Jahreszahl anschneiden als
      das Nachbarfeld überdecken. */
   overflow: hidden;
 }
@@ -3102,7 +3130,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 @media (max-width: 640px) {
   .wrap { padding: 1rem 0.75rem 3rem; }
 
-  /* position: relative als Anker fuer den Design-Umschalter, siehe unten. */
+  /* position: relative als Anker für den Design-Umschalter, siehe unten. */
   .page-head { position: relative; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem; }
   .page-head h1 { font-size: 1.35rem; }
   .sub { font-size: 0.85rem; }
@@ -3113,14 +3141,14 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
   .page-head__ctl { width: 100%; }
 
-  /* Der Design-Umschalter gehoert auf dem Telefon nach oben rechts, auf die
-     Hoehe des "Hauptseite"-Knopfes - die beiden bilden dann zusammen die
-     Kopfzeile. Im DOM steht er bei den Modus-Knoepfen, weil er auf dem
-     Desktop dorthin gehoert; hier wird er deshalb aus dem Fluss genommen.
+  /* Der Design-Umschalter gehört auf dem Telefon nach oben rechts, auf die
+     Höhe des "Hauptseite"-Knopfes - die beiden bilden dann zusammen die
+     Kopfzeile. Im DOM steht er bei den Modus-Knöpfen, weil er auf dem
+     Desktop dorthin gehört; hier wird er deshalb aus dem Fluss genommen.
 
      Der Anker ist die obere rechte Ecke der Kopfzeile, also genau die Zeile
-     des Zurueck-Knopfes - keine zusammengerechnete Position. Damit beide
-     buendig stehen, ist der Knopf so hoch wie dessen `min-height`. */
+     des Zurück-Knopfes - keine zusammengerechnete Position. Damit beide
+     bündig stehen, ist der Knopf so hoch wie dessen `min-height`. */
   .theme-toggle {
     --size: 44px;
     position: absolute;
@@ -3128,7 +3156,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
     right: 0;
   }
 
-  /* Ohne den Umschalter im Fluss bekommen die Modus-Knoepfe die volle
+  /* Ohne den Umschalter im Fluss bekommen die Modus-Knöpfe die volle
      Breite der Zeile. */
   .page-head__ctl .modes { flex: 1 1 100%; }
 
@@ -3141,7 +3169,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
   /* Die Optionszeile als festes Zweispalten-Raster statt Flexbox mit
      Inhaltsbreite. Vorher bestimmte der längste Optionstext die Feldbreite;
-     bei grösserer Schrift oder ausgefallener Systemschrift schoben sich
+     bei größerer Schrift oder ausgefallener Systemschrift schoben sich
      Beschriftung und Nachbarfeld dadurch ineinander. Feste Spalten können
      das nicht, egal wie lang der Text wird. */
   /*
@@ -3153,8 +3181,8 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
    * die Uhrzeit kommt mit 127 aus. Zwei gleiche Spalten geben beiden 154 px
    * — das Datum lief über, die Uhrzeit stand halb leer da.
    *
-   * Die Spalten sind ausdrücklich als `minmax(0, …)` geschrieben. Ein blosses
-   * `1.3fr` heisst in Wahrheit `minmax(auto, 1.3fr)`, und dieses `auto` ist
+   * Die Spalten sind ausdrücklich als `minmax(0, …)` geschrieben. Ein bloßes
+   * `1.3fr` heißt in Wahrheit `minmax(auto, 1.3fr)`, und dieses `auto` ist
    * die INHALTSBREITE: ein Systemsteuerelement, das breiter sein will, zieht
    * seine Spalte auf und schiebt das Raster über den Panelrand. Mit der
    * Null als Untergrenze kann das nicht passieren.
@@ -3210,8 +3238,8 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
      Vorher lag er absolut positioniert über dem Feld, mit einer aus
      Beschriftungs- und Feldhöhe zusammengerechneten Position
      (`top: calc(50% + 0.55rem)`). Diese Rechnung stimmt nur bei genau
-     einer Schriftgröße — bei grösserer Systemschrift oder umgebrochenem
-     Label sass der Knopf schief im Feld. Als eigene Rasterspalte, die
+     einer Schriftgröße — bei größerer Systemschrift oder umgebrochenem
+     Label saß der Knopf schief im Feld. Als eigene Rasterspalte, die
      über beide Zeilen geht, ergibt sich die Mitte von selbst und kann
      nicht mehr verrutschen. */
   .row--stations {
@@ -3271,7 +3299,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
      nicht auf die Länge von "Empfehlung" zusammenschrumpfen. 16 px, weil
      Safari sonst beim Antippen in das Feld hineinzoomt - dieselbe Regel wie
      bei den Formularfeldern, die die spezifischere Auswahl hier sonst
-     ueberschreiben wuerde. */
+     überschreiben würde. */
   .results-bar select { width: 100%; min-height: 44px; font-size: 16px; }
   .results-bar__note { flex-basis: 100%; }
 
@@ -3342,7 +3370,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
    Ab hier ist für Datum und Uhrzeit nebeneinander kein Platz mehr: das
    Panel ist innen keine 300 px breit, und schon das Datumsfeld allein
    braucht bei 16 px Schrift rund 165 davon. Es bekommt deshalb eine eigene
-   Zeile — dort kann es nicht überlaufen, egal wie gross die Systemschrift
+   Zeile — dort kann es nicht überlaufen, egal wie groß die Systemschrift
    eingestellt ist. Uhrzeit und Klasse rücken zusammen.
 
    360 px und nicht 380: die verbreiteten Telefongrössen liegen bei 375 und

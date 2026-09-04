@@ -3,19 +3,15 @@
  * Bahnsteige aus OpenStreetMap (Overpass API).
  *
  * WOZU: Bei einem Umstieg von vier Minuten ist die entscheidende Frage nicht
- * "welches Gleis", sondern "wie weit ist es bis dahin". Die Fahrplanquellen
- * nennen nur die Gleisnummer; wo dieses Gleis liegt, wissen sie nicht.
+ * "welches Gleis", sondern "wo liegt es". Die Fahrplanquellen nennen nur die
+ * Gleisnummer; wo dieses Gleis liegt, wissen sie nicht.
  *
- * OSM weiss es: Bahnsteige sind als `railway=platform` erfasst, mit
+ * OSM weiß es: Bahnsteige sind als `railway=platform` erfasst, mit
  * Gleisnummer (`ref` bzw. `local_ref`), Koordinaten und oft auch Ebene
- * (`level`). Daraus laesst sich die Luftlinie zwischen zwei Gleisen und ein
- * massstaeblicher Lageplan bauen.
+ * (`level`). Daraus wird ein maßstäblicher Lageplan.
  *
- * DAZU DIE FUSSWEGE: Grosse Bahnhoefe sind in OSM oft innen kartiert -
- * Muenchen Hbf etwa mit ueber 500 Wegen und Treppen samt Ebenenangabe. Wo das
- * der Fall ist, laesst sich daraus ein Wegenetz bauen und der Umstiegsweg
- * berechnen. Wo es fehlt, bleibt es bei Lage und Luftlinie; die Anzeige sagt
- * dann auch, dass kein Weg bekannt ist.
+ * NICHT MEHR DABEI: die Fußwege. Aus ihnen wurde einmal der genaue Laufweg
+ * gerechnet - siehe stationData(). Sie waren der größte Teil der Antwort.
  *
  * FAIRER UMGANG: Overpass ist ein kostenlos betriebener Gemeinschaftsdienst.
  * Bahnsteige bewegen sich nicht, deshalb wird sehr lange gecacht und der
@@ -26,23 +22,23 @@ final class Overpass
     /**
      * Suchradius um den Bahnhofsmittelpunkt.
      *
-     * Grosse Bahnhoefe messen gut 400 m in der Laenge, gemessen ab der Mitte
+     * Große Bahnhöfe messen gut 400 m in der Länge, gemessen ab der Mitte
      * also gut 200 m. 350 m fasst auch weit vorgelagerte Bahnsteige, holt
-     * aber noch nicht die Tramhaltestelle zwei Strassen weiter mit herein.
+     * aber noch nicht die Tramhaltestelle zwei Straßen weiter mit herein.
      */
     private const RADIUS_M = 350;
 
     /**
-     * Wie viele Nummern hoechstens fehlen duerfen, damit ergaenzt wird.
-     * Darueber ist es keine Erfassungsluecke mehr, sondern ein eigener
+     * Wie viele Nummern höchstens fehlen dürfen, damit ergänzt wird.
+     * Darüber ist es keine Erfassungslücke mehr, sondern ein eigener
      * Bahnhofsteil mit eigener Nummerierung.
      */
     private const MAX_GAP = 3;
 
     /**
      * Abstand zweier benachbarter Gleisnummern, grob. Zwei Gleisachsen mit
-     * einem Bahnsteig dazwischen sind gut zehn Meter auseinander; fuenfzehn
-     * lassen Luft fuer breitere Bahnsteige, ohne einen ganzen Bahnhofsteil
+     * einem Bahnsteig dazwischen sind gut zehn Meter auseinander; fünfzehn
+     * lassen Luft für breitere Bahnsteige, ohne einen ganzen Bahnhofsteil
      * einzufangen.
      */
     private const TRACK_SPACING_M = 15.0;
@@ -61,12 +57,12 @@ final class Overpass
      *
      * Jede bekommt nur einen Teil des Gesamtbudgets: eine tote Instanz soll
      * nicht die ganze Zeit fressen. Vorher wartete eine Anfrage zweimal
-     * fuenfzig Sekunden und gab dann auf - der Umstiegsplan blieb weg,
-     * obwohl eine dritte Instanz sofort geantwortet haette.
+     * fünfzig Sekunden und gab dann auf - der Umstiegsplan blieb weg,
+     * obwohl eine dritte Instanz sofort geantwortet hätte.
      *
-     * Als Erfolg zaehlt nur eine Antwort, die sich als JSON lesen laesst.
-     * Ueberlastete Instanzen schicken eine HTML-Fehlerseite mit Status 200;
-     * ohne diese Pruefung waere das ein Bahnhof ohne Bahnsteige.
+     * Als Erfolg zählt nur eine Antwort, die sich als JSON lesen lässt.
+     * Überlastete Instanzen schicken eine HTML-Fehlerseite mit Status 200;
+     * ohne diese Prüfung wäre das ein Bahnhof ohne Bahnsteige.
      *
      * @return ?array Overpass-Antwort als Array, oder null
      */
@@ -111,7 +107,7 @@ final class Overpass
     {
         $liste = $cfg['endpoints'] ?? null;
         if (!is_array($liste)) {
-            // Aeltere Konfiguration mit einzelnem Endpunkt und Fallback.
+            // Ältere Konfiguration mit einzelnem Endpunkt und Fallback.
             $liste = [$cfg['endpoint'] ?? '', $cfg['fallback'] ?? ''];
         }
         return array_values(array_filter(array_map('strval', $liste)));
@@ -131,46 +127,55 @@ final class Overpass
     }
 
     /**
-     * Bahnsteige UND Fusswege eines Bahnhofs in einer Abfrage.
+     * Die nummerierten Bahnsteige eines Bahnhofs.
      *
-     * Eine Anfrage statt zwei: Overpass ist ein Gemeinschaftsdienst, und
-     * beides wird ohnehin zusammen gebraucht.
+     * Grundlage des Umstiegsplans: er zeigt, wo Ankunfts- und Abfahrtsgleis
+     * liegen. Wie man dazwischen läuft, sagt er bewusst nicht - siehe die
+     * Anmerkung zur Abfrage weiter unten.
      *
-     * @return array{ok:bool,error:?string,data:array{platforms:array,ways:array}}
+     * @return array{ok:bool,error:?string,data:array{platforms:array}}
      */
     public function stationData(float $lat, float $lon): array
     {
         // Drei Erfassungsarten, weil OSM uneinheitlich taggt und jede
-        // einzelne fuer sich ganze Bahnhoefe verschluckt:
+        // einzelne für sich ganze Bahnhöfe verschluckt:
         //
         //   railway=platform / public_transport=platform als NODE oder WAY
-        //       Muenchen Hbf fuehrt seine Bahnsteige so.
+        //       München Hbf führt seine Bahnsteige so.
         //
         //   dieselben Tags als RELATION (multipolygon)
-        //       Frankfurt Hbf, Wuerzburg Hbf, Stuttgart Hbf und Zuerich HB
-        //       kartieren ihre Bahnsteige ausschliesslich so. Ohne diese
-        //       Zeile lieferte Frankfurt null und Zuerich einen einzigen
+        //       Frankfurt Hbf, Würzburg Hbf, Stuttgart Hbf und Zürich HB
+        //       kartieren ihre Bahnsteige ausschließlich so. Ohne diese
+        //       Zeile lieferte Frankfurt null und Zürich einen einzigen
         //       nummerierten Bahnsteig - der Lageplan entfiel deshalb dort
-        //       immer, obwohl die Daten laengst in OSM stehen.
+        //       immer, obwohl die Daten längst in OSM stehen.
         //
         //   public_transport=stop_position mit local_ref
-        //       Die Rueckfallebene fuer Bahnhoefe, deren Bahnsteigflaechen
-        //       gar keine Nummer tragen. Zuerich HB hat 26 solcher Punkte
+        //       Die Rückfallebene für Bahnhöfe, deren Bahnsteigflächen
+        //       gar keine Nummer tragen. Zürich HB hat 26 solcher Punkte
         //       (Gleis 3-18, 31-34, 41-44). ACHTUNG: bei diesen Knoten steht
-        //       in `ref` die Nummer des BAHNHOFS (Zuerich: 13030), die
+        //       in `ref` die Nummer des BAHNHOFS (Zürich: 13030), die
         //       Gleisnummer nur in `local_ref` - siehe unten.
         //
         // Kein train=yes als Bedingung: OSM taggt es bei Bahnsteigen oft gar
-        // nicht (Wuerzburg Hbf lieferte damit null statt vierzehn). Tram-,
+        // nicht (Würzburg Hbf lieferte damit null statt vierzehn). Tram-,
         // Bus- und U-Bahnsteige fliegen weiter unten raus, anhand der Tags,
-        // die sie tatsaechlich tragen.
+        // die sie tatsächlich tragen.
         //
-        // out geom statt out center: fuer den Wegeplan brauchen wir den
-        // Verlauf der Bahnsteige und Fusswege, nicht nur ihre Mittelpunkte.
+        // KEINE FUSSWEGE MEHR: früher holte diese Abfrage zusätzlich alle
+        // Wege mit highway=footway|steps|corridor|pedestrian|elevator, um
+        // daraus den genauen Laufweg zwischen zwei Bahnsteigen zu berechnen.
+        // Das ist entfallen - der Plan zeigt jetzt nur noch, WO die beiden
+        // Bahnsteige liegen (siehe handlePlatforms()). Die Fußwege waren der
+        // größte Teil der Antwort; ohne sie ist die Abfrage deutlich
+        // kleiner, und der Gemeinschaftsdienst Overpass dankt es.
+        //
+        // out geom statt out center: für den Plan brauchen wir den Umriss
+        // der Bahnsteige, nicht nur ihre Mittelpunkte.
         // Und `out geom` statt `out geom tags`, weil Overpass im Tag-Modus
         // bei Relationen NUR die Bounding-Box liefert, nicht die Mitglieder -
-        // die Bahnsteigflaechen kaemen dann ohne Umriss an. Der Aufschlag
-        // liegt bei etwa 15 % Antwortgroesse (Muenchen Hbf: 357 statt
+        // die Bahnsteigflächen kämen dann ohne Umriss an. Der Aufschlag
+        // liegt bei etwa 15 % Antwortgröße (München Hbf: 357 statt
         // 408 KB), und gecacht wird ohnehin sieben Tage.
         //
         // EINFACHE ANFUEHRUNGSZEICHEN, und zwar zwingend: in einem
@@ -190,8 +195,6 @@ final class Overpass
             . 'relation(around:%1$d,%2$.6f,%3$.6f)["public_transport"="platform"];'
             . 'node(around:%1$d,%2$.6f,%3$.6f)["public_transport"="stop_position"];'
             . 'node(around:%1$d,%2$.6f,%3$.6f)["railway"="stop"];'
-            . 'way(around:%1$d,%2$.6f,%3$.6f)'
-            . '["highway"~"^(footway|steps|corridor|pedestrian|elevator)$"];'
             . ');out geom;',
             $r, $lat, $lon
         );
@@ -204,33 +207,11 @@ final class Overpass
         $elements = $antwort['elements'] ?? [];
 
         $out  = [];
-        $ways = [];
         $seen = [];
         $stationsnummern = self::stationCodes($elements);
 
         foreach ($elements as $e) {
             $tags = $e['tags'] ?? [];
-
-            // Fusswege und Treppen: Verlauf und Art, mehr braucht das
-            // Wegenetz nicht.
-            $hw = (string) ($tags['highway'] ?? '');
-            if ($hw !== '' && isset($e['geometry'])) {
-                $pts = [];
-                foreach ($e['geometry'] as $g) {
-                    $pts[] = [round((float) $g['lat'], 6), round((float) $g['lon'], 6)];
-                }
-                if (count($pts) >= 2) {
-                    $ways[] = [
-                        'kind'   => $hw,
-                        'points' => $pts,
-                        // "level=-1;0" heisst: dieses Treppenstueck verbindet
-                        // die Ebenen -1 und 0. Damit kann die Anzeige spaeter
-                        // sagen, WOHIN es geht, nicht nur dass es Stufen gibt.
-                        'level'  => isset($tags['level']) ? (string) $tags['level'] : null,
-                    ];
-                }
-                continue;
-            }
 
             // Mittelpunkt und - bei Wegen - der Umriss. Der Umriss macht aus
             // der Punktwolke einen Bahnhofsplan.
@@ -255,27 +236,27 @@ final class Overpass
                 continue;
             }
 
-            // Handelt es sich um eine Bahnsteigflaeche oder nur um einen
-            // Haltepunkt auf dem Gleis? Davon haengt ab, in welchem Tag die
+            // Handelt es sich um eine Bahnsteigfläche oder nur um einen
+            // Haltepunkt auf dem Gleis? Davon hängt ab, in welchem Tag die
             // Gleisnummer steht - und wie brauchbar die Lage ist.
             $isStopNode = ($tags['public_transport'] ?? '') === 'stop_position'
                 || ($tags['railway'] ?? '') === 'stop';
 
             // Ein Bahnsteig bedient oft zwei Gleise ("24;25"). Beide sollen
-            // sich spaeter ueber ihre Nummer wiederfinden lassen.
+            // sich später über ihre Nummer wiederfinden lassen.
             //
-            // WELCHES TAG die Nummer traegt, ist von Bahnhof zu Bahnhof
+            // WELCHES TAG die Nummer trägt, ist von Bahnhof zu Bahnhof
             // verschieden, und beide Lesarten kommen vor:
             //
             //   Mannheim Hbf  ref=1..12,  local_ref fehlt
-            //   Zuerich HB    local_ref=3..44,  ref=13030 - die Nummer des
+            //   Zürich HB    local_ref=3..44,  ref=13030 - die Nummer des
             //                 BAHNHOFS im Netz der SBB, auf jedem Knoten
             //                 dieselbe
             //
             // Erst local_ref, dann ref - und was wie eine Stationsnummer
-            // aussieht, faellt vorher raus (siehe stationCodes()). Nur
-            // local_ref zu nehmen liess Mannheim mit einem einzigen
-            // Bahnsteig dastehen; nur ref zu nehmen machte aus Zuerich
+            // aussieht, fällt vorher raus (siehe stationCodes()). Nur
+            // local_ref zu nehmen ließ Mannheim mit einem einzigen
+            // Bahnsteig dastehen; nur ref zu nehmen machte aus Zürich
             // "Gleis 13030".
             $ref = trim((string) ($tags['local_ref'] ?? ''));
             if ($ref === '') {
@@ -287,7 +268,7 @@ final class Overpass
 
             // Vierstellige "Gleisnummern" gibt es nicht, und was an mehreren
             // Haltepunkten desselben Bahnhofs gleich lautet, ist die Nummer
-            // des Bahnhofs. Beides wuerde nur eine Zuordnung vortaeuschen.
+            // des Bahnhofs. Beides würde nur eine Zuordnung vortäuschen.
             $tracks = array_values(array_filter(
                 $tracks,
                 static fn(string $t): bool => !preg_match('/^\d{4,}$/', $t)
@@ -298,13 +279,13 @@ final class Overpass
                 continue; // ohne Gleisnummer nicht zuzuordnen
             }
 
-            // ABSCHNITTE: Manche Bahnhoefe sind in OSM je Bahnsteigabschnitt
-            // erfasst - Ulm Hbf fuehrt "4 Nord", "4 Sued", "5a", "5b" und
+            // ABSCHNITTE: Manche Bahnhöfe sind in OSM je Bahnsteigabschnitt
+            // erfasst - Ulm Hbf führt "4 Nord", "4 Süd", "5a", "5b" und
             // kein einziges nacktes "4". Der Fahrplan sagt aber "Gleis 4",
             // und die Suche nach dieser Nummer ging deshalb an einem
-            // vollstaendig kartierten Bahnhof leer aus.
+            // vollständig kartierten Bahnhof leer aus.
             //
-            // Die blosse Nummer kommt als ZWEITNAME dazu, nicht als
+            // Die bloße Nummer kommt als ZWEITNAME dazu, nicht als
             // gleichwertige. Wo es ein echtes "4" gibt, soll das gewinnen -
             // siehe preferBestSource().
             $alt = [];
@@ -314,19 +295,19 @@ final class Overpass
                 }
             }
 
-            // Tram, U-Bahn und Bus haben eigene, unabhaengige Gleis- bzw.
-            // Steignummern. Ohne diesen Filter waere der "Steig 1" einer
+            // Tram, U-Bahn und Bus haben eigene, unabhängige Gleis- bzw.
+            // Steignummern. Ohne diesen Filter wäre der "Steig 1" einer
             // Tramhaltestelle nicht vom Gleis 1 des Bahnhofs zu unterscheiden.
             //
             // Ausgeschlossen wird nur, was sich AUSDRUECKLICH als Nicht-Bahn
-            // ausweist: ein fehlendes train-Tag heisst bei Bahnsteigen in der
+            // ausweist: ein fehlendes train-Tag heißt bei Bahnsteigen in der
             // Regel nur, dass es niemand eingetragen hat.
             //
-            // Fuer HALTEPUNKTE gilt das Gegenteil: sie liegen auf einem Gleis
-            // und muessen sagen, auf was fuer einem. Mannheim Hbf hat neben
-            // den zwoelf Bahngleisen die Bussteige "Steig E" bis "Steig G"
+            // Für HALTEPUNKTE gilt das Gegenteil: sie liegen auf einem Gleis
+            // und müssen sagen, auf was für einem. Mannheim Hbf hat neben
+            // den zwölf Bahngleisen die Bussteige "Steig E" bis "Steig G"
             // als stop_position ohne jedes Modus-Tag - ohne diese Bedingung
-            // stuenden sie als Gleise im Plan.
+            // stünden sie als Gleise im Plan.
             if ($isStopNode
                 && ($tags['train'] ?? '') !== 'yes'
                 && ($tags['railway'] ?? '') !== 'stop') {
@@ -344,16 +325,16 @@ final class Overpass
                 }
             }
 
-            // Manche Bahnsteige tragen beide Tags und kaemen sonst doppelt.
+            // Manche Bahnsteige tragen beide Tags und kämen sonst doppelt.
             $dedupe = implode('/', $tracks) . '@' . round($plat['lat'], 4) . ',' . round($plat['lon'], 4);
             if (isset($seen[$dedupe])) {
                 continue;
             }
             $seen[$dedupe] = true;
 
-            // Guete der Quelle, fuer die Auswahl weiter unten. Eine Flaeche
-            // mit Umriss ergibt einen massstaeblichen Bahnsteig; ein Punkt
-            // auf dem Gleis nur eine Markierung ungefaehr an der richtigen
+            // Güte der Quelle, für die Auswahl weiter unten. Eine Fläche
+            // mit Umriss ergibt einen maßstäblichen Bahnsteig; ein Punkt
+            // auf dem Gleis nur eine Markierung ungefähr an der richtigen
             // Stelle. Beides ist besser als nichts, aber nicht gleich gut.
             $rank = $shape !== [] ? 0 : ($isStopNode ? 2 : 1);
 
@@ -379,34 +360,34 @@ final class Overpass
         return [
             'ok'    => true,
             'error' => null,
-            'data'  => ['platforms' => $platforms, 'ways' => $ways],
+            'data'  => ['platforms' => $platforms],
         ];
     }
 
     /**
-     * Einzelne fehlende Gleisnummern aus ihren Nachbarn ergaenzen.
+     * Einzelne fehlende Gleisnummern aus ihren Nachbarn ergänzen.
      *
      * WOZU: Mannheim Hbf hat in OSM die Gleise 1-5 und 7-12, aber kein 6 -
-     * jemand hat es beim Erfassen ausgelassen. Faehrt der Anschlusszug von
+     * jemand hat es beim Erfassen ausgelassen. Fährt der Anschlusszug von
      * Gleis 6, entfiel deshalb der ganze Umstiegsplan, obwohl der Bahnhof
-     * ringsum vollstaendig kartiert ist.
+     * ringsum vollständig kartiert ist.
      *
-     * WIE: Nur wo hoechstens drei Nummern zwischen zwei vorhandenen fehlen
+     * WIE: Nur wo höchstens drei Nummern zwischen zwei vorhandenen fehlen
      * und die beiden Nachbarn entsprechend dicht beieinanderliegen. Gleis 6
      * liegt dann in der Mitte zwischen 5 und 7 - bei neun Metern Abstand ist
      * das kein Raten mehr, sondern die Bahnsteigkante dazwischen. Bei
-     * groesseren Luecken wird linear zwischen den Nachbarn geteilt.
+     * größeren Lücken wird linear zwischen den Nachbarn geteilt.
      *
-     * Drei und nicht eine, weil die Erhebung ueber dreissig Bahnhoefe zeigte,
-     * dass Zweierluecken genauso haeufig sind: Genf fehlen 8 und 9, Hamburg
-     * und Berlin Hbf je 9 und 10, Nuernberg 10 und 11.
+     * Drei und nicht eine, weil die Erhebung über dreißig Bahnhöfe zeigte,
+     * dass Zweierlücken genauso häufig sind: Genf fehlen 8 und 9, Hamburg
+     * und Berlin Hbf je 9 und 10, Nürnberg 10 und 11.
      *
-     * WO NICHT: Zwischen Gleis 18 und 31 in Zuerich klafft eine Luecke von
+     * WO NICHT: Zwischen Gleis 18 und 31 in Zürich klafft eine Lücke von
      * dreizehn Nummern und mehreren hundert Metern - das ist keine
-     * Erfassungsluecke, sondern ein zweiter Bahnhofsteil. Genauso Bern
+     * Erfassungslücke, sondern ein zweiter Bahnhofsteil. Genauso Bern
      * (13 -> 21, RBS) und Basel SBB (20 -> 30, SNCF). Der Abstand entscheidet:
-     * je fehlender Nummer sind knapp fuenfzehn Meter zulaessig, das ist eine
-     * Gleisachse. Und was ergaenzt wurde, sagt es ueber `estimated`, damit
+     * je fehlender Nummer sind knapp fünfzehn Meter zulässig, das ist eine
+     * Gleisachse. Und was ergänzt wurde, sagt es über `estimated`, damit
      * die Anzeige es kenntlich machen kann.
      *
      * @param array<int,array> $platforms
@@ -442,7 +423,7 @@ final class Overpass
                 continue;   // zu weit auseinander - das ist ein anderer Bahnhofsteil
             }
 
-            // Linear teilen: bei einer Luecke von zwei liegen die beiden
+            // Linear teilen: bei einer Lücke von zwei liegen die beiden
             // fehlenden Gleise auf einem und zwei Dritteln der Strecke.
             for ($k = 1; $k <= $luecke; $k++) {
                 $t = $k / ($luecke + 1);
@@ -451,7 +432,7 @@ final class Overpass
                     'name'   => '',
                     'lat'    => $a['lat'] + ($b['lat'] - $a['lat']) * $t,
                     'lon'    => $a['lon'] + ($b['lon'] - $a['lon']) * $t,
-                    // Kein Umriss: die Lage ist geschaetzt, eine Flaeche waere
+                    // Kein Umriss: die Lage ist geschätzt, eine Fläche wäre
                     // eine Genauigkeit, die es nicht gibt.
                     'shape'  => [],
                     'level'  => $a['level'] !== null && $a['level'] === $b['level'] ? $a['level'] : null,
@@ -473,17 +454,17 @@ final class Overpass
     }
 
     /**
-     * Werte, die keine Gleisnummer sein koennen, weil sie den ganzen
+     * Werte, die keine Gleisnummer sein können, weil sie den ganzen
      * Bahnhof meinen.
      *
      * An Haltepunkten steht in `ref` mancherorts die Nummer des BAHNHOFS im
-     * Netz des Betreibers - in Zuerich HB die 13030, auf jedem der 26
-     * Haltepunkte dieselbe. Ein Gleis hat hoechstens zwei Haltepunkte, einen
+     * Netz des Betreibers - in Zürich HB die 13030, auf jedem der 26
+     * Haltepunkte dieselbe. Ein Gleis hat höchstens zwei Haltepunkte, einen
      * je Richtung. Was auf DREI oder mehr auftaucht, ist deshalb keine
      * Gleisnummer.
      *
      * @param array<int,array> $elements Overpass-Rohdaten
-     * @return array<string,true> verdaechtige Werte als Schluessel
+     * @return array<string,true> verdächtige Werte als Schlüssel
      */
     private static function stationCodes(array $elements): array
     {
@@ -513,16 +494,16 @@ final class Overpass
     /**
      * Je Gleisnummer nur die beste Quelle behalten.
      *
-     * Grosse Bahnhoefe sind in OSM oft doppelt erfasst: die Bahnsteigflaeche
+     * Große Bahnhöfe sind in OSM oft doppelt erfasst: die Bahnsteigfläche
      * als Weg oder Relation UND ein Haltepunkt auf dem Gleis, beide mit
      * derselben Nummer. Blieben beide stehen, fiele die Wahl beim Zeichnen
-     * willkuerlich - mal die massstaebliche Flaeche, mal der Punkt daneben,
+     * willkürlich - mal die maßstäbliche Fläche, mal der Punkt daneben,
      * je nachdem, was Overpass zuerst ausgibt.
      *
-     * Deshalb: ein Eintrag faellt weg, sobald ALLE seine Gleise schon von
+     * Deshalb: ein Eintrag fällt weg, sobald ALLE seine Gleise schon von
      * einer besseren Quelle abgedeckt sind. Deckt er auch nur ein Gleis ab,
-     * das sonst fehlen wuerde, bleibt er - lieber ein grober Punkt als eine
-     * Luecke im Plan.
+     * das sonst fehlen würde, bleibt er - lieber ein grober Punkt als eine
+     * Lücke im Plan.
      *
      * @param array<int,array> $platforms
      * @return array<int,array>
@@ -556,8 +537,8 @@ final class Overpass
             foreach ($p['_alt'] as $t) {
                 if (!isset($covered[$t])) {
                     $covered[$t] = true;
-                    // Als Zeichenkette: PHP macht aus dem Array-Schluessel "4"
-                    // eine Zahl, und in der Liste stuenden dann Text und Zahl
+                    // Als Zeichenkette: PHP macht aus dem Array-Schlüssel "4"
+                    // eine Zahl, und in der Liste stünden dann Text und Zahl
                     // gemischt.
                     $out[$i]['tracks'][] = (string) $t;
                 }

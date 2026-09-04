@@ -18,10 +18,10 @@
  *
  * ZWEI QUELLEN: das Verzeichnis der DB InfraGO hinter strecken.info für
  * Deutschland, der HAFAS Information Manager der ÖBB für Österreich und die
- * Schweiz. Deutschland steht vorn — das grösste Netz im deutschsprachigen
+ * Schweiz. Deutschland steht vorn — das größte Netz im deutschsprachigen
  * Raum, und die österreichische Quelle meldet fast nur Nebenbahnen.
  *
- * Bewusst zurückhaltend: standardmässig eingeklappt, Aktualisierung nur
+ * Bewusst zurückhaltend: standardmäßig eingeklappt, Aktualisierung nur
  * stündlich (der Server cacht ohnehin so lange), und bei Fehlern lautlos
  * verstecken statt Alarm zu schlagen.
  */
@@ -49,7 +49,7 @@ export function initWorks(mount) {
   const summary = document.createElement('summary');
   summary.className = 'mvg-ticker__summary';
   const label = document.createElement('span');
-  label.textContent = 'Grosse Baustellen im Netz';
+  label.textContent = 'Große Baustellen im Netz';
   const count = document.createElement('span');
   count.className = 'mvg-ticker__count';
   summary.append(label, count);
@@ -145,14 +145,14 @@ function render(mount, count, list, works, ensureMap) {
 
   list.replaceChildren();
   let erstes = true;
-  for (const [land, eintraege] of nachLand) {
-    list.append(landGruppe(land, eintraege, erstes, ensureMap));
+  for (const [land, bauabschnitte] of nachLand) {
+    list.append(landGruppe(land, bauabschnitte, erstes, ensureMap));
     erstes = false;
   }
 }
 
 /** Ein Land als aufklappbarer Block mit seinen Baustellen. */
-function landGruppe(land, eintraege, offen, ensureMap) {
+function landGruppe(land, bauabschnitte, offen, ensureMap) {
   const li = document.createElement('li');
   li.className = 'works__land';
 
@@ -166,7 +166,7 @@ function landGruppe(land, eintraege, offen, ensureMap) {
   name.textContent = landName(land);
   const zahl = document.createElement('span');
   zahl.className = 'works__land-count';
-  zahl.textContent = String(eintraege.length);
+  zahl.textContent = String(bauabschnitte.length);
   sum.append(name, zahl);
   box.append(sum);
 
@@ -180,11 +180,11 @@ function landGruppe(land, eintraege, offen, ensureMap) {
   mehr.className = 'works__more';
 
   const nachschieben = () => {
-    for (const w of eintraege.slice(gezeigt, gezeigt + MAX_ROWS)) {
+    for (const w of bauabschnitte.slice(gezeigt, gezeigt + MAX_ROWS)) {
       ul.append(zeile(w, ensureMap));
     }
-    gezeigt = Math.min(gezeigt + MAX_ROWS, eintraege.length);
-    const rest = eintraege.length - gezeigt;
+    gezeigt = Math.min(gezeigt + MAX_ROWS, bauabschnitte.length);
+    const rest = bauabschnitte.length - gezeigt;
     mehr.hidden = rest === 0;
     mehr.textContent = rest > MAX_ROWS
       ? `${MAX_ROWS} weitere von ${rest}`
@@ -198,40 +198,88 @@ function landGruppe(land, eintraege, offen, ensureMap) {
   return li;
 }
 
-/** Eine Baustelle als Zeile. */
+/**
+ * Eine Baustelle als aufklappbare Zeile.
+ *
+ * Zugeklappt steht da, was für die Übersicht zählt: Abschnitt, Thema, wie
+ * lange noch. Der ganze Meldungstext hing vorher nur im `title`-Attribut —
+ * auf einem Berührungsbildschirm gibt es kein Darüberfahren, dort war er
+ * damit unerreichbar. Aufgeklappt steht er als Satz da, mit dem Zeitraum und
+ * den betroffenen Strecken darunter.
+ */
 function zeile(w, ensureMap) {
   const li = document.createElement('li');
   li.className = 'mvg-ticker__item works__item';
-  // Der vollständige Meldungstext als Tooltip. In der Zeile steht nur, was
-  // dort hineinpasst; wer mehr wissen will, fährt darüber.
-  if (w.text) li.title = w.text;
+
+  const box = document.createElement('details');
+  box.className = 'works__detail';
+
+  const sum = document.createElement('summary');
+  sum.className = 'works__summary';
+
+  const sect = document.createElement('span');
+  sect.className = 'works__section';
+  sect.textContent = `${short(w.from?.name)} → ${short(w.to?.name)}`;
+  sum.append(sect);
+
+  const title = document.createElement('span');
+  title.className = 'mvg-ticker__title works__title';
+  title.textContent = topic(w.title);
+  sum.append(title);
+
+  const until = document.createElement('span');
+  until.className = 'mvg-ticker__until';
+  until.textContent = untilText(w.end);
+  sum.append(until);
+
+  box.append(sum);
+
+  const body = document.createElement('div');
+  body.className = 'works__body';
+
+  // Der Satz zur Baustelle. Fehlt er ausnahmsweise, sagt wenigstens die
+  // Überschrift, was dort passiert - leer bleiben soll der Kasten nicht.
+  const text = document.createElement('p');
+  text.className = 'works__text';
+  text.textContent = w.text || w.title || 'Bauarbeiten auf diesem Abschnitt.';
+  body.append(text);
+
+  const meta = document.createElement('p');
+  meta.className = 'works__meta';
+  meta.textContent = zeitraum(w.start, w.end);
+  if (w.lines?.length) {
+    meta.textContent += ` · Strecke ${w.lines.slice(0, 4).join(', ')}`;
+  }
+  body.append(meta);
 
   // Anklickbar: der Kartenausschnitt springt auf den Abschnitt. Genau
   // dafür sind die Koordinaten da — "wo ist das eigentlich".
   const jump = document.createElement('button');
   jump.type = 'button';
   jump.className = 'works__jump';
-  jump.title = 'Auf der Karte zeigen';
-
-  const sect = document.createElement('span');
-  sect.className = 'works__section';
-  sect.textContent = `${short(w.from?.name)} → ${short(w.to?.name)}`;
-  jump.append(sect);
-
+  jump.textContent = 'Auf der Karte zeigen';
   jump.addEventListener('click', () => ensureMap().focusWork(w));
-  li.append(jump);
+  body.append(jump);
 
-  const title = document.createElement('span');
-  title.className = 'mvg-ticker__title works__title';
-  title.textContent = topic(w.title);
-  li.append(title);
-
-  const until = document.createElement('span');
-  until.className = 'mvg-ticker__until';
-  until.textContent = untilText(w.end);
-  li.append(until);
-
+  box.append(body);
+  li.append(box);
   return li;
+}
+
+/** "5. Sep. bis 30. Nov. 2026", so weit die Daten reichen. */
+function zeitraum(start, end) {
+  const fmt = (iso) => {
+    const t = Date.parse(iso || '');
+    return Number.isFinite(t)
+      ? new Date(t).toLocaleDateString('de-CH', { day: 'numeric', month: 'short', year: 'numeric' })
+      : null;
+  };
+  const a = fmt(start);
+  const b = fmt(end);
+  if (a && b) return `${a} bis ${b}`;
+  if (b) return `bis ${b}`;
+  if (a) return `seit ${a}`;
+  return 'Zeitraum unbekannt';
 }
 
 /** Ländercode als Name — "de" liest sich in einer Überschrift schlecht. */

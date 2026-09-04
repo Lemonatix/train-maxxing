@@ -1,9 +1,9 @@
 <?php
 /**
- * Datei-basierter Cache. Bewusst simpel, damit er auf jedem Shared Hosting laeuft
+ * Datei-basierter Cache. Bewusst simpel, damit er auf jedem Shared Hosting läuft
  * (kein APCu, kein Redis, keine DB).
  *
- * Schlaegt das Schreiben fehl (read-only Verzeichnis), degradiert die Klasse
+ * Schlägt das Schreiben fehl (read-only Verzeichnis), degradiert die Klasse
  * still zu "kein Cache" statt die Anfrage zu killen.
  */
 final class Cache
@@ -66,7 +66,7 @@ final class Cache
 
     /**
      * Entfernt abgelaufene Dateien. Wird gelegentlich (1% der Requests) aufgerufen,
-     * damit der Ordner auf Dauer nicht volllaeuft.
+     * damit der Ordner auf Dauer nicht vollläuft.
      */
     public function gc(int $maxAge = 86400): void
     {

@@ -1,13 +1,13 @@
 /**
- * Kompakter Stoerungsticker fuer den Muenchner Nahverkehr.
+ * Kompakter Störungsticker für den Münchner Nahverkehr.
  *
- * Zeigt aktive Stoerungs- und Betriebsmeldungen der MVG als kollabierbaren
+ * Zeigt aktive Störungs- und Betriebsmeldungen der MVG als kollabierbaren
  * Chip unter dem Formular. Der Endpunkt liefert das gesamte MVV/MVG-Netz;
- * hier werden nur zeitlich gueltige Eintraege dargestellt.
+ * hier werden nur zeitlich gültige Einträge dargestellt.
  *
- * Bewusst zurueckhaltend:
- *   - Standardmaessig eingeklappt, kein visueller Konkurrent zur Suchmaske
- *   - Aktualisierung nur alle 2 Minuten - laenger reicht dem PHP-Cache
+ * Bewusst zurückhaltend:
+ *   - Standardmäßig eingeklappt, kein visueller Konkurrent zur Suchmaske
+ *   - Aktualisierung nur alle 2 Minuten - länger reicht dem PHP-Cache
  *   - Bei Fehlern kein rotes Alarmzeichen, sondern lautlos verstecken. Der
  *     Ticker ist Beiwerk, keine Kernfunktion.
  */
@@ -18,22 +18,22 @@ const REFRESH_MS = 120_000;
 const MAX_ROWS   = 6;
 
 const TYPE_LABEL = {
-  INCIDENT:        'Stoerung',
-  SCHEDULE_CHANGE: 'Fahrplanaenderung',
+  INCIDENT:        'Störung',
+  SCHEDULE_CHANGE: 'Fahrplanänderung',
   CONSTRUCTION:    'Baustelle',
-  DISRUPTION:      'Stoerung',
+  DISRUPTION:      'Störung',
   ELEVATOR:        'Aufzug',
   ESCALATOR:       'Rolltreppe',
 };
 
 /**
  * Baut das Widget in $mount ein und startet den Refresh-Zyklus.
- * Gibt eine Abbruchfunktion zurueck, falls die App das Widget entfernen will.
+ * Gibt eine Abbruchfunktion zurück, falls die App das Widget entfernen will.
  */
 export function initMvgTicker(mount) {
   if (!mount) return () => {};
 
-  // Grundgeruest nur ein Mal aufbauen, spaeter nur Daten austauschen.
+  // Grundgerüst nur ein Mal aufbauen, später nur Daten austauschen.
   mount.innerHTML = '';
   mount.hidden = true;
   mount.setAttribute('aria-live', 'polite');
@@ -44,7 +44,7 @@ export function initMvgTicker(mount) {
   const summary = document.createElement('summary');
   summary.className = 'mvg-ticker__summary';
   const label = document.createElement('span');
-  label.textContent = 'Stoerungen Muenchen';
+  label.textContent = 'Störungen München';
   const count = document.createElement('span');
   count.className = 'mvg-ticker__count';
   summary.append(label, count);
@@ -65,7 +65,7 @@ export function initMvgTicker(mount) {
       renderTicker(mount, count, list, data.disruptions || []);
     } catch (err) {
       if (err.name === 'AbortError') return;
-      // Ausblenden statt Alarm; ein toter Endpunkt darf die Suche nicht stoeren.
+      // Ausblenden statt Alarm; ein toter Endpunkt darf die Suche nicht stören.
       mount.hidden = true;
     }
   };
@@ -81,7 +81,7 @@ export function initMvgTicker(mount) {
 }
 
 /**
- * Aktualisiert die Anzeige. Reine Textinhalte, keine gefaehrlichen Elemente -
+ * Aktualisiert die Anzeige. Reine Textinhalte, keine gefährlichen Elemente -
  * MVG-Titel und -Beschreibungen kommen aus einer externen API.
  */
 function renderTicker(mount, count, list, all) {

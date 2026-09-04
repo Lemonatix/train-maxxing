@@ -14,6 +14,8 @@
  * vorher ohne Hintergrund und ohne externe Requests.
  */
 
+import { typeOf } from './data/trains.js';
+
 const NS = 'http://www.w3.org/2000/svg';
 
 /**
@@ -119,11 +121,20 @@ function levelName(lv) {
  * im Fernverkehr leer. Manche Linien tragen die Gattung schon in sich ("RE3"),
  * dann wird sie nicht doppelt davorgesetzt.
  *
+ * DIE GATTUNG WIRD NORMALISIERT. Was in den Daten steht, ist bei allem, was
+ * nicht die DB selbst fährt, ein Sammelkürzel des Betreibers — "DPN RB37"
+ * stand so in der Liste, in der Live-Verfolgung und an den Zügen auf der
+ * Karte. typeOf() macht daraus die Gattung, die auch am Bahnsteig steht.
+ *
  * @param {?object} t Zug mit {category, line, trainNumber, name}
  * @returns {string}
  */
 export function trainLabel(t) {
-  const cat  = String(t?.category || '').trim();
+  // Bei wirklich unbekannter Gattung liefert typeOf() das rohe Kürzel zurück
+  // — oder '?', wenn gar keins dabei war. Ein Fragezeichen vor die Linie zu
+  // setzen hülfe niemandem, deshalb gilt es hier als "keine Gattung".
+  const type = typeOf({ ...t, mode: 'train' });
+  const cat  = type.label === '?' ? '' : type.label;
   const line = String(t?.line || '').trim();
   const num  = String(t?.trainNumber || '').trim();
   const name = String(t?.name || '').replace(/\s+/g, ' ').trim();
@@ -140,14 +151,14 @@ export function trainLabel(t) {
 /**
  * Sind das zwei Meldungen desselben Zuges?
  *
- * Die `jid` waere die eindeutige Antwort, taugt aber nur INNERHALB einer
+ * Die `jid` wäre die eindeutige Antwort, taugt aber nur INNERHALB einer
  * HAFAS-Antwort: sie wird pro Anfrage neu aufgebaut, die Kennung aus der
  * Verbindungssuche und die aus der Positionsmeldung sind deshalb in aller
  * Regel verschieden.
  *
- * DIE ZUGNUMMER ENTSCHEIDET, wo es eine gibt. Die Beschriftung taugt dafuer
+ * DIE ZUGNUMMER ENTSCHEIDET, wo es eine gibt. Die Beschriftung taugt dafür
  * nicht mehr, seit sie im Nahverkehr die LINIE zeigt: auf der S 33 sind zu
- * jeder Zeit mehrere Zuege unterwegs, und "S 33" ist kein Zug, sondern eine
+ * jeder Zeit mehrere Züge unterwegs, und "S 33" ist kein Zug, sondern eine
  * Linie. Widersprechen sich die Gattungen, ist es ohnehin nicht derselbe Zug.
  *
  * @param {?object} a Zug mit {jid, category, line, trainNumber, name}
@@ -174,27 +185,27 @@ export function sameTrain(a, b) {
 }
 
 /**
- * Der Punkt auf einem Linienzug, der `pt` am naechsten liegt - oder null,
+ * Der Punkt auf einem Linienzug, der `pt` am nächsten liegt - oder null,
  * wenn der Linienzug keine Strecke hergibt.
  *
- * Gebraucht fuer die aus dem Fahrplan hochgerechnete Zugposition: die wird
+ * Gebraucht für die aus dem Fahrplan hochgerechnete Zugposition: die wird
  * zwischen zwei HALTEN interpoliert, also auf der Luftlinie. Wo die Strecke
  * einen Bogen macht - Rheintal, Gotthard, jede Ausweichkurve -, liegt der
  * Punkt dadurch sichtbar neben der gezeichneten Linie. Auf den Linienzug
- * gezogen sitzt er immer da, wo der Zug auch faehrt.
+ * gezogen sitzt er immer da, wo der Zug auch fährt.
  *
- * Gerechnet wird in Gradkoordinaten mit einem Breitenausgleich fuer die
- * Laenge. Ueber die Laenge eines Streckenabschnitts ist das genau genug und
- * spart die Projektion - fuer einen Naehe-Vergleich reicht es allemal.
+ * Gerechnet wird in Gradkoordinaten mit einem Breitenausgleich für die
+ * Länge. Über die Länge eines Streckenabschnitts ist das genau genug und
+ * spart die Projektion - für einen Nähe-Vergleich reicht es allemal.
  *
  * @param {[number, number]} pt    [lat, lon]
- * @param {Array<Array<[number, number]>>} parts Linienzuege wie in geometryOf()
+ * @param {Array<Array<[number, number]>>} parts Linienzüge wie in geometryOf()
  * @returns {?[number, number]}
  */
 export function snapToLine(pt, parts) {
   const [lat, lon] = pt;
-  // Laengengrade ruecken polwaerts zusammen - sonst zoege es den Punkt in
-  // noerdlichen Breiten in die falsche Richtung.
+  // Längengrade rücken polwärts zusammen - sonst zöge es den Punkt in
+  // nördlichen Breiten in die falsche Richtung.
   const kx = Math.cos((lat * Math.PI) / 180);
 
   let best = null;
@@ -212,8 +223,8 @@ export function snapToLine(pt, parts) {
       const dy = bLat - aLat;
 
       const len2 = dx * dx + dy * dy;
-      // Lotfusspunkt, auf das Segment begrenzt - sonst laege er auf der
-      // Verlaengerung und damit ausserhalb der Strecke.
+      // Lotfußpunkt, auf das Segment begrenzt - sonst läge er auf der
+      // Verlängerung und damit außerhalb der Strecke.
       const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2));
 
       const px = ax + dx * t;
@@ -273,17 +284,19 @@ function stopsOf(journey) {
 export class RouteMap {
   /**
    * @param {HTMLElement} container
-   * @param {{mode?: 'routes'|'works'}} [opts]
+   * @param {{mode?: 'routes'|'works'|'station'}} [opts]
    *   `works` macht daraus eine reine Baustellenkarte: keine Routen, keine
-   *   Live-Züge, eigene Beschriftung. Sonst ist alles gleich — dieselbe
-   *   Kachelquelle, dasselbe Zoomen und Ziehen, dieselbe Maßstabsleiste.
-   *   Eine zweite Karte zu bauen hätte all das doppelt bedeutet.
+   *   Live-Züge, eigene Beschriftung. `station` zeigt die Bahnsteige eines
+   *   Bahnhofs, mit Umschalter für die Ebene. Sonst ist alles gleich —
+   *   dieselbe Kachelquelle, dasselbe Zoomen und Ziehen, dieselbe
+   *   Maßstabsleiste. Eine zweite Karte zu bauen hätte all das doppelt
+   *   bedeutet.
    */
   constructor(container, opts = {}) {
     this.el = container;
     this.mode = ['works', 'station'].includes(opts.mode) ? opts.mode : 'routes';
-    // Bahnhofsmodus: Bahnsteige, Laufweg und die Ebene, die gerade gezeigt
-    // wird. Siehe setStation().
+    // Bahnhofsmodus: die Bahnsteige und die Ebene, die gerade gezeigt wird.
+    // Siehe setStation().
     this.station = null;
     this.level = null;
     this.zoom = 7;
@@ -295,7 +308,7 @@ export class RouteMap {
     // Die gerade live verfolgte Verbindung. Wird über allen Suchergebnissen
     // gezeichnet und bleibt stehen, auch wenn die Liste etwas anderes zeigt.
     this.tracked = null;
-    // Bauarbeiten im Netz als eigene Ebene: sie gehoeren zu keiner Route und
+    // Bauarbeiten im Netz als eigene Ebene: sie gehören zu keiner Route und
     // sollen auch ohne Suchergebnis sichtbar sein.
     this.works = [];
     this.showWorks = false;
@@ -621,14 +634,20 @@ export class RouteMap {
   fit() {
     const pts = [];
 
-    // Im Bahnhof zählt der Laufweg, nicht der ganze Bahnhof.
+    // Im Bahnhof zählen die beiden beteiligten Bahnsteige, nicht der ganze
+    // Bahnhof: bei Frankfurt Hbf lägen sonst achtundzwanzig Gleise im Bild
+    // und die zwei, um die es geht, wären zwei Striche unter vielen. Sind sie
+    // nicht bekannt, bleibt der Überblick über alle.
     if (this.mode === 'station') {
       const st = this.station;
-      for (const p of st?.route?.path || []) pts.push(p);
+      for (const p of [st?.from, st?.to]) {
+        if (p?.shape?.length) pts.push(...p.shape);
+        else if (p) pts.push([p.lat, p.lon]);
+      }
       if (pts.length < 2) {
-        for (const p of [st?.from, st?.to]) {
-          if (p?.shape?.length) pts.push(...p.shape);
-          else if (p) pts.push([p.lat, p.lon]);
+        for (const p of st?.platforms || []) {
+          if (p.shape?.length) pts.push(...p.shape);
+          else if (p.lat != null) pts.push([p.lat, p.lon]);
         }
       }
       this.fitPoints(pts, 55);
@@ -696,6 +715,54 @@ export class RouteMap {
     this.updateHint();
   }
 
+  /**
+   * Auf eine einzelne Verbindung zoomen.
+   *
+   * Gerufen, wenn jemand eine Verbindung auswählt — in der Liste oder auf der
+   * Karte. Der Ausschnitt über ALLEN Treffern taugt für den Überblick, aber
+   * nicht für die eine, die man sich gerade ansieht: Zürich–Wien und
+   * Zürich–Wien über München liegen darin fast übereinander, und wo die
+   * gewählte Route entlangführt, erkennt man erst beim Hineinzoomen.
+   *
+   * Zoomt NICHT, wenn die Route schon vollständig und groß genug im Bild
+   * liegt: sonst springt der Ausschnitt bei jedem Klick in der Liste, auch
+   * wenn er längst passt. `fitPoints` setzt zudem den Mittelpunkt neu, und
+   * das allein ist schon eine sichtbare Bewegung.
+   */
+  focusJourney(index) {
+    const entry = this.ranked[index];
+    if (!entry) return;
+
+    const pts = [];
+    for (const part of geometryOf(entry.journey)) pts.push(...part);
+    if (pts.length < 2) return;
+
+    const { w, h } = this.size();
+    const xs = pts.map(([, lo]) => lonToX(lo, this.zoom));
+    const ys = pts.map(([la]) => latToY(la, this.zoom));
+    const bx = Math.max(...xs) - Math.min(...xs);
+    const by = Math.max(...ys) - Math.min(...ys);
+
+    // Passt sie ins Bild und füllt es zu mindestens einem Drittel, ist der
+    // Ausschnitt in Ordnung — dann nur nachzentrieren, wenn sie herausragt.
+    const passt = bx <= w - 80 && by <= h - 80;
+    const grossGenug = bx > (w - 80) / 3 || by > (h - 80) / 3;
+    if (passt && grossGenug && this.imAusschnitt(pts)) return;
+
+    this.fitPoints(pts);
+    this.render();
+  }
+
+  /** Liegen alle Punkte im sichtbaren Ausschnitt? */
+  imAusschnitt(pts) {
+    const { w, h } = this.size();
+    const toPx = this.projector();
+    return pts.every(([la, lo]) => {
+      const [x, y] = toPx([la, lo]);
+      return x >= 0 && y >= 0 && x <= w && y <= h;
+    });
+  }
+
   updateHint() {
     if (!this.hint) return;
     this.hint.classList.remove('is-error');
@@ -710,7 +777,7 @@ export class RouteMap {
         : 'Ziehen zum Verschieben, Scrollen zum Zoomen.';
     }
     if (this.mode === 'works') {
-      if (this.works.length === 0) return 'Zurzeit sind keine grösseren Baustellen gemeldet.';
+      if (this.works.length === 0) return 'Zurzeit sind keine größeren Baustellen gemeldet.';
       // Zwei Linienarten, zwei Aussagen — das gehört dazugesagt, sonst liest
       // man die gestrichelte Gerade als Streckenverlauf.
       const exakt = this.works.filter((w) => w.geometry?.length > 1).length;
@@ -749,11 +816,11 @@ export class RouteMap {
   // -------------------------------------------------------------------
 
   /**
-   * Bahnsteige und Umsteigeweg setzen.
+   * Bahnsteige setzen.
    *
-   * @param {object} st {platforms, from, to, route}
+   * @param {object} st {platforms, from, to}
    *   `from`/`to` sind die beiden beteiligten Bahnsteige aus `platforms`,
-   *   `route` das Ergebnis von StationPlan::route mit `path` und `levels`.
+   *   soweit die Gleisnummern bekannt sind — sonst null.
    */
   setStation(st) {
     this.station = st || null;
@@ -786,7 +853,6 @@ export class RouteMap {
     if (!st) return [];
     const set = new Set();
     for (const p of st.platforms || []) if (p.level != null) set.add(p.level);
-    for (const l of st.route?.levels || []) if (l != null) set.add(l);
     return [...set].sort((a, b) => b - a);
   }
 
@@ -821,7 +887,7 @@ export class RouteMap {
   stepLevel(richtung) {
     const ebenen = this.levelsPresent();
     if (ebenen.length < 2) return;
-    // Die Liste ist von oben nach unten sortiert — "höher" heisst rückwärts.
+    // Die Liste ist von oben nach unten sortiert — "höher" heißt rückwärts.
     const i = Math.max(0, ebenen.indexOf(this.level));
     const next = ebenen[Math.min(ebenen.length - 1, Math.max(0, i - richtung))];
     if (next === this.level) return;
@@ -847,12 +913,18 @@ export class RouteMap {
   }
 
   /**
-   * Bahnsteige und Laufweg.
+   * Die Bahnsteige des Bahnhofs, Ankunfts- und Abfahrtsgleis hervorgehoben.
    *
    * NACH EBENEN GETRENNT: was auf der gerade gezeigten Ebene liegt, ist
    * kräftig gezeichnet, alles andere tritt blass zurück. Ein Umstieg über
-   * vier Ebenen ist sonst ein einziger Strich, in dem sich Bahnsteig,
-   * Unterführung und Halle ununterscheidbar überlagern.
+   * vier Ebenen ist sonst ein Gewirr, in dem sich Bahnsteig, Unterführung
+   * und Halle ununterscheidbar überlagern.
+   *
+   * KEIN LAUFWEG. Hier stand einmal der aus den OSM-Fußwegen gerechnete
+   * Weg von Gleis zu Gleis. Er setzte voraus, dass ein Bahnhof innen
+   * vollständig kartiert ist, und das ist er fast nirgends — herausgekommen
+   * sind Wege, die es so nicht gibt. Wo die beiden Bahnsteige liegen, reicht
+   * für die Frage „muss ich rennen".
    */
   renderStation(svg, w, h, toPx) {
     const st = this.station;
@@ -898,52 +970,25 @@ export class RouteMap {
       }
     }
 
-    // --- Laufweg, Abschnitt für Abschnitt ------------------------------
-    const pfad = st.route?.path || [];
-    const ebenen = st.route?.levels || [];
-    for (let i = 0; i < pfad.length - 1; i++) {
-      const [x1, y1] = toPx(pfad[i]);
-      const [x2, y2] = toPx(pfad[i + 1]);
-      const lv = ebenen[i + 1] ?? ebenen[i] ?? null;
-      const seg = document.createElementNS(NS, 'line');
-      seg.setAttribute('x1', x1.toFixed(1));
-      seg.setAttribute('y1', y1.toFixed(1));
-      seg.setAttribute('x2', x2.toFixed(1));
-      seg.setAttribute('y2', y2.toFixed(1));
-      seg.setAttribute('class', 'map__walk' + (aufEbene(lv) ? '' : ' is-other-level'));
-      g.append(seg);
-    }
-
-    // --- Anfang, Ende, und wo es hinauf- oder hinuntergeht -------------
-    for (const [pt, cls, txt] of [
-      [pfad[0], 'is-start', 'Ankunftsgleis'],
-      [pfad[pfad.length - 1], 'is-end', 'Abfahrtsgleis'],
+    // --- Ankunft und Abfahrt markieren ---------------------------------
+    // Ein Punkt auf der Mitte des jeweiligen Bahnsteigs. Zusammen mit der
+    // Einfärbung beantwortet er die eigentliche Frage: liegen die beiden
+    // nebeneinander oder an entgegengesetzten Enden?
+    for (const [p, cls, txt] of [
+      [st.from, 'is-start', 'Ankunftsgleis'],
+      [st.to, 'is-end', 'Abfahrtsgleis'],
     ]) {
-      if (!pt) continue;
-      const [x, y] = toPx(pt);
+      if (!p || p.lat == null || p.lon == null) continue;
+      // Bei Flächen ist das der Schwerpunkt des Umrisses, also die
+      // Bahnsteigmitte; Haltepunkte haben ohnehin nur diese eine Koordinate.
+      const [x, y] = toPx([p.lat, p.lon]);
       const c = document.createElementNS(NS, 'circle');
       c.setAttribute('cx', x.toFixed(1));
       c.setAttribute('cy', y.toFixed(1));
       c.setAttribute('r', '6');
       c.setAttribute('class', 'map__walk-end ' + cls);
       const t = document.createElementNS(NS, 'title');
-      t.textContent = txt;
-      c.append(t);
-      g.append(c);
-    }
-
-    for (const m of st.route?.marks || []) {
-      const pt = pfad[m.at];
-      if (!pt) continue;
-      const [x, y] = toPx(pt);
-      const c = document.createElementNS(NS, 'text');
-      c.setAttribute('x', x.toFixed(1));
-      c.setAttribute('y', (y + 5).toFixed(1));
-      c.setAttribute('text-anchor', 'middle');
-      c.setAttribute('class', 'map__walk-mark');
-      c.textContent = m.kind === 'elevator' ? '⇕' : '⇅';
-      const t = document.createElementNS(NS, 'title');
-      t.textContent = m.kind === 'elevator' ? 'Aufzug' : 'Treppe';
+      t.textContent = `${txt} — Gleis ${(p.tracks || []).join('/')}`;
       c.append(t);
       g.append(c);
     }
@@ -988,7 +1033,7 @@ export class RouteMap {
     this.showWorks = true;
     if (pts.length === 2) {
       this.fitPoints(pts);
-      // Ein einzelner Abschnitt fuellt sonst den ganzen Bildschirm.
+      // Ein einzelner Abschnitt füllt sonst den ganzen Bildschirm.
       this.zoom = Math.min(this.zoom, 11);
     } else {
       this.center = { lat: pts[0][0], lon: pts[0][1] };
@@ -1024,6 +1069,15 @@ export class RouteMap {
 
   // -------------------------------------------------------------------------
 
+  /** [lat, lon] → Bildschirmpixel im aktuellen Ausschnitt. */
+  projector() {
+    const { w, h } = this.size();
+    const z = this.zoom;
+    const cx = lonToX(this.center.lon, z);
+    const cy = latToY(this.center.lat, z);
+    return ([la, lo]) => [lonToX(lo, z) - cx + w / 2, latToY(la, z) - cy + h / 2];
+  }
+
   render() {
     if (!this.built) return;
     const { w, h } = this.size();
@@ -1031,7 +1085,7 @@ export class RouteMap {
     const cx = lonToX(this.center.lon, z);
     const cy = latToY(this.center.lat, z);
 
-    const toPx = ([la, lo]) => [lonToX(lo, z) - cx + w / 2, latToY(la, z) - cy + h / 2];
+    const toPx = this.projector();
 
     this.renderTiles(w, h, cx, cy);
     this.renderOverlay(w, h, toPx);
@@ -1270,7 +1324,7 @@ export class RouteMap {
     const cyi = cy / 2 ** (this.zoom - zi);
 
     // Eine Kachelreihe über den Rand hinaus laden. Beim Ziehen ist der neue
-    // Ausschnitt dadurch schon abgedeckt, statt erst weiss aufzublitzen und
+    // Ausschnitt dadurch schon abgedeckt, statt erst weiß aufzublitzen und
     // dann nachzuladen.
     const halfW = w / 2 / scale + TILE_SIZE;
     const halfH = h / 2 / scale + TILE_SIZE;
@@ -1460,7 +1514,7 @@ export class RouteMap {
 
       const [x1, y1] = toPx([a.lat, a.lon]);
       const [x2, y2] = toPx([b.lat, b.lon]);
-      // Ausserhalb des Ausschnitts nichts zeichnen - bei hundert Abschnitten
+      // Außerhalb des Ausschnitts nichts zeichnen - bei hundert Abschnitten
       // spart das spürbar Arbeit.
       if (off(x1, y1) && off(x2, y2)) continue;
 
@@ -1505,7 +1559,7 @@ export class RouteMap {
    * Die live verfolgte Verbindung: Streckenverlauf, Start und Ziel, und wo
    * der Zug gerade ist.
    *
-   * Bewusst eine eigene Ebene und nicht bloss eine weitere Route aus der
+   * Bewusst eine eigene Ebene und nicht bloß eine weitere Route aus der
    * Liste — sie überlebt neue Suchen und muss deshalb unabhängig von
    * `ranked` gezeichnet werden.
    */
@@ -1582,15 +1636,15 @@ export class RouteMap {
   }
 
   /**
-   * Die Zuege, die auf der Karte erscheinen sollen — plus der verfolgte.
+   * Die Züge, die auf der Karte erscheinen sollen — plus der verfolgte.
    *
    * Der verfolgte Zug MUSS immer dabei sein. Die Positionsantwort endet bei
-   * 40 Zuegen im Ausschnitt; beim Herauszoomen faellt ausgerechnet er
-   * regelmaessig heraus, und dann waere der eine Zug unsichtbar, auf den es
+   * 40 Zügen im Ausschnitt; beim Herauszoomen fällt ausgerechnet er
+   * regelmäßig heraus, und dann wäre der eine Zug unsichtbar, auf den es
    * ankommt. Steht er nicht in der Live-Liste, wird er aus seiner zuletzt
-   * bekannten Position ergaenzt.
+   * bekannten Position ergänzt.
    *
-   * Zugeordnet wird ueber sameTrain(): die jid taugt dafuer nicht, sie wird
+   * Zugeordnet wird über sameTrain(): die jid taugt dafür nicht, sie wird
    * je HAFAS-Antwort neu vergeben.
    *
    * @returns {{trains: Array, own: ?object}}
@@ -1614,7 +1668,7 @@ export class RouteMap {
       lat: pos.lat,
       lon: pos.lon,
       onRoute: true,
-      // Ohne ausdrueckliches Gegenteil ist die Position hochgerechnet.
+      // Ohne ausdrückliches Gegenteil ist die Position hochgerechnet.
       estimated: pos.estimated !== false,
     };
     trains.push(own);
@@ -1624,9 +1678,9 @@ export class RouteMap {
   renderLiveTrains(svg, w, h, toPx) {
     // Der verfolgte Zug bekommt eine eigene Farbe, damit man ihn zwischen
     // den anderen findet - und er wird IMMER gezeichnet, notfalls aus seiner
-    // zuletzt bekannten Position ergaenzt. Das ist kein Randfall: die
-    // Positionsantwort endet bei 40 Zuegen im Ausschnitt, beim Herauszoomen
-    // faellt er also regelmaessig heraus. Sonst waere ausgerechnet der Zug
+    // zuletzt bekannten Position ergänzt. Das ist kein Randfall: die
+    // Positionsantwort endet bei 40 Zügen im Ausschnitt, beim Herauszoomen
+    // fällt er also regelmäßig heraus. Sonst wäre ausgerechnet der Zug
     // unsichtbar, den man verfolgt.
     const { trains, own } = this.trainsOnMap();
 
@@ -1640,7 +1694,7 @@ export class RouteMap {
         + (t.onRoute ? ' is-onroute' : '')
         + (t === own ? ' is-tracked' : '')
         // Hochgerechnete Position: derselbe Punkt, nur hohl - damit man
-        // sieht, dass die Stelle geschaetzt und nicht gemeldet ist.
+        // sieht, dass die Stelle geschätzt und nicht gemeldet ist.
         + (t.estimated ? ' is-estimated' : ''));
       if (t.jid) {
         g.dataset.jid = t.jid;
@@ -1650,7 +1704,7 @@ export class RouteMap {
           `${trainLabel(t)}${t.direction ? ' nach ' + t.direction : ''} — Details anzeigen`);
       }
 
-      // Grosszuegige, unsichtbare Trefferflaeche: der Punkt allein ist auf
+      // Großzügige, unsichtbare Trefferfläche: der Punkt allein ist auf
       // dem Telefon kaum zu treffen.
       const hit = document.createElementNS(NS, 'circle');
       hit.setAttribute('cx', x.toFixed(1));

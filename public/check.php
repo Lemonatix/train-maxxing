@@ -1,6 +1,6 @@
 <?php
 /**
- * Selbsttest fuer den Webspace.
+ * Selbsttest für den Webspace.
  *
  * Ruf diese Datei nach dem Hochladen einmal im Browser auf:
  *   https://deine-domain.tld/train/check.php
@@ -8,8 +8,8 @@
  * Sie sagt dir, ob PHP passt, ob ausgehende Verbindungen erlaubt sind und
  * welche der Datenquellen von deinem Hoster aus erreichbar sind.
  *
- * WICHTIG: Nach erfolgreichem Test loeschen oder umbenennen - die Datei gibt
- * Serverdetails preis, die nicht oeffentlich sein muessen.
+ * WICHTIG: Nach erfolgreichem Test löschen oder umbenennen - die Datei gibt
+ * Serverdetails preis, die nicht öffentlich sein müssen.
  */
 
 declare(strict_types=1);
@@ -30,7 +30,7 @@ $phpOk = version_compare(PHP_VERSION, '8.0.0', '>=');
 $checks[] = [
     'name'   => 'PHP-Version',
     'state'  => $phpOk ? 'ok' : 'fail',
-    'detail' => PHP_VERSION . ($phpOk ? '' : ' - benoetigt wird mindestens 8.0'),
+    'detail' => PHP_VERSION . ($phpOk ? '' : ' - benötigt wird mindestens 8.0'),
     'hint'   => $phpOk ? '' : 'Stell in der Hoster-Verwaltung eine neuere PHP-Version ein.',
 ];
 
@@ -38,24 +38,24 @@ $curlOk = function_exists('curl_init');
 $checks[] = [
     'name'   => 'cURL-Erweiterung',
     'state'  => $curlOk ? 'ok' : 'fail',
-    'detail' => $curlOk ? 'verfuegbar' : 'fehlt',
+    'detail' => $curlOk ? 'verfügbar' : 'fehlt',
     'hint'   => $curlOk ? '' : 'Ohne cURL kann das Tool keine Daten abrufen. Beim Hoster aktivieren lassen.',
 ];
 
-// Ohne TLS-1.3-Cipher-Steuerung blockt die DB jede Anfrage (Akamai prueft den
-// TLS-Fingerprint). Das ist die haeufigste Ursache, wenn Preise fehlen.
+// Ohne TLS-1.3-Cipher-Steuerung blockt die DB jede Anfrage (Akamai prüft den
+// TLS-Fingerprint). Das ist die häufigste Ursache, wenn Preise fehlen.
 $tls13 = defined('CURLOPT_TLS13_CIPHERS');
 $curlVersion = $curlOk ? (curl_version()['version'] ?? '?') : '?';
 $sslVersion  = $curlOk ? (curl_version()['ssl_version'] ?? '?') : '?';
 $checks[] = [
-    'name'   => 'TLS-1.3-Cipher-Steuerung (fuer DB-Preise)',
+    'name'   => 'TLS-1.3-Cipher-Steuerung (für DB-Preise)',
     'state'  => $tls13 ? 'ok' : 'warn',
     'detail' => 'cURL ' . $curlVersion . ' / ' . $sslVersion
-        . ($tls13 ? ' - CURLOPT_TLS13_CIPHERS verfuegbar' : ' - CURLOPT_TLS13_CIPHERS fehlt'),
+        . ($tls13 ? ' - CURLOPT_TLS13_CIPHERS verfügbar' : ' - CURLOPT_TLS13_CIPHERS fehlt'),
     'hint'   => $tls13
         ? ''
-        : 'Ohne diese Option laesst sich der TLS-Fingerprint nicht anpassen und die DB antwortet mit 403. '
-          . 'Noetig sind cURL 7.61+ mit OpenSSL 1.1.1+. Fahrplan und Schaetzpreise funktionieren trotzdem.',
+        : 'Ohne diese Option lässt sich der TLS-Fingerprint nicht anpassen und die DB antwortet mit 403. '
+          . 'Nötig sind cURL 7.61+ mit OpenSSL 1.1.1+. Fahrplan und Schätzpreise funktionieren trotzdem.',
 ];
 
 $cache   = new Cache((string) $config['cache_dir']);
@@ -64,7 +64,7 @@ $checks[] = [
     'name'   => 'Cache-Verzeichnis beschreibbar',
     'state'  => $cacheOk ? 'ok' : 'warn',
     'detail' => $cacheOk ? (string) $config['cache_dir'] : 'nicht beschreibbar: ' . $config['cache_dir'],
-    'hint'   => $cacheOk ? '' : 'Das Tool laeuft auch ohne Cache, wird aber langsamer und stellt mehr Anfragen. Setz in api/config.php "cache_dir" z.B. auf sys_get_temp_dir().',
+    'hint'   => $cacheOk ? '' : 'Das Tool läuft auch ohne Cache, wird aber langsamer und stellt mehr Anfragen. Setz in api/config.php "cache_dir" z.B. auf sys_get_temp_dir().',
 ];
 
 // --- Datenquellen ------------------------------------------------------
@@ -74,15 +74,15 @@ if ($curlOk) {
 
     $t0   = microtime(true);
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
-    $r    = $oebb->locations('Zuerich', 1);
+    $r    = $oebb->locations('Zürich', 1);
     $ms   = (int) round((microtime(true) - $t0) * 1000);
     $checks[] = [
-        'name'   => 'OeBB HAFAS - Fahrplan, Zuggattungen (KRITISCH)',
+        'name'   => 'ÖBB HAFAS - Fahrplan, Zuggattungen (KRITISCH)',
         'state'  => $r['ok'] ? 'ok' : 'fail',
         'detail' => $r['ok']
             ? 'erreichbar in ' . $ms . ' ms, Testtreffer: ' . ($r['data'][0]['name'] ?? '-')
             : ($r['error'] ?? 'unbekannter Fehler'),
-        'hint'   => $r['ok'] ? '' : 'Ohne diese Quelle funktioniert das Tool nicht. Pruef, ob dein Hoster ausgehende HTTPS-Verbindungen erlaubt.',
+        'hint'   => $r['ok'] ? '' : 'Ohne diese Quelle funktioniert das Tool nicht. Prüf, ob dein Hoster ausgehende HTTPS-Verbindungen erlaubt.',
     ];
 
     $t0 = microtime(true);
@@ -97,25 +97,61 @@ if ($curlOk) {
             : ($r['error'] ?? 'unbekannter Fehler'),
         'hint'   => $r['ok']
             ? 'Sehr gut - du bekommst echte Preise inklusive Abo-Rabatt.'
-            : 'DB blockt Server-IPs haeufig. Das Tool funktioniert weiter, zeigt Preise aber nur als Schaetzung mit Spanne. Alles andere - Fahrplan, Zuege, Umstiege - ist davon nicht betroffen.',
+            : 'DB blockt Server-IPs häufig. Das Tool funktioniert weiter, zeigt Preise aber nur als Schätzung mit Spanne. Alles andere - Fahrplan, Züge, Umstiege - ist davon nicht betroffen.',
     ];
 
-    // MVG nur pruefen, wenn der Provider aktiv ist - sonst ist ein "fail"
-    // hier verwirrend fuer alle, die den Muenchner Nahverkehr nicht nutzen.
+    // MVG nur prüfen, wenn der Provider aktiv ist - sonst ist ein "fail"
+    // hier verwirrend für alle, die den Münchner Nahverkehr nicht nutzen.
     if (($config['providers']['mvg']['enabled'] ?? false) === true) {
         $t0  = microtime(true);
         $mvg = new Mvg($http, $config['providers']['mvg']);
         $r   = $mvg->locations('Marienplatz', 1);
         $ms  = (int) round((microtime(true) - $t0) * 1000);
         $checks[] = [
-            'name'   => 'MVG (Muenchner Nahverkehr, Stoerungsticker)',
+            'name'   => 'MVG (Münchner Nahverkehr, Störungsticker)',
             'state'  => $r['ok'] ? 'ok' : 'warn',
             'detail' => $r['ok']
                 ? 'erreichbar in ' . $ms . ' ms, Testtreffer: ' . ($r['data'][0]['name'] ?? '-')
                 : ($r['error'] ?? 'unbekannter Fehler'),
             'hint'   => $r['ok']
-                ? 'Muenchner U-Bahn-Halte werden in der Ortssuche gefunden, der Stoerungsticker ist aktiv.'
-                : 'Ohne MVG bleibt die Ortssuche fuer den Muenchner Nahverkehr auf DB/OeBB angewiesen und der Stoerungsticker fehlt. Nicht kritisch.',
+                ? 'Münchner U-Bahn-Halte werden in der Ortssuche gefunden, der Störungsticker ist aktiv.'
+                : 'Ohne MVG bleibt die Ortssuche für den Münchner Nahverkehr auf DB/ÖBB angewiesen und der Störungsticker fehlt. Nicht kritisch.',
+        ];
+    }
+
+    // Wagenreihung: die einzige harte Quelle für die Baureihe. Sie ist
+    // Beiwerk - ohne sie fehlt nur die Angabe "ICE 4" statt "ICE" -, aber
+    // ihr Ausfall war bisher unsichtbar, weil der Provider bei jedem Fehler
+    // stillschweigend weitermacht. Genau deshalb steht sie hier.
+    if (($config['providers']['wagenreihung']['enabled'] ?? false) === true) {
+        $t0  = microtime(true);
+        $res = $http->getJson(
+            rtrim((string) $config['providers']['wagenreihung']['endpoint'], '/')
+                . '/coachSequence.departureSequence?input='
+                . rawurlencode(json_encode(json_encode([
+                    ['evaNumber' => 1, 'plannedDeparture' => 2, 'initialDeparture' => 3,
+                     'journeyNumber' => 4, 'category' => 5, 'administration' => 6],
+                    '8000105',
+                    ['Date', gmdate('Y-m-d\TH:i:s.000\Z')],
+                    ['Date', gmdate('Y-m-d\T00:00:00.000\Z')],
+                    1074, 'ICE', '80',
+                ]))),
+            ['Accept' => 'application/json', 'User-Agent' => 'train-maxxing/1.0 (privates Fahrplanwerkzeug)']
+        );
+        $ms = (int) round((microtime(true) - $t0) * 1000);
+        $ok = $res['ok'] && $res['json'] !== null;
+        $checks[] = [
+            'name'   => 'bahn.expert - Baureihe aus der Wagenreihung (optional)',
+            'state'  => $ok ? 'ok' : 'warn',
+            'detail' => $ok
+                ? 'erreichbar in ' . $ms . ' ms'
+                : 'HTTP ' . $res['status'] . ' - Schnittstelle antwortet nicht wie erwartet',
+            'hint'   => $ok
+                ? 'Deutscher Fernverkehr am Reisetag wird mit der Baureihe angezeigt (ICE 4, ICE 3neo …).'
+                : 'Ohne diese Quelle bleibt es bei der Gattung; das Fahrzeug wird nur dort genannt, '
+                  . 'wo es sich aus der Gattung oder der Strecke zwingend ergibt (railjet, Nightjet, Giruno …). '
+                  . 'bahn.expert ist ein privates Projekt und ändert seine Schnittstelle gelegentlich - '
+                  . 'wer die Angabe braucht, wechselt auf RIS::Transports im DB API Marketplace.',
         ];
     }
 }
@@ -165,15 +201,15 @@ foreach ($checks as $c) {
 </head>
 <body>
   <h1>train-maxxing &mdash; Selbsttest</h1>
-  <p class="lead">Prueft, ob dein Webspace alles kann, was das Tool braucht.</p>
+  <p class="lead">Prüft, ob dein Webspace alles kann, was das Tool braucht.</p>
 
   <div class="summary">
     <?php if ($hasFail): ?>
-      <strong>Noch nicht startklar.</strong> Mindestens eine kritische Pruefung ist fehlgeschlagen &mdash; siehe unten.
+      <strong>Noch nicht startklar.</strong> Mindestens eine kritische Prüfung ist fehlgeschlagen &mdash; siehe unten.
     <?php elseif ($hasWarn): ?>
-      <strong>Startklar mit Einschraenkungen.</strong> Das Tool laeuft. Einzelne Komfortfunktionen &mdash; in der Regel die Echtpreise &mdash; stehen nicht zur Verfuegung.
+      <strong>Startklar mit Einschränkungen.</strong> Das Tool läuft. Einzelne Komfortfunktionen &mdash; in der Regel die Echtpreise &mdash; stehen nicht zur Verfügung.
     <?php else: ?>
-      <strong>Alles in Ordnung.</strong> Du kannst <a href="index.html">das Tool oeffnen</a>.
+      <strong>Alles in Ordnung.</strong> Du kannst <a href="index.html">das Tool öffnen</a>.
     <?php endif; ?>
   </div>
 
@@ -191,8 +227,8 @@ foreach ($checks as $c) {
   <?php endforeach; ?>
 
   <p class="hint">
-    Wenn alles passt: diese Datei loeschen oder umbenennen. Sie verraet sonst
-    unnoetig Details ueber deinen Server.
+    Wenn alles passt: diese Datei löschen oder umbenennen. Sie verrät sonst
+    unnötig Details über deinen Server.
   </p>
 </body>
 </html>

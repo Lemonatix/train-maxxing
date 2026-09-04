@@ -1,26 +1,26 @@
 <?php
 /**
- * Den tatsaechlichen Streckenverlauf eines Bauabschnitts aus OpenStreetMap.
+ * Den tatsächlichen Streckenverlauf eines Bauabschnitts aus OpenStreetMap.
  *
- * WOZU: Die Baustellenquellen nennen zwei Betriebsstellen - "Frankfurt-Hoechst
+ * WOZU: Die Baustellenquellen nennen zwei Betriebsstellen - "Frankfurt-Höchst
  * bis Bad Soden" - und deren Koordinaten. Zeichnet man das als gerade Linie,
- * laeuft sie quer durch die Stadt, waehrend die Schiene einen Bogen macht.
- * Bei laengeren Abschnitten wird daraus Unfug: die Luftlinie Hamburg-Berlin
+ * läuft sie quer durch die Stadt, während die Schiene einen Bogen macht.
+ * Bei längeren Abschnitten wird daraus Unfug: die Luftlinie Hamburg-Berlin
  * hat mit der Strecke wenig zu tun.
  *
  * WIE: Deutsche Strecken tragen in OSM ihre VzG-Nummer als `ref` an den
- * Gleisen (`railway=rail`). Zu jedem Abschnitt wird das Stueck Netz mit
+ * Gleisen (`railway=rail`). Zu jedem Abschnitt wird das Stück Netz mit
  * dieser Nummer geholt - begrenzt auf ein Rechteck um die beiden Endpunkte,
- * sonst antwortet Overpass mit einer Zeitueberschreitung. Aus den Gleisen
- * entsteht ein Graph, und der kuerzeste Weg vom einen Endpunkt zum anderen
+ * sonst antwortet Overpass mit einer Zeitüberschreitung. Aus den Gleisen
+ * entsteht ein Graph, und der kürzeste Weg vom einen Endpunkt zum anderen
  * ist der gesuchte Verlauf.
  *
  * ALLE ABSCHNITTE IN EINER ABFRAGE: Overpass ist ein Gemeinschaftsdienst.
- * Sechzig einzelne Anfragen waeren unhoeflich und langsam; sechzig begrenzte
+ * Sechzig einzelne Anfragen wären unhöflich und langsam; sechzig begrenzte
  * Teilabfragen in einer Anfrage sind eine.
  *
  * WO ES NICHT KLAPPT - keine Streckennummer, in OSM nicht erfasst, Overpass
- * ueberlastet - bleibt es bei der geraden Linie. Die Anzeige sagt ohnehin,
+ * überlastet - bleibt es bei der geraden Linie. Die Anzeige sagt ohnehin,
  * dass die Linie den betroffenen ABSCHNITT zeigt und nicht den Verlauf der
  * Schiene.
  */
@@ -37,35 +37,35 @@ final class RailGeometry
     private const ENDS_DEG = 0.004;
 
     /**
-     * Hoechstzahl Abschnitte je Abfrage. Jeder bringt eine eigene
-     * Teilabfrage mit; irgendwann wird die Anfrage dem Server zu gross.
+     * Höchstzahl Abschnitte je Abfrage. Jeder bringt eine eigene
+     * Teilabfrage mit; irgendwann wird die Anfrage dem Server zu groß.
      */
     private const MAX_SECTIONS = 40;
 
-    /** Stuetzpunkte je Abschnitt - fuer eine Uebersichtskarte reicht das. */
+    /** Stützpunkte je Abschnitt - für eine Übersichtskarte reicht das. */
     private const MAX_POINTS = 80;
 
     /**
      * Wie weit ein Gleispunkt vom gemeldeten Endpunkt entfernt sein darf, um
      * als dessen Lage zu gelten. Betriebsstellen sind ausgedehnt und ihre
-     * Koordinate meint das Empfangsgebaeude, nicht den Gleisanfang.
+     * Koordinate meint das Empfangsgebäude, nicht den Gleisanfang.
      */
     private const SNAP_M = 1500.0;
 
     /**
-     * Bis zu welcher Luecke zwei Gleisstuecke als verbunden gelten.
+     * Bis zu welcher Lücke zwei Gleisstücke als verbunden gelten.
      *
-     * Vierzig Meter ueberbruecken die Stelle, an der die Streckennummer
-     * aufhoert - am Einfahrsignal eines Bahnhofs - ohne zwei
-     * nebeneinanderliegende Strecken kurzzuschliessen.
+     * Vierzig Meter überbrücken die Stelle, an der die Streckennummer
+     * aufhört - am Einfahrsignal eines Bahnhofs - ohne zwei
+     * nebeneinanderliegende Strecken kurzzuschließen.
      */
     private const GAP_M = 40.0;
 
     /**
      * Wie viele Abschnitte je Aufruf neu geholt werden.
      *
-     * Der Verlauf einer Strecke aendert sich nicht, deshalb wird er lange
-     * gecacht und nur nachgeladen, was fehlt. Ueber ein paar Aufrufe hinweg
+     * Der Verlauf einer Strecke ändert sich nicht, deshalb wird er lange
+     * gecacht und nur nachgeladen, was fehlt. Über ein paar Aufrufe hinweg
      * ist damit alles beisammen, ohne Overpass in einem Rutsch mit vierzig
      * Teilabfragen zu belasten.
      */
@@ -74,7 +74,7 @@ final class RailGeometry
     /** Wie lange ein einmal ermittelter Verlauf gilt. Schienen ziehen nicht um. */
     private const TTL = 2592000; // 30 Tage
 
-    /** Nach einem Fehlschlag: fruehestens am naechsten Tag wieder versuchen. */
+    /** Nach einem Fehlschlag: frühestens am nächsten Tag wieder versuchen. */
     private const RETRY_AFTER = 86400;
 
     private Http $http;
@@ -89,13 +89,13 @@ final class RailGeometry
     }
 
     /**
-     * Ergaenzt die Abschnitte um ihren Streckenverlauf.
+     * Ergänzt die Abschnitte um ihren Streckenverlauf.
      *
-     * Angefasst werden nur Eintraege mit Streckennummer und ohne bereits
-     * vorhandene Geometrie - die OeBB liefert ihre selbst mit.
+     * Angefasst werden nur Einträge mit Streckennummer und ohne bereits
+     * vorhandene Geometrie - die ÖBB liefert ihre selbst mit.
      *
      * @param array<int,array> $works
-     * @return array<int,array> dieselben Eintraege, teils mit 'geometry'
+     * @return array<int,array> dieselben Einträge, teils mit 'geometry'
      */
     public function enrich(array $works): array
     {
@@ -108,17 +108,17 @@ final class RailGeometry
                 continue;
             }
             // Ein Abschnitt, dessen Enden zusammenfallen, ist ein Punkt -
-            // dafuer gibt es keinen Verlauf zu zeichnen.
+            // dafür gibt es keinen Verlauf zu zeichnen.
             if (self::metres(self::pt($w['from']), self::pt($w['to'])) < 200.0) {
                 continue;
             }
 
             // Schon einmal ermittelt? Dann von dort.
             //
-            // ERFOLG haelt dreissig Tage, MISSERFOLG nur einen. Ein leerer
-            // Eintrag heisst naemlich nicht zwingend "gibt es in OSM nicht":
+            // ERFOLG hält dreißig Tage, MISSERFOLG nur einen. Ein leerer
+            // Eintrag heißt nämlich nicht zwingend "gibt es in OSM nicht":
             // er entsteht genauso, wenn Overpass an dem Tag nur einen Teil
-            // der Gleise geliefert hat, und dann waere die Strecke einen
+            // der Gleise geliefert hat, und dann wäre die Strecke einen
             // Monat lang zu Unrecht abgeschrieben. Gemessen an denselben
             // zwanzig Abschnitten schwankte die Ausbeute je nach Instanz
             // zwischen 7 und 11 - genau diese Schwankung darf sich nicht
@@ -156,7 +156,7 @@ final class RailGeometry
         return $works;
     }
 
-    /** Schluessel aus Abschnitt und Streckennummern - beides bestimmt den Verlauf. */
+    /** Schlüssel aus Abschnitt und Streckennummern - beides bestimmt den Verlauf. */
     private static function cacheKey(array $w): string
     {
         return sprintf(
@@ -168,7 +168,7 @@ final class RailGeometry
     }
 
     /**
-     * Alle benoetigten Gleise in einer Overpass-Abfrage.
+     * Alle benötigten Gleise in einer Overpass-Abfrage.
      *
      * @param array<int,array> $works
      * @return array<int,array{ref:string,points:array<int,array{0:float,1:float}>}>
@@ -178,8 +178,8 @@ final class RailGeometry
         $teile = [];
         foreach ($works as $w) {
             [$s, $west, $n, $ost] = self::bbox($w);
-            // Mehrere Nummern kommen vor, wenn ein Vorhaben ueber einen
-            // Knoten laeuft. Als Alternative im regulaeren Ausdruck.
+            // Mehrere Nummern kommen vor, wenn ein Vorhaben über einen
+            // Knoten läuft. Als Alternative im regulären Ausdruck.
             $refs = implode('|', array_map(
                 static fn(string $r): string => preg_quote($r, '/'),
                 array_slice($w['lines'], 0, 4)
@@ -189,15 +189,15 @@ final class RailGeometry
                 $s, $west, $n, $ost, $refs
             );
 
-            // DAZU DIE GLEISE IN DEN BEIDEN BAHNHOEFEN, ohne Ruecksicht auf
-            // die Streckennummer: innerhalb eines Bahnhofs traegt kaum ein
+            // DAZU DIE GLEISE IN DEN BEIDEN BAHNHOEFEN, ohne Rücksicht auf
+            // die Streckennummer: innerhalb eines Bahnhofs trägt kaum ein
             // Gleis sie, sie klebt an der freien Strecke. Der Verlauf endete
-            // deshalb regelmaessig am Einfahrsignal und fand den gemeldeten
+            // deshalb regelmäßig am Einfahrsignal und fand den gemeldeten
             // Endpunkt nicht mehr.
             //
             // Eng begrenzt - ein knapper halber Kilometer um jeden Endpunkt.
-            // Grosszuegiger geschnitten kaeme in einer Stadt das halbe Netz
-            // mit, und der Weg koennte ueber eine Nachbarstrecke abkuerzen.
+            // Großzügiger geschnitten käme in einer Stadt das halbe Netz
+            // mit, und der Weg könnte über eine Nachbarstrecke abkürzen.
             foreach ([$w['from'], $w['to']] as $ort) {
                 $teile[] = sprintf(
                     'way(%.4f,%.4f,%.4f,%.4f)["railway"="rail"];',
@@ -261,7 +261,7 @@ final class RailGeometry
     }
 
     /**
-     * Der Weg von einem Ende des Abschnitts zum anderen, ueber die Gleise.
+     * Der Weg von einem Ende des Abschnitts zum anderen, über die Gleise.
      *
      * @param array<int,array> $wege
      * @return array<int,array{0:float,1:float}>
@@ -272,12 +272,12 @@ final class RailGeometry
         [$s, $west, $n, $ost] = self::bbox($work);
 
         // Graph aufbauen - nur aus den Gleisen, die zu diesem Abschnitt
-        // gehoeren: gleiche Streckennummer und im selben Rechteck.
+        // gehören: gleiche Streckennummer und im selben Rechteck.
         $nodes = [];
         $adj   = [];
         $key = static fn(array $p): string => $p[0] . ',' . $p[1];
 
-        // Gleise in unmittelbarer Naehe der beiden Endpunkte zaehlen mit,
+        // Gleise in unmittelbarer Nähe der beiden Endpunkte zählen mit,
         // auch ohne passende Streckennummer - siehe ENDS_DEG.
         $nahAmEnde = function (array $pts) use ($work): bool {
             foreach ([$work['from'], $work['to']] as $ort) {
@@ -327,9 +327,9 @@ final class RailGeometry
 
         // LUECKEN SCHLIESSEN. Innerhalb eines Bahnhofs tragen die Gleise
         // meist keine Streckennummer - die Nummer klebt an der freien
-        // Strecke. Der Graph reisst deshalb genau dort auseinander, wo die
+        // Strecke. Der Graph reißt deshalb genau dort auseinander, wo die
         // beiden Endpunkte des Abschnitts liegen, und die Suche findet
-        // nichts. Enden zweier Gleisstuecke, die keine vierzig Meter
+        // nichts. Enden zweier Gleisstücke, die keine vierzig Meter
         // auseinanderliegen, werden deshalb verbunden.
         self::bridgeGaps($nodes, $adj);
 
@@ -385,12 +385,12 @@ final class RailGeometry
     /**
      * Nahe beieinanderliegende Knoten verbinden.
      *
-     * Ueber ein Raster, damit nicht jeder Knoten gegen jeden geprueft werden
-     * muss: bei tausend Knoten waere das eine Million Vergleiche, hier sind
+     * Über ein Raster, damit nicht jeder Knoten gegen jeden geprüft werden
+     * muss: bei tausend Knoten wäre das eine Million Vergleiche, hier sind
      * es ein paar tausend.
      *
      * @param array<string,array{0:float,1:float}> $nodes
-     * @param array<string,array>                  $adj wird ergaenzt
+     * @param array<string,array>                  $adj wird ergänzt
      */
     private static function bridgeGaps(array $nodes, array &$adj): void
     {
@@ -419,7 +419,7 @@ final class RailGeometry
         }
     }
 
-    /** Der Graphknoten, der einem Punkt am naechsten liegt. */
+    /** Der Graphknoten, der einem Punkt am nächsten liegt. */
     private static function nearest(array $nodes, array $ziel): ?string
     {
         $best = self::SNAP_M;
@@ -453,7 +453,7 @@ final class RailGeometry
         return [(float) $ort['lat'], (float) $ort['lon']];
     }
 
-    /** Gleichmaessiges Ausduennen; Anfang und Ende bleiben erhalten. */
+    /** Gleichmäßiges Ausdünnen; Anfang und Ende bleiben erhalten. */
     private static function thin(array $points, int $max): array
     {
         $n = count($points);

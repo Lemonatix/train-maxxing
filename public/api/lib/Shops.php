@@ -2,22 +2,22 @@
 /**
  * Buchungs-Deeplinks zu den Ticketshops.
  *
- * Welche Shops angeboten werden, richtet sich nach den Laendern, die die Reise
- * beruehrt: eine Fahrt Zuerich-Muenchen bekommt SBB und DB, eine Fahrt
- * Wien-Muenchen OeBB und DB. Der Shop des Startlandes steht vorn, weil dort in
+ * Welche Shops angeboten werden, richtet sich nach den Ländern, die die Reise
+ * berührt: eine Fahrt Zürich-München bekommt SBB und DB, eine Fahrt
+ * Wien-München ÖBB und DB. Der Shop des Startlandes steht vorn, weil dort in
  * der Regel die passenden Abos hinterlegt sind.
  *
  * VERLAESSLICHKEIT DER LINKS:
- *   OeBB  - kommt fertig aus der Fahrplanantwort (HAFAS "clickout") und ist
- *           mit Datum, Zeit und beiden Bahnhoefen vorbelegt.
- *   DB    - Deeplink-Format der Buchungsstrecke, HTTP 200 geprueft.
- *   SBB   - hier ist nur die Zielseite geprueft (HTTP 200). Ob sie die
- *           Parameter uebernimmt, laesst sich serverseitig nicht feststellen,
+ *   ÖBB  - kommt fertig aus der Fahrplanantwort (HAFAS "clickout") und ist
+ *           mit Datum, Zeit und beiden Bahnhöfen vorbelegt.
+ *   DB    - Deeplink-Format der Buchungsstrecke, HTTP 200 geprüft.
+ *   SBB   - hier ist nur die Zielseite geprüft (HTTP 200). Ob sie die
+ *           Parameter übernimmt, lässt sich serverseitig nicht feststellen,
  *           weil die Suche clientseitig aufgebaut wird. Der alte Pfad
  *           fahrplan.xhtml liefert inzwischen durchgehend HTTP 400 und ist
  *           deshalb raus. Im Zweifel landet man auf der Fahrplansuche und muss
  *           die Orte selbst eintragen - deshalb ist der Link als
- *           "nicht garantiert vorausgefuellt" markiert.
+ *           "nicht garantiert vorausgefüllt" markiert.
  */
 final class Shops
 {
@@ -28,7 +28,7 @@ final class Shops
     ];
 
     /**
-     * Baut die Shop-Liste fuer eine Verbindung.
+     * Baut die Shop-Liste für eine Verbindung.
      *
      * @param array   $journey    normalisierte Verbindung
      * @param string  $date       YYYY-MM-DD
@@ -66,7 +66,7 @@ final class Shops
             $depDate = $date;
         }
 
-        // Beteiligte Laender, Startland zuerst.
+        // Beteiligte Länder, Startland zuerst.
         $startCountry = (string) ($first['from']['country'] ?? '');
         $countries    = [];
         if (isset(self::NAMES[$startCountry])) {
@@ -78,7 +78,7 @@ final class Shops
             }
         }
         if ($countries === []) {
-            $countries = ['de']; // sinnvoller Standard fuer den Vertrieb
+            $countries = ['de']; // sinnvoller Standard für den Vertrieb
         }
 
         $out = [];
@@ -117,8 +117,8 @@ final class Shops
      *
      *   A=1@O=Zürich HB@X=8540211@Y=47378177@U=80@L=8503000@
      *
-     * X und Y sind Laenge und Breite mal 1e6. Ohne Koordinaten bleibt die ID
-     * unvollstaendig, wird von der Buchungsstrecke aber trotzdem akzeptiert.
+     * X und Y sind Länge und Breite mal 1e6. Ohne Koordinaten bleibt die ID
+     * unvollständig, wird von der Buchungsstrecke aber trotzdem akzeptiert.
      */
     private static function dbLocationId(string $name, array $loc, string $eva): string
     {
@@ -168,9 +168,9 @@ final class Shops
 
             case 'de':
                 // Die Buchungsstrecke liest ihre Parameter aus dem Fragment.
-                // Mit blossen Ortsnamen (so/zo) meldet sie "Keine Verbindungen
+                // Mit bloßen Ortsnamen (so/zo) meldet sie "Keine Verbindungen
                 // gefunden" und ignoriert das Datum - sie braucht die
-                // vollstaendigen Location-IDs inklusive Koordinaten.
+                // vollständigen Location-IDs inklusive Koordinaten.
                 $ends = self::endpoints($journey);
                 $soid = self::dbLocationId($fromName, $ends['from'], $fromEva);
                 $zoid = self::dbLocationId($toName, $ends['to'], $toEva);
@@ -199,7 +199,7 @@ final class Shops
                     'id'        => 'de',
                     'label'     => 'DB',
                     'url'       => 'https://www.bahn.de/buchung/fahrplan/suche#' . $frag,
-                    // Siehe Klassenkommentar: Format nicht abschliessend geprueft.
+                    // Siehe Klassenkommentar: Format nicht abschließend geprüft.
                     'prefilled' => false,
                 ];
 
@@ -214,7 +214,7 @@ final class Shops
                     'id'        => 'ch',
                     'label'     => 'SBB',
                     'url'       => $url,
-                    // Siehe Klassenkommentar: Uebernahme der Parameter ungeprueft.
+                    // Siehe Klassenkommentar: Übernahme der Parameter ungeprüft.
                     'prefilled' => false,
                 ];
         }

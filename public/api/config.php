@@ -3,7 +3,7 @@
  * Zentrale Konfiguration.
  *
  * Diese Datei ist die einzige, die du normalerweise anfassen musst, wenn sich
- * etwas am Hosting oder an den Upstream-APIs aendert.
+ * etwas am Hosting oder an den Upstream-APIs ändert.
  */
 
 return [
@@ -16,25 +16,25 @@ return [
     'cache_dir' => __DIR__ . '/cache',
 
     // Wie lange Antworten zwischengespeichert werden (Sekunden).
-    // Fahrplaene aendern sich selten, Preise oefter.
+    // Fahrpläne ändern sich selten, Preise öfter.
     'cache_ttl' => [
         'locations'   => 86400,  // Ortssuche: 1 Tag
         'journeys'    => 300,    // Verbindungen: 5 Minuten
         'prices'      => 600,    // Preise: 10 Minuten
-        'disruptions' => 120,    // MVG-Stoerungsticker: 2 Minuten
-        'fxrate'      => 21600,  // EZB-Wechselkurse: 6 Stunden (taeglich neu)
+        'disruptions' => 120,    // MVG-Störungsticker: 2 Minuten
+        'fxrate'      => 21600,  // EZB-Wechselkurse: 6 Stunden (täglich neu)
         'platforms'   => 604800, // Bahnsteige aus OSM: 7 Tage (bewegen sich nicht)
         'works'       => 3600,   // Bauarbeiten: 1 Stunde
-        // Streckenverlaeufe aus OSM. Der laengste Wert hier bestimmt zugleich,
-        // wie lange der Cache-Ordner Dateien behaelt - siehe gc() in index.php.
+        // Streckenverläufe aus OSM. Der längste Wert hier bestimmt zugleich,
+        // wie lange der Cache-Ordner Dateien behält - siehe gc() in index.php.
         'railgeom'    => 2592000, // 30 Tage (Schienen ziehen nicht um)
     ],
 
     // Timeout pro Upstream-Request in Sekunden.
     'http_timeout' => 25,
 
-    // Einfaches Rate-Limit pro IP, damit dein Webspace nicht als Scraper auffaellt
-    // und du nicht aus Versehen gegen deinen Hoster-Vertrag verstoesst.
+    // Einfaches Rate-Limit pro IP, damit dein Webspace nicht als Scraper auffällt
+    // und du nicht aus Versehen gegen deinen Hoster-Vertrag verstößt.
     'rate_limit' => [
         'enabled'  => true,
         'max'      => 60,   // Requests
@@ -42,13 +42,13 @@ return [
     ],
 
     'providers' => [
-        // --- OeBB HAFAS: Fahrplan, Zuggattungen, Zugnummern. Sehr zuverlaessig. ---
-        // Liefert KEINE Preise, nur einen Deeplink in den OeBB-Shop.
+        // --- ÖBB HAFAS: Fahrplan, Zuggattungen, Zugnummern. Sehr zuverlässig. ---
+        // Liefert KEINE Preise, nur einen Deeplink in den ÖBB-Shop.
         'oebb' => [
             'enabled'  => true,
             'endpoint' => 'https://fahrplan.oebb.at/bin/mgate.exe',
-            // Diese Werte stammen aus der oeffentlichen OeBB-App-Konfiguration.
-            // Falls die API irgendwann "auth" moniert, muessen sie aktualisiert werden.
+            // Diese Werte stammen aus der öffentlichen ÖBB-App-Konfiguration.
+            // Falls die API irgendwann "auth" moniert, müssen sie aktualisiert werden.
             'auth'     => ['type' => 'AID', 'aid' => 'OWDL4fE4ixNiPBBm'],
             'client'   => ['id' => 'OEBB', 'type' => 'IPH', 'name' => 'oebbPROD-ADHOC', 'v' => '6030600'],
             'ver'      => '1.57',
@@ -62,12 +62,12 @@ return [
         ],
 
         // --- DB: die einzige der drei Quellen, die echte Preise liefert. ---
-        // ACHTUNG: DB blockt Rechenzentrums-IPs haeufig mit HTTP 403 "OPS_BLOCKED".
+        // ACHTUNG: DB blockt Rechenzentrums-IPs häufig mit HTTP 403 "OPS_BLOCKED".
         // Ob es von deinem Webspace aus geht, zeigt dir check.php.
         'db' => [
             'enabled'  => true,
             // 'bahnde'  = Web-API von int.bahn.de (kein Key)
-            // 'dbrest'  = eine db-rest Instanz (eigene oder oeffentliche)
+            // 'dbrest'  = eine db-rest Instanz (eigene oder öffentliche)
             'mode'     => 'bahnde',
             'bahnde'   => [
                 'locations' => 'https://int.bahn.de/web/api/reiseloesung/orte',
@@ -80,15 +80,15 @@ return [
             ],
         ],
 
-        // --- MVG: Muenchner Nahverkehr (U-Bahn, Tram, Bus, S-Bahn). ---
+        // --- MVG: Münchner Nahverkehr (U-Bahn, Tram, Bus, S-Bahn). ---
         //
-        // Ergaenzt die Ortssuche um alle Halte des MVV/MVG-Netzes - HAFAS
+        // Ergänzt die Ortssuche um alle Halte des MVV/MVG-Netzes - HAFAS
         // kennt reine U-Bahn-Halte wie "Odeonsplatz" oder "Sendlinger Tor"
-        // oft nicht. Zusaetzlich liefert die API einen Stoerungsticker
+        // oft nicht. Zusätzlich liefert die API einen Störungsticker
         // (?action=disruptions), den die App als Live-Widget einblenden kann.
         //
-        // Die API laeuft ohne Auth und ist ausdruecklich fuer die MVG-Web-App
-        // gedacht. Fuer den fairen Umgang: cache_ttl['disruptions'] deckelt
+        // Die API läuft ohne Auth und ist ausdrücklich für die MVG-Web-App
+        // gedacht. Für den fairen Umgang: cache_ttl['disruptions'] deckelt
         // die Aufruffrequenz.
         //
         // Halte, die HAFAS nicht kennt, sind mit dieser API NICHT anroutbar
@@ -99,42 +99,42 @@ return [
             'user_agent' => 'train-maxxing (+https://github.com/)',
         ],
 
-        // --- strecken.info (DB InfraGO): grosse Baustellen in Deutschland. ---
+        // --- strecken.info (DB InfraGO): große Baustellen in Deutschland. ---
         //
         // Das Verzeichnis hinter strecken.info. Liefert Totalsperrungen im
         // ganzen deutschen Netz mit Abschnitt, Zeitraum, Art der Arbeiten und
-        // Streckennummer - die OeBB-Quelle deckt fast nur Oesterreich ab.
+        // Streckennummer - die ÖBB-Quelle deckt fast nur Österreich ab.
         //
         // Die Antwort umfasst mehrere Megabyte, deshalb greift cache_ttl
         // ['works']. Abschalten kostet nur die deutschen Baustellen; die
-        // oesterreichischen kommen weiter ueber die OeBB.
+        // österreichischen kommen weiter über die ÖBB.
         'streckeninfo' => [
             'enabled'    => true,
             'user_agent' => 'train-maxxing (+https://github.com/)',
         ],
 
-        // --- OpenStreetMap via Overpass: Bahnsteige fuer den Umstiegsplan. ---
+        // --- OpenStreetMap via Overpass: Bahnsteige für den Umstiegsplan. ---
         //
         // Liefert Gleisnummer, Lage und Ebene der Bahnsteige. Daraus baut die
-        // App bei knappen Umstiegen einen massstaeblichen Lageplan mit der
+        // App bei knappen Umstiegen einen maßstäblichen Lageplan mit der
         // Luftlinie zwischen Ankunfts- und Abfahrtsgleis.
         //
         // Overpass ist ein kostenlos betriebener Gemeinschaftsdienst. Sei
-        // fair: Bahnsteige aendern sich praktisch nie, deshalb sind sieben
-        // Tage Cache gesetzt. Eine oeffentliche Instanz vertraegt keine
+        // fair: Bahnsteige ändern sich praktisch nie, deshalb sind sieben
+        // Tage Cache gesetzt. Eine öffentliche Instanz verträgt keine
         // Dauerlast - wer das Tool stark nutzt, sollte eine eigene Instanz
         // eintragen oder den Provider abschalten.
         'overpass' => [
             'enabled'    => true,
-            // Der Reihe nach, bis eine antwortet. Die oeffentlichen Instanzen
+            // Der Reihe nach, bis eine antwortet. Die öffentlichen Instanzen
             // sind unterschiedlich gut gelaunt: die Hauptinstanz stellt
             // Anfragen bei Last in eine Warteschlange (gemessen: elf Sekunden
-            // fuer eine triviale Abfrage), und die Ausweichserver sind
+            // für eine triviale Abfrage), und die Ausweichserver sind
             // zeitweise ganz weg (HTTP 502). Mit nur einem Ausweichserver
-            // hiess das im Betrieb regelmaessig "Dienst antwortet nicht".
+            // hieß das im Betrieb regelmäßig "Dienst antwortet nicht".
             //
-            // NUR WELTWEITE INSTANZEN. Regionale Auszuege wie overpass.osm.ch
-            // antworten fuer einen deutschen Bahnhof mit HTTP 200 und einer
+            // NUR WELTWEITE INSTANZEN. Regionale Auszüge wie overpass.osm.ch
+            // antworten für einen deutschen Bahnhof mit HTTP 200 und einer
             // LEEREN Liste - nicht von "nicht kartiert" zu unterscheiden.
             'endpoints'  => [
                 'https://overpass-api.de/api/interpreter',
@@ -143,17 +143,17 @@ return [
                 'https://overpass.private.coffee/api/interpreter',
             ],
             'user_agent' => 'train-maxxing (+https://github.com/)',
-            // Gesamtbudget fuer alle Versuche zusammen. Je Instanz wird ein
+            // Gesamtbudget für alle Versuche zusammen. Je Instanz wird ein
             // Teil davon angesetzt, damit eine tote Instanz nicht die ganze
-            // Zeit frisst - vorher wartete die Anfrage zweimal fuenfzig
+            // Zeit frisst - vorher wartete die Anfrage zweimal fünfzig
             // Sekunden und gab dann auf.
             'timeout'    => 60,
         ],
 
         // --- Wagenreihung: liefert die Baureihe (ICE 4 = BR 412 usw.). ---
         //
-        // Laeuft ueber bahn.expert, weil der DB-eigene Endpunkt von aussen
-        // nicht ansprechbar ist (HTTP 422, siehe README). Gilt nur fuer
+        // Läuft über bahn.expert, weil der DB-eigene Endpunkt von außen
+        // nicht ansprechbar ist (HTTP 422, siehe README). Gilt nur für
         // deutschen Fernverkehr am Reisetag.
         //
         // bahn.expert ist ein privat betriebenes Projekt. Sei fair: Ergebnisse

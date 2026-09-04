@@ -3,7 +3,7 @@
  *
  * Einstellungen (Abos, Modus, Gewichtungen, eigene Zugregeln) liegen im
  * localStorage. Es werden keine Daten an Dritte gesendet - alle Abfragen
- * laufen ueber dein eigenes PHP-Backend.
+ * laufen über dein eigenes PHP-Backend.
  */
 
 import { api } from './api.js';
@@ -22,18 +22,18 @@ const THEME_KEY = 'train-maxxing:theme';
 /**
  * Die verfolgte Verbindung liegt getrennt von den Einstellungen.
  *
- * Sie ist kurzlebig und gross - sie gehoert nicht in denselben Eintrag wie
- * Abos und Reglerstellungen, die bei jeder Aenderung neu geschrieben werden.
+ * Sie ist kurzlebig und groß - sie gehört nicht in denselben Eintrag wie
+ * Abos und Reglerstellungen, die bei jeder Änderung neu geschrieben werden.
  */
 const TRACK_KEY = 'train-maxxing:tracked';
 
 /**
- * Seitengroesse der Ergebnisliste.
+ * Seitengröße der Ergebnisliste.
  *
  * HAFAS deckelt eine Suchanfrage bei rund sechs Treffern - "einfach mehr
- * anfragen" gibt es nicht. Spaetere Abfahrten kommen ueber den Blaetter-
+ * anfragen" gibt es nicht. Spätere Abfahrten kommen über den Blätter-
  * Kontext der vorigen Antwort. Deshalb: sechs zeigen, und wer mehr will,
- * loest damit die naechste Seite aus.
+ * löst damit die nächste Seite aus.
  */
 const PAGE_SIZE = 6;
 
@@ -46,7 +46,7 @@ const state = {
   time: nowHHMM(),
   arrival: false,
   travelClass: 2,
-  // Kuerzestmoeglicher Umstieg als Standard. Unter einer Minute gibt es keinen
+  // Kürzestmöglicher Umstieg als Standard. Unter einer Minute gibt es keinen
   // Umstieg, deshalb ist 1 die Untergrenze.
   minChange: 1,
   discounts: [],
@@ -54,11 +54,11 @@ const state = {
   // Nerd-Parameter
   modelPrefs: {},      // Modell-ID  -> Bonus (-5 … +5)
   routePrefs: {},      // Strecken-ID -> Bonus (-5 … +5)
-  speedWeight: 0,      // Gewicht fuer unbenannte Strecken (0 … 5)
+  speedWeight: 0,      // Gewicht für unbenannte Strecken (0 … 5)
   liveTrains: true,    // Zugpositionen auf der Karte
   // Welche Verkehrsmittel auf der Karte erscheinen. Leer = alle. Bewusst
   // getrennt von state.products: auf der Karte will man oft nur den
-  // Fernverkehr sehen, ohne die Verbindungssuche einzuschraenken.
+  // Fernverkehr sehen, ohne die Verbindungssuche einzuschränken.
   liveProducts: [],
   // Sortierung der Trefferliste. Chronologisch nach Abfahrt ist die
   // Voreinstellung, weil das die Reihenfolge ist, in der die Züge fahren -
@@ -70,8 +70,10 @@ const state = {
   lastPayload: null,
   ranked: [],
   visible: PAGE_SIZE,  // wie viele Karten die Liste gerade zeigt
-  scrollCtx: null,     // Blaetter-Kontext fuer spaetere Abfahrten
+  scrollCtx: null,       // Blätter-Kontext für spätere Abfahrten
+  scrollBackCtx: null,   // derselbe rückwärts, für frühere Abfahrten
   loadingMore: false,
+  loadingEarlier: false,
   selectedIndex: 0,
   productCatalogue: [], // vom Backend geladen: [{id, label, hint}]
 };
@@ -93,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Eine geteilte Suche aus der URL hat Vorrang vor gespeicherten Werten.
   const shared = applyShareUrl();
   map = new RouteMap($('#map'));
-  // Nach Verschieben oder Zoomen die Zuege im neuen Ausschnitt nachladen.
+  // Nach Verschieben oder Zoomen die Züge im neuen Ausschnitt nachladen.
   map.onViewChange = scheduleLiveTrains;
   map.onTrainClick = showTrainDetails;
   // Karte sofort aufbauen, damit sie nicht erst nach der ersten Suche erscheint.
@@ -102,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
   live = new LiveTracker($('#live-panel'), map);
   // Der Knopf auf der Karte muss mitbekommen, ob gerade verfolgt wird.
   live.onChange = () => draw();
-  // Klasse, Abos und Verkehrsmittel gelten auch fuer Ersatzverbindungen.
+  // Klasse, Abos und Verkehrsmittel gelten auch für Ersatzverbindungen.
   live.context = () => ({
     travelClass: state.travelClass,
     discounts: state.discounts,
@@ -120,14 +122,14 @@ document.addEventListener('DOMContentLoaded', () => {
   loadCatalogue();
   loadFxRates();
   applyStateToForm();
-  // MVG-Stoerungsticker Muenchen einblenden, wenn der Endpoint Meldungen hat.
+  // MVG-Störungsticker München einblenden, wenn der Endpoint Meldungen hat.
   initMvgTicker(document.getElementById('mvg-ticker'));
   // Bauarbeiten im Netz: Liste plus Kartenebene.
-  // Die Baustellen bringen ihre eigene Karte mit - sie gehoeren nicht auf
+  // Die Baustellen bringen ihre eigene Karte mit - sie gehören nicht auf
   // die Routenkarte, siehe works.js.
   initWorks(document.getElementById('works'));
 
-  // Eine laufende Verfolgung ueberlebt Neuladen und neue Suchen.
+  // Eine laufende Verfolgung überlebt Neuladen und neue Suchen.
   restoreTracked();
 
   // Geteilte Suche direkt ausführen, damit der Empfänger nichts tun muss.
@@ -153,9 +155,9 @@ function loadSettings() {
       if (saved[key] !== undefined) state[key] = saved[key];
     }
 
-    // Frueher war die Voreinstellung 5 Minuten bzw. "egal" (null). Beides
-    // einmalig auf den kuerzestmoeglichen Umstieg ziehen - wer bewusst
-    // umgestellt hat, behaelt seinen Wert.
+    // Früher war die Voreinstellung 5 Minuten bzw. "egal" (null). Beides
+    // einmalig auf den kürzestmöglichen Umstieg ziehen - wer bewusst
+    // umgestellt hat, behält seinen Wert.
     if (!saved.minChangeMigrated) {
       if (state.minChange == null || state.minChange === 5) state.minChange = 1;
     }
@@ -183,7 +185,7 @@ function saveSettings() {
   }
 }
 
-/** Sichert die verfolgte Verbindung, damit sie ein Neuladen uebersteht. */
+/** Sichert die verfolgte Verbindung, damit sie ein Neuladen übersteht. */
 function saveTracked(journey) {
   try {
     if (!journey) localStorage.removeItem(TRACK_KEY);
@@ -196,9 +198,9 @@ function saveTracked(journey) {
 /**
  * Stellt eine laufende Verfolgung wieder her.
  *
- * Nur, solange die Fahrt noch laeuft - eine gestern verfolgte Verbindung
- * wieder aufzumachen waere Unsinn. Die Echtzeitlage wird ohnehin sofort
- * neu geladen, gespeichert ist nur das Geruest der Verbindung.
+ * Nur, solange die Fahrt noch läuft - eine gestern verfolgte Verbindung
+ * wieder aufzumachen wäre Unsinn. Die Echtzeitlage wird ohnehin sofort
+ * neu geladen, gespeichert ist nur das Gerüst der Verbindung.
  */
 function restoreTracked() {
   let journey = null;
@@ -223,7 +225,7 @@ function restoreTracked() {
 // ======================================================================
 
 /**
- * Die Karte rechnet in Pixeln ihres Containers. Aendert sich dessen Groesse -
+ * Die Karte rechnet in Pixeln ihres Containers. Ändert sich dessen Größe -
  * Fenster skaliert, Telefon gedreht - muss sie neu gezeichnet werden.
  */
 function setupResize() {
@@ -254,7 +256,7 @@ function setupLiveToggle() {
 }
 
 /**
- * Filtermenue fuer die Live-Zuege auf der Karte.
+ * Filtermenü für die Live-Züge auf der Karte.
  *
  * Baut auf demselben Verkehrsmittel-Katalog auf wie der Suchfilter, wirkt
  * aber nur auf die Karte. Wird erst gerufen, wenn der Katalog geladen ist.
@@ -297,7 +299,7 @@ function setupLiveFilter(products) {
     cb.value = p.id;
     cb.addEventListener('change', () => {
       const checked = [...boxes].filter(([, c]) => c.checked).map(([id]) => id);
-      // Alles angehakt heisst "keine Einschraenkung" - das spart den Parameter.
+      // Alles angehakt heißt "keine Einschränkung" - das spart den Parameter.
       state.liveProducts = checked.length === products.length ? [] : checked;
       sync();
       saveSettings();
@@ -355,11 +357,11 @@ function setupSort() {
     applySort();
     saveSettings();
 
-    // Zurueck an den Listenanfang. Ohne das bleibt die Auswahl an der alten
-    // Verbindung haengen - und weil die Karte ueber der Liste genau diese
-    // Auswahl zeigt, aendert sich im halben Bild nichts, obwohl die Liste
-    // laengst neu sortiert ist. Es sah dann aus, als greife die Sortierung
-    // erst bei der naechsten Suche.
+    // Zurück an den Listenanfang. Ohne das bleibt die Auswahl an der alten
+    // Verbindung hängen - und weil die Karte über der Liste genau diese
+    // Auswahl zeigt, ändert sich im halben Bild nichts, obwohl die Liste
+    // längst neu sortiert ist. Es sah dann aus, als greife die Sortierung
+    // erst bei der nächsten Suche.
     if (state.lastPayload) rerank({ keepSelection: false });
   });
   applySort();
@@ -368,10 +370,10 @@ function setupSort() {
 /**
  * Beschriftung und Hinweistext der Sortierung nachziehen.
  *
- * Die Voreinstellung heisst je nach Modus etwas anderes, weil sie etwas
+ * Die Voreinstellung heißt je nach Modus etwas anderes, weil sie etwas
  * anderes TUT: im Normal-Modus eine Punktzahl aus Preis, Dauer und
  * Umstiegen, im Nerd-Modus die Gruppierung nach Streckenvarianten. Ein
- * gemeinsames "Empfehlung" waere in einem der beiden Faelle gelogen.
+ * gemeinsames "Empfehlung" wäre in einem der beiden Fälle gelogen.
  */
 function applySort() {
   const sel = $('#sort');
@@ -691,7 +693,7 @@ async function loadCatalogue() {
 /**
  * Wechselkurse einmal je Sitzung holen.
  *
- * Beiwerk: schlaegt es fehl, fehlt nur der Gegenwert in Franken. Deshalb
+ * Beiwerk: schlägt es fehl, fehlt nur der Gegenwert in Franken. Deshalb
  * ohne Fehlermeldung und ohne die Suche aufzuhalten.
  */
 async function loadFxRates() {
@@ -700,7 +702,7 @@ async function loadFxRates() {
     setFxRates(res);
     if (state.ranked.length > 0) draw();
   } catch {
-    // Kein Kurs, kein Gegenwert - sonst aendert sich nichts.
+    // Kein Kurs, kein Gegenwert - sonst ändert sich nichts.
   }
 }
 
@@ -808,9 +810,11 @@ async function runSearch() {
   state.selectedIndex = 0;
   state.visible = PAGE_SIZE;
   state.scrollCtx = null;
+  state.scrollBackCtx = null;
   state.loadingMore = false;
-  // Die Verfolgung laeuft weiter: wer im Zug sitzt und nebenbei die
-  // Rueckfahrt sucht, will sie nicht jedes Mal neu starten.
+  state.loadingEarlier = false;
+  // Die Verfolgung läuft weiter: wer im Zug sitzt und nebenbei die
+  // Rückfahrt sucht, will sie nicht jedes Mal neu starten.
 
   try {
     const payload = await api.journeys(
@@ -833,6 +837,7 @@ async function runSearch() {
 
     state.lastPayload = payload;
     state.scrollCtx = payload.scroll || null;
+    state.scrollBackCtx = payload.scrollBack || null;
     const n = payload.journeys.length;
     if (n === 0) {
       // Konkreter Hinweis statt kommentarlosem "0 Verbindungen": in der Praxis
@@ -861,6 +866,11 @@ async function runSearch() {
     }
     updateShareUrl();
     rerank();
+    // Neue Suche, neuer Ausschnitt: sonst zeigt die Karte nach Zürich-Wien
+    // weiter den Alpenraum, während die Liste Berlin-Hamburg führt. Nur
+    // beim Blättern (showMore) bleibt der Ausschnitt stehen.
+    map.fit();
+    map.render();
     loadBestPrices();
   } catch (err) {
     if (err.name === 'AbortError') return;
@@ -873,11 +883,11 @@ async function runSearch() {
  * Neu bewerten ohne neue Netzabfrage - z.B. nach Moduswechsel.
  *
  * @param {{keepSelection?: boolean}} [opts]
- *   keepSelection=false springt zurueck an den Listenanfang. Gedacht fuer die
- *   ausdrueckliche Umsortierung: dort ist die Frage "was steht jetzt oben",
- *   und die Karte ueber der Liste soll das auch zeigen. Bei Modus- und
- *   Reglerwechseln bleibt die Auswahl dagegen an ihrer Verbindung haengen -
- *   da hat man sich fuer eine bestimmte entschieden und schraubt nur an der
+ *   keepSelection=false springt zurück an den Listenanfang. Gedacht für die
+ *   ausdrückliche Umsortierung: dort ist die Frage "was steht jetzt oben",
+ *   und die Karte über der Liste soll das auch zeigen. Bei Modus- und
+ *   Reglerwechseln bleibt die Auswahl dagegen an ihrer Verbindung hängen -
+ *   da hat man sich für eine bestimmte entschieden und schraubt nur an der
  *   Reihenfolge drumherum.
  */
 function rerank(opts) {
@@ -885,7 +895,7 @@ function rerank(opts) {
   const payload = state.lastPayload;
   if (!payload) return;
 
-  // Die Auswahl haengt an der Verbindung, nicht an ihrer Position: nach
+  // Die Auswahl hängt an der Verbindung, nicht an ihrer Position: nach
   // einem Moduswechsel oder einer nachgeladenen Seite steht sie woanders.
   const selected = keepSelection ? (state.ranked[state.selectedIndex]?.journey ?? null) : null;
 
@@ -902,7 +912,7 @@ function rerank(opts) {
   state.selectedIndex = again >= 0 ? again : 0;
   state.visible = Math.min(Math.max(state.visible, PAGE_SIZE), ranked.length);
   // Ist die Auswahl durch die Neusortierung nach hinten gerutscht, muss sie
-  // sichtbar bleiben - sonst zeigt die Karte eine Route ohne zugehoerige Karte.
+  // sichtbar bleiben - sonst zeigt die Karte eine Route ohne zugehörige Karte.
   if (state.selectedIndex >= state.visible) {
     state.visible = Math.min(
       Math.ceil((state.selectedIndex + 1) / PAGE_SIZE) * PAGE_SIZE,
@@ -918,8 +928,8 @@ function rerank(opts) {
 function draw() {
   const ranked = state.ranked;
   showSortBar(ranked.length > 0);
-  // Bestenzeichen ueber ALLE Treffer bestimmen, nicht nur die sichtbaren:
-  // sonst wandert das Label "guenstigste" beim Ausklappen weiter.
+  // Bestenzeichen über ALLE Treffer bestimmen, nicht nur die sichtbaren:
+  // sonst wandert das Label "günstigste" beim Ausklappen weiter.
   renderResults($('#results-list'), ranked, highlights(ranked), state, select, showMore, {
     toggle: (journey) => live.start(journey),
     isTracking: (journey) => live.isTracking(journey),
@@ -928,20 +938,20 @@ function draw() {
     takeAlternative,
     undoAlternative,
     loadPlatforms,
-  });
+  }, showEarlier);
   // Die Karte zeigt genau die Routen, die auch in der Liste stehen. Die
-  // Indizes bleiben dabei gueltig, weil von vorne geschnitten wird.
+  // Indizes bleiben dabei gültig, weil von vorne geschnitten wird.
   map.setData(ranked.slice(0, state.visible), state.selectedIndex, select);
   scheduleLiveTrains();
   ensureFallbacks();
 }
 
 /**
- * Zeigt die naechsten Verbindungen.
+ * Zeigt die nächsten Verbindungen.
  *
  * Zwei Stufen: was schon geladen ist, wird nur aufgeklappt. Ist alles
- * sichtbar, holt der naechste Klick die Folgeseite bei der OeBB - spaetere
- * Abfahrten gibt es nur ueber deren Blaetter-Kontext.
+ * sichtbar, holt der nächste Klick die Folgeseite bei der ÖBB - spätere
+ * Abfahrten gibt es nur über deren Blätter-Kontext.
  */
 async function showMore() {
   if (state.visible < state.ranked.length) {
@@ -970,7 +980,7 @@ async function showMore() {
       scroll: state.scrollCtx,
     });
 
-    // HAFAS liefert an der Seitengrenze gelegentlich Ueberschneidungen.
+    // HAFAS liefert an der Seitengrenze gelegentlich Überschneidungen.
     const known = new Set(state.lastPayload.journeys.map((j) => j.id));
     const fresh = (payload.journeys || []).filter((j) => !known.has(j.id));
 
@@ -991,16 +1001,73 @@ async function showMore() {
   }
 }
 
+/**
+ * Eine Seite früherer Abfahrten holen.
+ *
+ * Das Gegenstück zu showMore(). Die Uhrzeit im Formular ist ein Wunsch,
+ * kein Fahrplan: wer 08:00 einträgt, nimmt oft gern den 07:41 - nur steht
+ * der nirgends, weil HAFAS ab der genannten Zeit nach VORNE sucht. Statt
+ * die Suche mit anderer Uhrzeit zu wiederholen (und dabei alles Gefundene
+ * wegzuwerfen), blättert dieser Knopf mit demselben Kontextmechanismus
+ * rückwärts und hängt die Treffer an denselben Datensatz.
+ *
+ * Die Anzahl sichtbarer Karten wächst um die neuen Treffer: sortiert wird
+ * nach Abfahrt, die früheren stehen also VORNE. Bliebe `visible` stehen,
+ * schöben sie genauso viele Verbindungen unter den Ausklapppunkt - man
+ * hätte geladen und zugleich etwas verloren.
+ */
+async function showEarlier() {
+  if (!state.scrollBackCtx || state.loadingEarlier || !state.from || !state.to) return;
+
+  state.loadingEarlier = true;
+  draw();
+
+  try {
+    const payload = await api.journeys({
+      from: state.from.id,
+      to: state.to.id,
+      date: state.date,
+      time: state.time,
+      arrival: state.arrival,
+      travelClass: state.travelClass,
+      results: PAGE_SIZE,
+      minChange: state.minChange,
+      discounts: state.discounts,
+      products: state.products,
+      via: state.mode === 'nerd' && state.via ? [state.via.id] : [],
+      scroll: state.scrollBackCtx,
+    });
+
+    const known = new Set(state.lastPayload.journeys.map((j) => j.id));
+    const fresh = (payload.journeys || []).filter((j) => !known.has(j.id));
+
+    state.lastPayload.journeys.unshift(...fresh);
+    // Ohne neuen Kontext ist der Anfang erreicht; der Knopf verschwindet dann.
+    state.scrollBackCtx = fresh.length > 0 ? (payload.scrollBack || null) : null;
+    state.visible += fresh.length;
+    rerank();
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      const status = $('#status');
+      status.className = 'status status--error';
+      status.textContent = 'Frühere Verbindungen konnten nicht geladen werden: ' + err.message;
+    }
+  } finally {
+    state.loadingEarlier = false;
+    draw();
+  }
+}
+
 // ======================================================================
-// Rueckfallebene bei knappen Umstiegen
+// Rückfallebene bei knappen Umstiegen
 // ======================================================================
 
 /**
- * Zu jedem knappen Umstieg (1-4 Minuten) den naechstspaeteren Anschluss holen.
+ * Zu jedem knappen Umstieg (1-4 Minuten) den nächstspäteren Anschluss holen.
  *
- * Passiert nachtraeglich und nur fuer die sichtbaren Karten - jede Abfrage
- * kostet eine HAFAS-Anfrage, und fuer eingeklappte Verbindungen waere sie
- * verschenkt. Das Ergebnis haengt am Abschnitt selbst, damit Neuzeichnen
+ * Passiert nachträglich und nur für die sichtbaren Karten - jede Abfrage
+ * kostet eine HAFAS-Anfrage, und für eingeklappte Verbindungen wäre sie
+ * verschenkt. Das Ergebnis hängt am Abschnitt selbst, damit Neuzeichnen
  * (Auswahl, Moduswechsel, Ausklappen) nichts erneut anfragt.
  */
 async function ensureFallbacks() {
@@ -1013,7 +1080,7 @@ async function ensureFallbacks() {
     if (!dest) continue;
 
     for (const leg of trains) {
-      if (leg.fallbackState) continue;                       // laeuft oder erledigt
+      if (leg.fallbackState) continue;                       // läuft oder erledigt
       const gap = leg.transferMin;
       if (typeof gap !== 'number' || gap < 1 || gap > 4) continue;
       if (!leg.from?.id) continue;
@@ -1036,7 +1103,7 @@ async function ensureFallbacks() {
           products: state.products,
           // Drei zur Auswahl: bei einem Vier-Minuten-Umstieg will man nicht
           // nur wissen, was sonst passiert, sondern auch gleich umsteigen
-          // koennen, ohne neu zu suchen.
+          // können, ohne neu zu suchen.
           limit: 3,
         })
           .then((res) => {
@@ -1100,7 +1167,8 @@ function undoAlternative(journey) {
 const platformCache = new Map();
 
 async function loadPlatforms(lat, lon, from, to) {
-  // Der Weg haengt am Gleispaar, deshalb gehoert es in den Schluessel.
+  // Die Bahnsteige hängen nur am Bahnhof, die Hervorhebung am Gleispaar -
+  // deshalb steht beides im Schlüssel.
   const key = `${lat.toFixed(4)},${lon.toFixed(4)}|${from}|${to}`;
   if (platformCache.has(key)) return platformCache.get(key);
 
@@ -1118,7 +1186,7 @@ async function loadPlatforms(lat, lon, from, to) {
     } catch {
       // Den Grund mitgeben: die Anzeige unterscheidet "Dienst gerade nicht
       // erreichbar" von "Bahnhof nicht kartiert" - zweierlei für den Leser.
-      res = { platforms: [], route: null, error: 'Netzwerkfehler' };
+      res = { platforms: [], error: 'Netzwerkfehler' };
     }
     if (!res?.platforms?.length) platformCache.delete(key);
     return res;
@@ -1168,7 +1236,7 @@ function takeAlternative(journey, leg, option) {
  * Datum und Uhrzeit eines ISO-Stempels, um Minuten verschoben.
  *
  * Gerechnet wird auf der Wanduhr des Stempels selbst (deshalb UTC-Arithmetik
- * auf den abgelesenen Feldern): der Zonenoffset der Quelle bleibt so aussen
+ * auf den abgelesenen Feldern): der Zonenoffset der Quelle bleibt so außen
  * vor, und der Tageswechsel um Mitternacht stimmt trotzdem.
  */
 function shiftIso(iso, minutes = 0) {
@@ -1183,15 +1251,15 @@ function shiftIso(iso, minutes = 0) {
 }
 
 // ======================================================================
-// Live-Zuege
+// Live-Züge
 // ======================================================================
 
 let liveTimer = null;
 let liveAbort = null;
 
 /**
- * Holt die Zuege im aktuellen Kartenausschnitt. Gedrosselt, damit Ziehen und
- * Zoomen nicht bei jedem Frame eine Anfrage ausloest.
+ * Holt die Züge im aktuellen Kartenausschnitt. Gedrosselt, damit Ziehen und
+ * Zoomen nicht bei jedem Frame eine Anfrage auslöst.
  */
 function scheduleLiveTrains() {
   if (!state.liveTrains) {
@@ -1275,7 +1343,7 @@ async function loadBestPrices() {
 
 let trainAbort = null;
 
-/** Laedt den Lauf eines angetippten Zuges und zeigt ihn unter der Karte. */
+/** Lädt den Lauf eines angetippten Zuges und zeigt ihn unter der Karte. */
 async function showTrainDetails(train) {
   const panel = $('#train-panel');
   panel.hidden = false;
@@ -1285,9 +1353,9 @@ async function showTrainDetails(train) {
   head.className = 'train-panel__head';
 
   // "ICE 516 → Hamburg Hbf". Die Nummer kommt aus dem Live-Zug, ist dort
-  // aber nicht immer getrennt geliefert - trainLabel() faellt in dem Fall
-  // auf den Produktnamen zurueck. Sobald der Zuglauf geladen ist, wird der
-  // Titel mit den vollstaendigeren Daten von dort ueberschrieben.
+  // aber nicht immer getrennt geliefert - trainLabel() fällt in dem Fall
+  // auf den Produktnamen zurück. Sobald der Zuglauf geladen ist, wird der
+  // Titel mit den vollständigeren Daten von dort überschrieben.
   const title = document.createElement('strong');
   title.className = 'train-panel__train';
   title.textContent = trainLabel(train);
@@ -1327,7 +1395,7 @@ async function showTrainDetails(train) {
 function renderTrainPanel(panel, head, t) {
   panel.replaceChildren(head);
 
-  // Der Zuglauf kennt Gattung, Nummer und Ziel zuverlaessiger als die
+  // Der Zuglauf kennt Gattung, Nummer und Ziel zuverlässiger als die
   // Positionsmeldung, aus der der Kopf gebaut wurde - jetzt nachziehen.
   const title = head.querySelector('.train-panel__train');
   if (title) title.textContent = trainLabel(t);
@@ -1421,7 +1489,7 @@ function renderTrainPanel(panel, head, t) {
 
 async function fetchLiveTrains() {
   // Auch ohne Trefferliste sinnvoll, sobald eine Verbindung verfolgt wird -
-  // dann liefern die Live-Zuege die gemeldete Position des eigenen Zuges.
+  // dann liefern die Live-Züge die gemeldete Position des eigenen Zuges.
   if (!state.liveTrains || (state.ranked.length === 0 && !live?.journey)) return;
 
   if (liveAbort) liveAbort.abort();
@@ -1443,7 +1511,10 @@ async function fetchLiveTrains() {
 
 /** Auswahl wechseln - egal ob per Klick auf Karte oder Liste. */
 function select(index) {
-  if (index === state.selectedIndex) return;
+  // Dieselbe noch einmal: nichts umzuschalten, aber der Ausschnitt soll
+  // trotzdem zu ihr zurückfinden - man hat inzwischen vielleicht
+  // weggeschoben.
+  if (index === state.selectedIndex) { map.focusJourney(index); return; }
   state.selectedIndex = index;
   // Auswahl per Karte oder geteiltem Link kann hinter dem Ausklapppunkt
   // liegen - dann klappen wir so weit auf, dass die Karte sichtbar wird.
@@ -1454,6 +1525,10 @@ function select(index) {
     );
   }
   draw();
+
+  // Auf die gewählte Route zoomen. Der Ausschnitt über allen Treffern zeigt
+  // sie als eine Linie unter vielen; gewählt hat man sie, um sie anzusehen.
+  map.focusJourney(index);
 
   const card = $('#results-list').children[index];
   if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -1466,7 +1541,7 @@ function select(index) {
 /**
  * Ein Regler je Korridor, nach Land gruppiert.
  *
- * Bewusst dieselbe Bedienung wie bei den Lieblingszuegen: -5 meiden bis +5
+ * Bewusst dieselbe Bedienung wie bei den Lieblingszügen: -5 meiden bis +5
  * bevorzugen. Die Bewertung entscheidet, in welcher Reihenfolge die
  * Routenvarianten in der Ergebnisliste stehen.
  */
@@ -1554,7 +1629,7 @@ function setupRoutes() {
     box.append(group);
   }
 
-  // Alle Regler auf einmal setzen, ohne fuer jeden ein rerank auszuloesen.
+  // Alle Regler auf einmal setzen, ohne für jeden ein rerank auszulösen.
   const applyAll = (prefs) => {
     state.routePrefs = { ...prefs };
     for (const [id, { slider, show }] of sliders) {

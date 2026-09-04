@@ -2,7 +2,7 @@
  * Darstellung der Ergebnisliste.
  *
  * Bewusst ohne Framework und ohne innerHTML mit Fremddaten: Stationsnamen und
- * Zugbezeichnungen kommen von externen APIs, deshalb wird alles ueber
+ * Zugbezeichnungen kommen von externen APIs, deshalb wird alles über
  * textContent gesetzt.
  */
 
@@ -39,7 +39,7 @@ const el = (tag, className, text) => {
   return n;
 };
 
-export function renderResults(container, ranked, marks, state, onSelect, onMore, liveCtl) {
+export function renderResults(container, ranked, marks, state, onSelect, onMore, liveCtl, onEarlier) {
   container.replaceChildren();
 
   // Eine laufende Verfolgung, die in dieser Liste nicht vorkommt, bekommt
@@ -53,6 +53,14 @@ export function renderResults(container, ranked, marks, state, onSelect, onMore,
   if (ranked.length === 0) {
     container.append(el('p', 'empty', 'Keine Verbindungen gefunden.'));
     return;
+  }
+
+  // Frühere Abfahrten — oben, wo sie hingehören: eine Verbindung eine halbe
+  // Stunde vor der gesuchten steht in der Liste vor ihr, nicht dahinter.
+  // Die Uhrzeit im Suchformular ist ja nur der Wunsch; ob eine Viertelstunde
+  // früher besser passt, sieht man erst an den Treffern.
+  if (state.scrollBackCtx || state.loadingEarlier) {
+    container.append(renderEarlier(state, onEarlier));
   }
 
   const visible = Math.min(state.visible ?? ranked.length, ranked.length);
@@ -74,14 +82,14 @@ export function renderResults(container, ranked, marks, state, onSelect, onMore,
 }
 
 /**
- * Der Knopf am Fuss der Liste.
+ * Der Knopf am Fuß der Liste.
  *
  * Er tut zwei verschiedene Dinge, und das steht auch dran: solange noch
  * geladene Verbindungen verborgen sind, klappt er nur auf. Danach holt er
- * die naechste Seite bei der OeBB.
+ * die nächste Seite bei der ÖBB.
  *
- * Beim Aufklappen nennt er zusaetzlich, ob unter den verborgenen Treffern
- * eine ausgezeichnete steckt - sonst muesste man blind klicken, um zu
+ * Beim Aufklappen nennt er zusätzlich, ob unter den verborgenen Treffern
+ * eine ausgezeichnete steckt - sonst müsste man blind klicken, um zu
  * wissen, ob es sich lohnt.
  */
 function renderMore(ranked, marks, visible, rest, state, onMore) {
@@ -112,6 +120,23 @@ function renderMore(ranked, marks, visible, rest, state, onMore) {
   }
 
   btn.addEventListener('click', () => onMore && onMore());
+  return btn;
+}
+
+/** Der Knopf am Kopf der Liste: eine Seite früherer Abfahrten nachladen. */
+function renderEarlier(state, onEarlier) {
+  const btn = el('button', 'more');
+  btn.type = 'button';
+
+  if (state.loadingEarlier) {
+    btn.disabled = true;
+    btn.append(el('span', 'more__label', 'Lade frühere Verbindungen …'));
+    return btn;
+  }
+
+  btn.append(el('span', 'more__label', 'Frühere Verbindungen laden'));
+  btn.append(el('span', 'more__hint', 'sucht vor der ersten Abfahrt weiter'));
+  btn.addEventListener('click', () => onEarlier && onEarlier());
   return btn;
 }
 
@@ -161,7 +186,7 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   const head = el('header', 'journey__head');
 
   // Zeiten. Liegt eine Ist-Zeit vor und weicht sie ab, steht der Fahrplanwert
-  // durchgestrichen daneben - sonst muesste man raten, was gilt.
+  // durchgestrichen daneben - sonst müsste man raten, was gilt.
   const times = el('div', 'journey__times');
   const timePair = (plan, real) => {
     const p = formatTime(plan);
@@ -222,9 +247,9 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   const badges = el('div', 'badges');
   const add = (text, cls) => badges.append(el('span', `badge ${cls}`, text));
 
-  // Selbst zusammengestellt, nicht so im Fahrplan: das gehoert kenntlich
+  // Selbst zusammengestellt, nicht so im Fahrplan: das gehört kenntlich
   // gemacht, sonst sucht man diese Verbindung im Ticketshop vergeblich.
-  // Anklickbar, weil eine Entscheidung unter Zeitdruck zuruecknehmbar sein muss.
+  // Anklickbar, weil eine Entscheidung unter Zeitdruck zurücknehmbar sein muss.
   if (j.rerouted) {
     if (j.original && liveCtl?.undoAlternative) {
       const undo = el('button', 'badge badge--rerouted badge--undo', 'umdisponiert');
@@ -262,7 +287,7 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   // Verbindung schneller ist als erwartet.
   const walks = (j.legs || []).filter((l) => l.mode === 'walk' && l.changesPlace);
   if (walks.length > 0) {
-    add(walks.length === 1 ? 'mit Fussweg' : `${walks.length} Fusswege`, 'badge--walk');
+    add(walks.length === 1 ? 'mit Fußweg' : `${walks.length} Fußwege`, 'badge--walk');
   }
 
   // Verspätung, sofern die DB Echtzeitdaten geliefert hat.
@@ -310,8 +335,8 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
     if (type.night) chip.classList.add('chip--night');
 
     // Beschriftung aus einer Hand: im Nahverkehr die Linie, im Fernverkehr
-    // die Zugnummer - siehe trainLabel().
-    chip.textContent = trainLabel({ ...leg, category: type.label });
+    // die Zugnummer - siehe trainLabel(). Die Gattung normalisiert es selbst.
+    chip.textContent = trainLabel(leg);
 
     // Fahrzeugmodell direkt am Chip, wenn wir es kennen.
     const ce = entry.comfortPerLeg.find((c) => c.leg === leg);
@@ -333,7 +358,7 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   card.append(chain);
 
   // --- Live verfolgen ---
-  // Steht vor den Details, weil es unterwegs die haeufigste Handlung ist.
+  // Steht vor den Details, weil es unterwegs die häufigste Handlung ist.
   if (liveCtl?.trackable(j)) {
     const tracking = liveCtl.isTracking(j);
     const btn = el('button', 'live-btn', tracking ? 'Verfolgung beenden' : 'Live verfolgen');
@@ -383,12 +408,12 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
 }
 
 /**
- * "Wenn du den Anschluss nicht kriegst": die naechsten Verbindungen ab dem
- * Umsteigebahnhof, jede davon uebernehmbar.
+ * "Wenn du den Anschluss nicht kriegst": die nächsten Verbindungen ab dem
+ * Umsteigebahnhof, jede davon übernehmbar.
  *
- * Wird von app.js nachgeladen, deshalb hier drei Zustaende. Anklickbar sind
- * die Vorschlaege, weil ein knapper Umstieg zwei Fragen aufwirft: was
- * passiert, wenn ich ihn verpasse — und will ich das Risiko ueberhaupt
+ * Wird von app.js nachgeladen, deshalb hier drei Zustände. Anklickbar sind
+ * die Vorschläge, weil ein knapper Umstieg zwei Fragen aufwirft: was
+ * passiert, wenn ich ihn verpasse — und will ich das Risiko überhaupt
  * eingehen. Die zweite beantwortet man nur, wenn man die Alternative auch
  * nehmen kann, ohne neu zu suchen.
  */
@@ -430,7 +455,7 @@ function renderFallback(journey, leg, actions) {
     btn.append(el('span', 'leg__alt-take', 'übernehmen'));
 
     btn.addEventListener('click', (e) => {
-      e.stopPropagation();  // nicht zugleich die Karte auswaehlen
+      e.stopPropagation();  // nicht zugleich die Karte auswählen
       actions?.takeAlternative?.(journey, leg, f);
     });
     list.append(btn);
@@ -445,30 +470,39 @@ function renderFallback(journey, leg, actions) {
 // ---------------------------------------------------------------------
 
 /**
- * "Wie weit ist es zum Anschlussgleis?"
+ * "Wo liegt das Anschlussgleis?"
  *
- * Bei einem Vier-Minuten-Umstieg ist das die eigentliche Frage — die
- * Gleisnummer allein sagt nichts darüber, ob man zwanzig Meter weiter oder
- * ans andere Ende der Halle muss.
+ * Bei einem knappen Umstieg ist das die eigentliche Frage — die Gleisnummer
+ * allein sagt nichts darüber, ob man zwanzig Meter weiter oder ans andere
+ * Ende der Halle muss.
+ *
+ * AN JEDEM UMSTIEG, nicht nur an den knappen, und AUCH OHNE GLEISNUMMERN.
+ * Vorher galten beide Bedingungen zugleich, und damit fiel der Plan bei den
+ * allermeisten Umstiegen aus: knapp ist nur eine Minderheit, und ob der
+ * Fahrplan Gleise mitliefert, hängt am Bahnhof und am Betreiber. Sind die
+ * Nummern bekannt, sind die beiden Bahnsteige hervorgehoben; sind sie es
+ * nicht, zeigt der Plan den Bahnhof mit allen erfassten Gleisen — auch das
+ * beantwortet "ein Bahnsteig oder eine halbe Halle".
  *
  * Die Bahnsteiglage kommt aus OpenStreetMap und wird erst geladen, wenn
- * jemand aufklappt. Wo OSM keine Gleisnummern führt — in der Schweiz häufig —
- * entfällt der Plan; angezeigt wird er nur, wenn BEIDE Gleise gefunden werden.
+ * jemand aufklappt.
  */
 function renderTransferPlan(journey, leg, actions) {
   const legs = journey.legs || [];
   const at = legs.indexOf(leg);
   const prev = [...legs.slice(0, at)].reverse().find((l) => l.mode === 'train');
+  if (!prev) return null;
 
-  const from = prev?.to?.platform;
-  const to = leg.from?.platform;
+  const from = prev.to?.platform || '';
+  const to = leg.from?.platform || '';
   const lat = leg.from?.lat;
   const lon = leg.from?.lon;
-  if (!from || !to || lat == null || lon == null || !actions?.loadPlatforms) return null;
+  if (lat == null || lon == null || !actions?.loadPlatforms) return null;
 
   const box = el('details', 'xfer');
   const sum = el('summary', 'xfer__summary');
-  sum.append(el('span', 'xfer__tracks', `Gleis ${from} → Gleis ${to}`));
+  sum.append(el('span', 'xfer__tracks',
+    from && to ? `Gleis ${from} → Gleis ${to}` : leg.from?.name || 'Umsteigebahnhof'));
   sum.append(el('span', 'xfer__hint', 'Lageplan'));
   box.append(sum);
 
@@ -478,7 +512,7 @@ function renderTransferPlan(journey, leg, actions) {
   // WIEDERHOLEN, statt den Fehler stehen zu lassen.
   //
   // Overpass ist ein Gemeinschaftsdienst und stellt Anfragen bei Last in eine
-  // Warteschlange; eine einzelne Abfrage geht dabei regelmässig verloren.
+  // Warteschlange; eine einzelne Abfrage geht dabei regelmäßig verloren.
   // Vorher wurde `geladen` gesetzt, BEVOR die Antwort da war — schlug sie
   // fehl, tat erneutes Aufklappen nichts mehr, und der Rat „später noch
   // einmal aufklappen" ging ins Leere. Jetzt gilt ein Versuch erst als
@@ -486,17 +520,17 @@ function renderTransferPlan(journey, leg, actions) {
   // wachsendem Abstand laufen von selbst.
   const VERSUCHE = 3;
   let geladen = false;
-  let laeuft = false;
+  let inArbeit = false;
 
   const laden = async () => {
-    if (geladen || laeuft) return;
-    laeuft = true;
+    if (geladen || inArbeit) return;
+    inArbeit = true;
     try {
       for (let versuch = 1; versuch <= VERSUCHE; versuch++) {
         const res = await actions.loadPlatforms(lat, lon, String(from), String(to));
 
         // Wiederholt wird nur, wenn der DIENST gepatzt hat. Eine gültige
-        // Antwort ohne Bahnsteige heisst "dieser Bahnhof ist in OSM nicht
+        // Antwort ohne Bahnsteige heißt "dieser Bahnhof ist in OSM nicht
         // erfasst" — die wird beim zweiten Fragen nicht anders, und Overpass
         // ist ein Gemeinschaftsdienst.
         const nochmal = !!res?.error;
@@ -517,7 +551,7 @@ function renderTransferPlan(journey, leg, actions) {
         if (!box.open) return;
       }
     } finally {
-      laeuft = false;
+      inArbeit = false;
     }
   };
 
@@ -526,13 +560,13 @@ function renderTransferPlan(journey, leg, actions) {
   return box;
 }
 
-/** Inhalt des Umstiegsplans: Bahnhofsskizze mit Laufweg, oder eine Erklärung. */
+/** Inhalt des Umstiegsplans: der Bahnhof aus OpenStreetMap, oder eine Erklärung. */
 function transferPlanBody(res, fromTrack, toTrack, stationName) {
   const platforms = res?.platforms || [];
-  const route = res?.route || null;
 
-  const find = (track) => platforms.find((p) =>
-    (p.tracks || []).some((t) => String(t) === String(track)));
+  const find = (track) => (track
+    ? platforms.find((p) => (p.tracks || []).some((t) => String(t) === String(track)))
+    : null) || null;
 
   const a = find(fromTrack);
   const b = find(toTrack);
@@ -542,64 +576,66 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
       'Gleis gegenüber am selben Bahnsteig — nur die Seite wechseln.')];
   }
 
-  if (!a || !b) {
+  // Ganz ohne Bahnsteige gibt es nichts zu zeigen. Die drei Gründe dafür
+  // verlangen Verschiedenes vom Leser: der Dienst war überlastet — gleich
+  // nochmal aufklappen; der Bahnhof ist nicht kartiert — nichts zu machen.
+  if (platforms.length === 0) {
     const p = el('p', 'xfer__note');
-
-    // Drei verschiedene Gründe, aus denen hier nichts steht — und sie
-    // verlangen Verschiedenes vom Leser. Der Dienst war überlastet: gleich
-    // nochmal aufklappen. Der Bahnhof ist nicht kartiert: gar nichts zu
-    // machen. Die Gleisnummern fehlen: dann hilft der Blick darauf, welche
-    // OSM kennt. Vorher stand in allen drei Fällen dieselbe Zeile, und die
-    // war in zweien davon schlicht falsch.
-    if (res?.error) {
-      p.textContent = 'Der Bahnhofsplan lässt sich gerade nicht laden — der '
-        + 'OpenStreetMap-Dienst ist überlastet. Zuklappen und wieder aufklappen '
-        + 'versucht es erneut.';
-    } else if (platforms.length === 0) {
-      p.textContent = `Für ${stationName || 'diesen Bahnhof'} sind in OpenStreetMap keine `
+    p.textContent = res?.error
+      ? 'Der Bahnhofsplan lässt sich gerade nicht laden — der OpenStreetMap-Dienst '
+        + 'ist überlastet. Zuklappen und wieder aufklappen versucht es erneut.'
+      : `Für ${stationName || 'diesen Bahnhof'} sind in OpenStreetMap keine `
         + 'nummerierten Bahnsteige erfasst — die Lage lässt sich daher nicht bestimmen.';
-    } else {
-      p.textContent = `In OpenStreetMap fehlen für ${stationName || 'diesen Bahnhof'} die Nummern `
-        + `von Gleis ${fromTrack} bzw. ${toTrack}. Bekannt sind nur: `
-        + platforms.map((x) => x.tracks.join('/')).slice(0, 8).join(', ') + '.';
-    }
     return [p];
   }
 
   const out = [];
   const line = el('p', 'xfer__note');
 
-  if (route?.found && route.metres != null) {
-    const mins = route.minutes;
-    line.textContent = route.adjacent
-      ? `Bahnsteig nebenan — rund ${Math.round(route.metres)} m.`
-      : `Rund ${Math.round(route.metres)} m Fussweg`
-        + (mins ? `, etwa ${mins < 1 ? 'unter einer Minute' : mins.toFixed(0) + ' min'}.` : '.');
-    if (route.steps) {
-      line.append(el('span', 'xfer__level', ' Über Treppen — mit Gepäck länger.'));
-    }
+  // WAS DIE ZEILE SAGT, hängt davon ab, wie viel wir wissen. Sie sagt
+  // ausdrücklich NICHT, wie weit es ist: der genaue Laufweg wurde aus den
+  // OSM-Fußwegen gerechnet und setzte einen innen vollständig kartierten
+  // Bahnhof voraus — den gibt es fast nirgends, und die Meter- und
+  // Minutenangaben waren dadurch genauer, als sie sein konnten. Wie weit die
+  // beiden Bahnsteige auseinanderliegen, zeigt die Karte darunter.
+  if (a && b) {
+    line.textContent = 'Ankunftsgleis blau, Abfahrtsgleis grün — die Karte zeigt, '
+      + 'wo beide liegen.';
+  } else if (a || b) {
+    // Eines von beiden ist da. Warum das andere fehlt, macht einen
+    // Unterschied: nennt der Fahrplan keine Nummer, ist nichts zu machen;
+    // kennt OpenStreetMap sie nicht, weiß man wenigstens, woran es liegt.
+    const bekannt = a ? `Ankunftsgleis ${fromTrack}` : `Abfahrtsgleis ${toTrack}`;
+    const fehlt = a ? toTrack : fromTrack;
+    line.textContent = fehlt
+      ? `Hervorgehoben ist nur das ${bekannt} — Gleis ${fehlt} kennt OpenStreetMap hier nicht.`
+      : `Hervorgehoben ist nur das ${bekannt} — das andere nennt der Fahrplan nicht.`;
+  } else if (!fromTrack || !toTrack) {
+    line.textContent = 'Der Fahrplan nennt für diesen Umstieg keine Gleisnummern. '
+      + `Gezeigt sind die Bahnsteige, die OpenStreetMap für ${stationName || 'den Bahnhof'} kennt.`;
   } else {
-    line.textContent = 'Der Weg zwischen den Bahnsteigen ist in OpenStreetMap '
-      + 'nicht durchgehend erfasst — gezeigt ist nur die Lage.';
+    line.textContent = `In OpenStreetMap fehlen für ${stationName || 'diesen Bahnhof'} die Nummern `
+      + `von Gleis ${fromTrack} bzw. ${toTrack}. Bekannt sind nur: `
+      + platforms.map((x) => x.tracks.join('/')).slice(0, 8).join(', ') + '.';
   }
 
   // Geschätzte Lage kenntlich machen — sie stammt aus den Nachbargleisen,
   // nicht aus OpenStreetMap selbst.
-  const geschaetzt = [a, b].filter((p) => p.estimated).map((p) => p.tracks.join('/'));
-  if (geschaetzt.length) {
+  const unsichereLage = [a, b].filter((p) => p?.estimated).map((p) => p.tracks.join('/'));
+  if (unsichereLage.length) {
     line.append(el('span', 'xfer__level',
-      ` Die Lage von Gleis ${geschaetzt.join(' und ')} ist aus den Nachbargleisen geschätzt.`));
+      ` Die Lage von Gleis ${unsichereLage.join(' und ')} ist aus den Nachbargleisen geschätzt.`));
   }
 
   // Ein Ebenenwechsel kostet mehr Zeit, als die Entfernung vermuten lässt.
-  if (a.level != null && b.level != null && a.level !== b.level) {
+  if (a?.level != null && b?.level != null && a.level !== b.level) {
     line.append(el('span', 'xfer__level', ' Dazu ein Ebenenwechsel.'));
   }
   out.push(line);
 
   // EINE KARTE, keine Skizze.
   //
-  // Vorher war das ein SVG mit ein paar Balken darauf: massstäblich zwar,
+  // Vorher war das ein SVG mit ein paar Balken darauf: maßstäblich zwar,
   // aber ohne Bezug zu irgendetwas, nicht zoombar, und ein Umstieg über
   // mehrere Ebenen lag darin als ein Strich übereinander. Jetzt dieselbe
   // Karte wie überall sonst — Kacheln als Untergrund, ziehen und zoomen,
@@ -608,19 +644,17 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
   out.push(mapEl);
 
   // Erst anhängen, dann bauen: die Karte misst ihren Kasten aus, und der ist
-  // ausserhalb des Dokuments null Pixel gross.
+  // außerhalb des Dokuments null Pixel groß.
   queueMicrotask(() => {
     if (!mapEl.isConnected) return;
     const map = new RouteMap(mapEl, { mode: 'station' });
     map.build();
-    map.setStation({ platforms, from: a, to: b, route });
+    map.setStation({ platforms, from: a, to: b });
   });
 
   out.push(el('p', 'xfer__source',
-    'Bahnhofsplan aus OpenStreetMap. Gemessen wird von Bahnsteigmitte zu '
-    + 'Bahnsteigmitte — wo genau der Wagen hält, weiss der Fahrplan nicht. '
-    + 'Der Weg folgt den dort erfassten Fusswegen und Treppen; Wartezeiten am '
-    + 'Aufzug sind nicht enthalten.'));
+    'Bahnhofsplan aus OpenStreetMap. Gezeigt ist die Lage der Bahnsteige, nicht '
+    + 'der Weg dorthin — den findet man im Bahnhof besser als jede Karte.'));
   return out;
 }
 
@@ -648,7 +682,7 @@ function renderLegs(journey, entry, state, actions) {
   const wrap = el('div', 'legs');
 
   for (const leg of journey.legs) {
-    // Fuer den Vergleich "wie viel spaeter komme ich an" in renderFallback.
+    // Für den Vergleich "wie viel später komme ich an" in renderFallback.
     leg.journeyArrival = journey.arrival;
     if (leg.mode === 'walk') {
       // Wechselt der Halt, läuft man wirklich ein Stück — das gehört
@@ -657,7 +691,7 @@ function renderLegs(journey, entry, state, actions) {
       if (!walksBetween && (leg.durationMin || 0) < 1) continue;
 
       const text = walksBetween
-        ? `Zu Fuss: ${leg.from.name} → ${leg.to.name} · ${formatDuration(leg.durationMin)}`
+        ? `Zu Fuß: ${leg.from.name} → ${leg.to.name} · ${formatDuration(leg.durationMin)}`
         : `Umstieg am selben Halt · ${formatDuration(leg.durationMin)}`;
 
       const row = el('div', 'leg leg--walk');
@@ -671,7 +705,8 @@ function renderLegs(journey, entry, state, actions) {
     const row = el('div', 'leg');
 
     // Umsteigezeit vor diesem Zug, wenn sie knapp ist.
-    if (leg.transferRisk && leg.transferRisk !== 'ok') {
+    const knapp = leg.transferRisk && leg.transferRisk !== 'ok';
+    if (knapp) {
       const t = el('div', `leg__transfer leg__transfer--${leg.transferRisk}`,
         leg.transferRisk === 'risky'
           ? `Nur ${leg.transferMin} min zum Umsteigen — bei Verspätung weg`
@@ -680,11 +715,17 @@ function renderLegs(journey, entry, state, actions) {
 
       // Bei sehr knappen Umstiegen die Alternativen gleich mitliefern:
       // die Frage ist nicht nur, ob man es schafft, sondern auch, ob man
-      // lieber gleich anders faehrt.
+      // lieber gleich anders fährt.
       const fb = renderFallback(journey, leg, actions);
       if (fb) row.append(fb);
+    }
 
-      // Lageplan des Umsteigebahnhofs, wenn beide Gleisnummern bekannt sind.
+    // Lageplan des Umsteigebahnhofs — an JEDEM Umstieg, nicht nur an den
+    // knappen. Auch bei zwanzig Minuten will man wissen, ob man quer durch
+    // den Bahnhof muss; und `transferMin` steht an jedem Abschnitt, vor dem
+    // ein anderer Zug lag. Zugeklappt kostet er nichts: geladen wird erst
+    // beim Aufklappen.
+    if (leg.transferMin != null) {
       const plan = renderTransferPlan(journey, leg, actions);
       if (plan) row.append(plan);
     }
@@ -696,19 +737,27 @@ function renderLegs(journey, entry, state, actions) {
     row.append(line1);
 
     const info = el('div', 'leg__train');
-    info.append(el('span', 'leg__cat', trainLabel({ ...leg, category: type.label })));
+    info.append(el('span', 'leg__cat', trainLabel(leg)));
     info.append(el('span', 'leg__long', type.long));
     info.append(el('span', 'leg__dur', formatDuration(leg.durationMin)));
 
     const comfortEntry = entry.comfortPerLeg.find((c) => c.leg === leg);
 
     // Fahrzeugmodell, wenn bekannt — mit Angabe, woher wir es wissen.
+    // Vier Wege dorthin, und sie sind verschieden sicher: nachgesehen,
+    // aus früheren Fahrten erinnert, aus der Strecke geschlossen, aus der
+    // Gattung geschlossen. Das gehört dazugesagt.
     if (comfortEntry?.model) {
       const m = el('span', 'leg__model', comfortEntry.model.label);
-      m.title = comfortEntry.certainty === 'series'
-        ? `Aus der Wagenreihung ermittelt (${leg.seriesName || 'BR ' + leg.series}).`
-        : 'Diese Gattung verkehrt nur mit diesem Fahrzeug.';
-      if (comfortEntry.certainty === 'sole') m.classList.add('leg__model--inferred');
+      m.title = {
+        series: `Aus der Wagenreihung ermittelt (${leg.seriesName || 'BR ' + leg.series}).`,
+        learned: `Dieser Zug fuhr zuletzt als ${leg.seriesName || 'BR ' + leg.series}`
+          + (leg.seriesLearned ? ` (vor ${leg.seriesLearned} Tagen beobachtet).` : '.')
+          + ' Umläufe ändern sich gelegentlich.',
+        route: comfortEntry.note || 'Auf dieser Strecke verkehrt nur dieses Fahrzeug.',
+        sole: 'Diese Gattung verkehrt nur mit diesem Fahrzeug.',
+      }[comfortEntry.certainty] || '';
+      if (comfortEntry.certainty !== 'series') m.classList.add('leg__model--inferred');
       info.append(m);
     } else if (leg.seriesName || leg.series) {
       info.append(el('span', 'leg__series', leg.seriesName || `Baureihe ${leg.series}`));
@@ -739,7 +788,7 @@ function renderLegs(journey, entry, state, actions) {
 
     // Zwischenhalte: im Nerd-Mode alle mit Uhrzeit, sonst nur die Anzahl.
     // Die Zeiten stehen hier nicht zur Zierde: zeitlich begrenzte Abos wie das
-    // GA Night gelten je Teilstueck, ein ECE ab Muenchen 17:03 ist in der
+    // GA Night gelten je Teilstück, ein ECE ab München 17:03 ist in der
     // Schweiz also trotzdem im Fenster.
     const stops = leg.stops || [];
     if (stops.length > 2) {
@@ -770,7 +819,7 @@ function renderLegs(journey, entry, state, actions) {
     wrap.append(row);
   }
 
-  // Preisherleitung transparent machen - vor allem bei Schaetzungen wichtig.
+  // Preisherleitung transparent machen - vor allem bei Schätzungen wichtig.
   const price = journey.price;
   if (price && price.estimated && price.perCountry) {
     const parts = Object.entries(price.perCountry)

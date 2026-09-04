@@ -26,8 +26,10 @@
  */
 
 import { api } from './api.js';
-import { geometryOf, trainLabel } from './map.js';
+// sameTrain war benutzt, aber nie importiert — siehe trainPosition().
+import { geometryOf, trainLabel, sameTrain } from './map.js';
 import { spliceJourney } from './scoring.js';
+import { typeOf } from './data/trains.js';
 
 const REFRESH_MS = 30_000;
 
@@ -89,9 +91,9 @@ export class LiveTracker {
     this.timer = null;
     this.risk = null;        // {legIndex, station, gap, status, key}
     this.options = [];       // Alternativen ab dem Umsteigebahnhof
-    this.optionsFor = null;  // zu welchem risk.key die Alternativen gehoeren
+    this.optionsFor = null;  // zu welchem risk.key die Alternativen gehören
     this.optionsLoading = false;
-    /** Liefert Klasse, Abos und Verkehrsmittel fuer Folgeabfragen. */
+    /** Liefert Klasse, Abos und Verkehrsmittel für Folgeabfragen. */
     this.context = () => ({ travelClass: 2, discounts: [], products: [] });
     /** Wird gerufen, wenn sich der Zustand ändert (für die Buttons in der Liste). */
     this.onChange = null;
@@ -121,9 +123,19 @@ export class LiveTracker {
       || (this.journey.id != null && this.journey.id === journey.id);
   }
 
-  /** Für welche Abschnitte gibt es überhaupt Echtzeitdaten? */
+  /**
+   * Die Zugabschnitte einer Verbindung.
+   *
+   * ALLE, nicht nur die mit `jid`. Die Kennung braucht es, um den Zuglauf
+   * bei HAFAS nachzuladen — sie fehlt aber, wenn der Fahrplan von der DB kam
+   * (bei Nahverkehrshalten, die die ÖBB nicht kennt, der Regelfall). Vorher
+   * war die Verfolgung dort komplett abgeschaltet: kein Knopf, keine Anzeige,
+   * obwohl die DB Ist-Zeiten schon in der Suchantwort mitliefert. Jetzt zeigt
+   * der Abschnitt, was bekannt ist, und aufgefrischt wird, was sich
+   * auffrischen lässt — siehe refresh().
+   */
   static trackableLegs(journey) {
-    return (journey.legs || []).filter((l) => l.mode === 'train' && l.jid);
+    return (journey.legs || []).filter((l) => l.mode === 'train');
   }
 
   start(journey) {
@@ -149,6 +161,18 @@ export class LiveTracker {
     this.startTimer();
     this.onChange?.();
     this.onJourneyChange?.(journey);
+
+    // HINSCHAUEN LASSEN. Das Feld sitzt unter der Karte, der Knopf steht auf
+    // einer Verbindungskarte weiter unten — bei der fünften Verbindung liegt
+    // zwischen beiden eine Bildschirmhöhe. Ohne diesen Sprung sah es aus, als
+    // täte der Knopf gar nichts.
+    //
+    // ERST NACH onChange(), und erst im nächsten Frame: onChange baut die
+    // Trefferliste neu auf und ändert dabei die Seitenhöhe. Mitten in einer
+    // laufenden Scrollanimation landet man sonst irgendwo.
+    requestAnimationFrame(() => {
+      this.panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
   }
 
   stop() {
@@ -187,15 +211,19 @@ export class LiveTracker {
     this.render();
 
     try {
+      // Nur Abschnitte mit Kennung lassen sich nachladen. Die übrigen bleiben
+      // bei dem, was die Suche mitgeliefert hat - das ist bei DB-Fahrplänen
+      // immerhin die Ist-Zeit, siehe renderLeg().
+      const nachladbar = this.legs.filter((e) => e.jid);
       const results = await Promise.allSettled(
-        this.legs.map((entry) => api.trainDetails(entry.jid))
+        nachladbar.map((entry) => api.trainDetails(entry.jid))
       );
       results.forEach((res, i) => {
-        if (res.status === 'fulfilled') this.legs[i].data = res.value.train;
+        if (res.status === 'fulfilled') nachladbar[i].data = res.value.train;
       });
 
       // Alles fehlgeschlagen ist ein echter Fehler; einzelne Ausfälle nicht.
-      this.error = results.every((r) => r.status === 'rejected')
+      this.error = results.length > 0 && results.every((r) => r.status === 'rejected')
         ? (results[0]?.reason?.message || 'Echtzeitdaten nicht verfügbar')
         : null;
 
@@ -217,6 +245,15 @@ export class LiveTracker {
    *
    * Nur wenn die Verbindung München überhaupt berührt — sonst wäre es
    * Rauschen aus einer fremden Stadt.
+   *
+   * UND NUR FÜR NAHVERKEHRSABSCHNITTE. Die MVG fährt S-Bahn, U-Bahn, Tram
+   * und Bus, und deren Linien heißen im Tram- und Busnetz schlicht "19",
+   * "58", "722". Genau so heißt aber auch die Linienkennung, die HAFAS im
+   * Fernverkehr ersatzweise aus der Zugnummer bildet — und so hingen unter
+   * einem ICE 722 von München nach Frankfurt drei Meldungen über eine
+   * verlegte Bushaltestelle am Kennedyplatz. Ein Fernzug kann keine
+   * MVG-Störung haben; nur was auch wirklich S, U, Tram oder Bus ist, wird
+   * abgeglichen.
    */
   async loadMvgMessages() {
     const inMunich = (this.journey.legs || []).some((leg) =>
@@ -224,13 +261,16 @@ export class LiveTracker {
     );
     if (!inMunich) { this.messages = []; return; }
 
+    const MVG_TYPES = ['S', 'U', 'Tram', 'Bus'];
     const lines = new Set();
     for (const leg of this.journey.legs || []) {
       if (leg.mode !== 'train') continue;
+      if (!MVG_TYPES.includes(typeOf(leg).label)) continue;
       for (const v of [leg.line, leg.name, leg.category]) {
         if (v) lines.add(String(v).trim().toUpperCase());
       }
     }
+    if (lines.size === 0) { this.messages = []; return; }
 
     try {
       const res = await api.disruptions();
@@ -271,6 +311,31 @@ export class LiveTracker {
   }
 
   /**
+   * Wann ist der Zug dieses Abschnitts da bzw. weg?
+   *
+   * Erst aus dem nachgeladenen Zuglauf - der ist frischer und kennt auch
+   * Gleiswechsel. Fehlt er (kein `jid`, oder die Abfrage lief ins Leere),
+   * zählen die Zeiten am Abschnitt selbst: bei DB-Fahrplänen stehen dort
+   * Ist-Zeiten, und genau die entscheiden über einen Anschluss.
+   *
+   * @param {object} entry  Eintrag aus this.legs
+   * @param {'arrival'|'departure'} kind
+   */
+  static legTime(entry, kind) {
+    const place = kind === 'arrival' ? entry.leg.to : entry.leg.from;
+
+    const ausLauf = LiveTracker.stopTime(entry.data, place, kind);
+    if (ausLauf) return ausLauf;
+
+    const real = kind === 'arrival' ? entry.leg.arrivalReal : entry.leg.departureReal;
+    const plan = kind === 'arrival' ? entry.leg.arrival : entry.leg.departure;
+    const t = Date.parse(real || plan || '');
+    return Number.isFinite(t)
+      ? { at: t, live: Boolean(real), platform: place?.platform }
+      : null;
+  }
+
+  /**
    * Den kritischsten Umstieg der Verbindung bestimmen.
    *
    * Gerechnet wird mit den Ist-Zeiten: der Zubringer kommt um X an, der
@@ -283,10 +348,9 @@ export class LiveTracker {
     for (let i = 0; i < this.legs.length - 1; i++) {
       const inc = this.legs[i];
       const out = this.legs[i + 1];
-      if (!inc.data || !out.data) continue;
 
-      const arr = LiveTracker.stopTime(inc.data, inc.leg.to, 'arrival');
-      const dep = LiveTracker.stopTime(out.data, out.leg.from, 'departure');
+      const arr = LiveTracker.legTime(inc, 'arrival');
+      const dep = LiveTracker.legTime(out, 'departure');
       if (!arr || !dep) continue;
 
       const gap = Math.round((dep.at - arr.at) / 60000);
@@ -455,6 +519,13 @@ export class LiveTracker {
     const label = trainLabel(current.leg);
 
     // 1. Gemeldete Position aus den Live-Zügen der Karte.
+    //
+    // sameTrain() war hier lange benutzt, ohne importiert zu sein: jede
+    // Positionsbestimmung warf einen ReferenceError, und weil pushToMap() im
+    // finally-Zweig von refresh() steckt, riss das die ganze Auffrischung mit
+    // sich. Und zwar genau dann, wenn man tatsächlich im Zug saß — vorher
+    // und nachher liefert currentEntry() null und die Zeile wird gar nicht
+    // erreicht.
     const live = (this.map?.liveTrains || []).find(
       (t) => t.lat != null && t.lon != null && sameTrain(current.leg, t)
     );
@@ -469,7 +540,7 @@ export class LiveTracker {
 
     // Die Halte eines Zuglaufs tragen oft nur Soll-Zeiten, während für den
     // Abschnitt selbst eine Verspätung bekannt ist. Ohne Korrektur läge der
-    // Zug bei einem verspäteten Lauf ausserhalb jedes Zeitfensters und wäre
+    // Zug bei einem verspäteten Lauf außerhalb jedes Zeitfensters und wäre
     // gar nicht auffindbar. Deshalb wird der Restfahrplan um die bekannte
     // Verspätung verschoben — genau das, was die Anzeigetafeln auch tun.
     const shift = LiveTracker.delayOf(current) * 60_000;
@@ -482,8 +553,8 @@ export class LiveTracker {
       return Number.isFinite(t) ? t + shift : NaN;
     };
 
-    // Der gezeichnete Streckenverlauf des Abschnitts. Er ist der Massstab
-    // dafuer, wo der Punkt liegen darf - siehe unten.
+    // Der gezeichnete Streckenverlauf des Abschnitts. Er ist der Maßstab
+    // dafür, wo der Punkt liegen darf - siehe unten.
     const line = Array.isArray(current.leg.geometry) && current.leg.geometry.length > 1
       ? [current.leg.geometry]
       : [];
@@ -502,7 +573,7 @@ export class LiveTracker {
       ];
 
       // Deshalb auf den Streckenverlauf ziehen: zwischen zwei Halten macht
-      // die Strecke Boegen, die Luftlinie schneidet sie ab. Ungezogen sass
+      // die Strecke Bögen, die Luftlinie schneidet sie ab. Ungezogen saß
       // der Punkt sichtbar neben der Linie, auf der er fahren sollte.
       const [lat, lon] = snapToLine(guess, line) || guess;
       return { lat, lon, label, estimated: true };
@@ -672,10 +743,17 @@ export class LiveTracker {
     }
 
     if (this.legs.length === 0) {
-      p.append(el('p', 'live__note',
-        'Für diese Verbindung liegen keine Echtzeit-Kennungen vor — sie stammt '
-        + 'aus dem DB-Fahrplan, der keine Zuglauf-IDs liefert.'));
+      p.append(el('p', 'live__note', 'Diese Verbindung hat keine Zugabschnitte.'));
       return;
+    }
+
+    // Ohne eine einzige Zuglauf-Kennung lässt sich nichts auffrischen. Die
+    // Abschnitte stehen trotzdem da — mit dem, was die Suche wusste.
+    if (this.legs.every((e) => !e.jid)) {
+      p.append(el('p', 'live__note',
+        'Der Fahrplan dieser Verbindung kommt von der DB und liefert keine '
+        + 'Zuglauf-Kennungen — gezeigt ist der Stand der Suche, er frischt '
+        + 'sich nicht von selbst auf.'));
     }
 
     const prog = this.progress();
@@ -707,8 +785,8 @@ export class LiveTracker {
     if (this.journey.rerouted) {
       const tag = el('span', 'live__rerouted', 'umdisponiert');
       title.append(tag);
-      // Zurueck zur urspruenglichen Verbindung - im Zug will man eine
-      // Fehlentscheidung ohne Neusuche korrigieren koennen.
+      // Zurück zur ursprünglichen Verbindung - im Zug will man eine
+      // Fehlentscheidung ohne Neusuche korrigieren können.
       if (this.journey.original) {
         const undo = el('button', 'live__undo', 'zurück');
         undo.type = 'button';
@@ -819,8 +897,8 @@ export class LiveTracker {
       ? `${(prog.metres / 1000).toFixed(1)} km`
       : `${Math.round(prog.metres)} m`;
 
-    // "in Zuerich HB", nicht "an Zuerich HB": Bahnhofsnamen tragen die
-    // Praeposition nicht mit, und "in" passt sowohl auf den Bahnhof als auch
+    // "in Zürich HB", nicht "an Zürich HB": Bahnhofsnamen tragen die
+    // Präposition nicht mit, und "in" passt sowohl auf den Bahnhof als auch
     // auf den Ort. "an" klingt nur bei Halten ohne Ortsnamen richtig.
     box.textContent = prog.atStop
       ? `Du bist in ${prog.from.name}.`
@@ -835,25 +913,36 @@ export class LiveTracker {
     return box;
   }
 
-  renderLeg({ leg, data }) {
+  renderLeg(entry) {
+    const { leg, data, jid } = entry;
     const box = el('section', 'live__leg');
 
     const head = el('div', 'live__leg-head');
     head.append(el('span', 'live__leg-name', trainLabel(leg)));
 
+    // ZWEI QUELLEN für die Verspätung, und die schlechtere zu nehmen wäre
+    // falsch: der nachgeladene Zuglauf ist die frischere, aber die Ist-Zeiten
+    // am Abschnitt selbst kommen von der DB und stehen auch dann da, wenn
+    // HAFAS nichts weiß. Vorher zählte allein `data.hasRealtime` - dadurch
+    // stand "keine Echtzeitdaten" an Abschnitten, deren Verspätung eine
+    // Zeile weiter oben in der Trefferliste zu lesen war.
+    const echtzeit = leg.hasRealtime || Boolean(leg.departureReal || leg.arrivalReal)
+      || Boolean(data?.hasRealtime);
+    const delay = LiveTracker.delayOf(entry);
+
     const badge = el('span', 'live__delay');
-    if (!data) {
-      badge.textContent = 'lädt …';
-      badge.dataset.state = 'unknown';
-    } else if (data.cancelled) {
+    if (leg.cancelled || data?.cancelled) {
       badge.textContent = 'Fällt aus';
       badge.dataset.state = 'bad';
-    } else if (!data.hasRealtime) {
+    } else if (!data && jid) {
+      badge.textContent = 'lädt …';
+      badge.dataset.state = 'unknown';
+    } else if (!echtzeit) {
       badge.textContent = 'keine Echtzeitdaten';
       badge.dataset.state = 'unknown';
-    } else if (data.delay > 0) {
-      badge.textContent = `+${data.delay} min`;
-      badge.dataset.state = data.delay >= 5 ? 'bad' : 'warn';
+    } else if (delay > 0) {
+      badge.textContent = `+${delay} min`;
+      badge.dataset.state = delay >= 5 ? 'bad' : 'warn';
     } else {
       badge.textContent = 'pünktlich';
       badge.dataset.state = 'good';
@@ -863,7 +952,10 @@ export class LiveTracker {
 
     for (const m of data?.messages || []) box.append(el('p', 'live__leg-msg', m));
 
-    if (data?.stops?.length) box.append(this.renderStops(leg, data.stops));
+    // Ohne nachgeladenen Zuglauf die Halte aus der Suche - die tragen zwar
+    // seltener Ist-Zeiten, sagen aber immerhin, wo es langgeht.
+    const stops = data?.stops?.length ? data.stops : (leg.stops || []);
+    if (stops.length) box.append(this.renderStops(leg, stops));
     return box;
   }
 

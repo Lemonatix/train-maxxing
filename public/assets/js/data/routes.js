@@ -379,14 +379,14 @@ export function routesOf(journey) {
 
   const out = [];
   for (const c of candidates) {
-    // Überlappung von mehr als einem Halt heisst: derselbe Streckenabschnitt.
+    // Überlappung von mehr als einem Halt heißt: derselbe Streckenabschnitt.
     // Ein einzelner gemeinsamer Halt ist dagegen ein normaler Übergang —
     // Bern–Olten und Bern–Brig treffen sich in Bern, ohne sich zu widersprechen.
     const clash = out.some((k) => Math.min(k.hi, c.hi) - Math.max(k.lo, c.lo) > 0);
     if (!clash) out.push(c);
   }
 
-  // Die Strecke mit dem groessten Fahrzeitanteil zuerst - sie prägt die Reise
+  // Die Strecke mit dem größten Fahrzeitanteil zuerst - sie prägt die Reise
   // und steht deshalb vorn, wenn die Variante benannt wird.
   return out
     .map(({ route, share }) => ({ route, share }))

@@ -3,33 +3,33 @@
  * Ortssuche aus mehreren Quellen.
  *
  * WARUM MEHRERE:
- * Die OeBB-Suche ist auf Oesterreich geeicht. Die Anfrage "Marienplatz" liefert
- * dort Graz, Viehofen und Hafnerbach - aber nicht Muenchen. Umgekehrt kennt die
+ * Die ÖBB-Suche ist auf Österreich geeicht. Die Anfrage "Marienplatz" liefert
+ * dort Graz, Viehofen und Hafnerbach - aber nicht München. Umgekehrt kennt die
  * DB-Suche den deutschen Nahverkehr bis hinunter zur einzelnen U-Bahn-Station,
- * ist aber bei kleinen oesterreichischen und Schweizer Halten duenner. Beide
- * verpassen regelmaessig die reinen Muenchner U-Bahn-/Tram-Halte (Odeonsplatz,
- * Sendlinger Tor); dafuer ergaenzt die MVG die Trefferliste.
+ * ist aber bei kleinen österreichischen und Schweizer Halten dünner. Beide
+ * verpassen regelmäßig die reinen Münchner U-Bahn-/Tram-Halte (Odeonsplatz,
+ * Sendlinger Tor); dafür ergänzt die MVG die Trefferliste.
  *
- * Die Quellen werden abgefragt, ueber die ID und ersatzweise ueber den
- * normalisierten Namen zusammengefuehrt und nach Bedeutung sortiert:
+ * Die Quellen werden abgefragt, über die ID und ersatzweise über den
+ * normalisierten Namen zusammengeführt und nach Bedeutung sortiert:
  * Fernverkehrsknoten zuerst, dann Regional-, dann Stadtverkehr. Das
- * entspricht in der Praxis der Groesse des Ortes.
+ * entspricht in der Praxis der Größe des Ortes.
  *
- * Die Fahrplansuche laeuft weiterhin ueber HAFAS. Halte, die nur die MVG
+ * Die Fahrplansuche läuft weiterhin über HAFAS. Halte, die nur die MVG
  * kennt, werden mit noJourneys=true markiert - die Endpoints der MVG-API
- * kennen keine Verbindungsauskunft, und HAFAS wuerde die MVG-globalIds
+ * kennen keine Verbindungsauskunft, und HAFAS würde die MVG-globalIds
  * nicht verstehen.
  */
 final class Locations
 {
     /**
-     * Gewicht je Produktgattung - der Ersatz fuer "Groesse des Ortes", den die
+     * Gewicht je Produktgattung - der Ersatz für "Größe des Ortes", den die
      * APIs nicht mitliefern.
      *
-     * U-Bahn und S-Bahn zaehlen bewusst hoch: Ein U-Bahn-Netz gibt es im
-     * deutschsprachigen Raum nur in Grossstaedten. Ohne diese Gewichtung
-     * gewinnt "Marienplatz, Schwerin" (Regionalhalt) gegen "Muenchen
-     * Marienplatz" (S-/U-Bahn-Knoten mit 150.000 Fahrgaesten am Tag).
+     * U-Bahn und S-Bahn zählen bewusst hoch: Ein U-Bahn-Netz gibt es im
+     * deutschsprachigen Raum nur in Großstädten. Ohne diese Gewichtung
+     * gewinnt "Marienplatz, Schwerin" (Regionalhalt) gegen "München
+     * Marienplatz" (S-/U-Bahn-Knoten mit 150.000 Fahrgästen am Tag).
      */
     private const PRODUCT_SCORE = [
         'ICE'            => 1000,
@@ -56,10 +56,10 @@ final class Locations
     /**
      * Wie gut passt der Name auf die Suche?
      *
-     * Das ist der WICHTIGSTE Faktor, wichtiger als die Groesse des Bahnhofs.
+     * Das ist der WICHTIGSTE Faktor, wichtiger als die Größe des Bahnhofs.
      * Ohne ihn gewinnt "Schendlingen (Bregenz)" gegen "Sendlinger Tor,
-     * Muenchen", weil HAFAS unscharf sucht und Schendlingen ein
-     * Fernverkehrshalt ist. Erst bei gleicher Namensqualitaet entscheidet,
+     * München", weil HAFAS unscharf sucht und Schendlingen ein
+     * Fernverkehrshalt ist. Erst bei gleicher Namensqualität entscheidet,
      * wie bedeutend die Station ist.
      */
     private static function nameRelevance(string $query, string $name): int
@@ -74,8 +74,8 @@ final class Locations
             return 5;                       // exakt
         }
         // Als ganzes Wort enthalten - egal ob vorn oder hinten. Bahnhofsnamen
-        // stellen die Stadt mal voran ("Muenchen Marienplatz") und mal
-        // nach ("Marienplatz, Muenchen"); beides ist gleich gut.
+        // stellen die Stadt mal voran ("München Marienplatz") und mal
+        // nach ("Marienplatz, München"); beides ist gleich gut.
         if (preg_match('/(^|[\s,\-\/])' . preg_quote($q, '/') . '($|[\s,\-\/\(])/', $n) === 1) {
             return 4;
         }
@@ -98,7 +98,7 @@ final class Locations
         return 0;
     }
 
-    /** Kleinschreibung, Umlaute aufgeloest, Sonderzeichen vereinheitlicht. */
+    /** Kleinschreibung, Umlaute aufgelöst, Sonderzeichen vereinheitlicht. */
     private static function normalize(string $s): string
     {
         $s = mb_strtolower(trim($s));
@@ -120,7 +120,7 @@ final class Locations
         $sources = [];
         $errors  = [];
 
-        // --- DB: beste Abdeckung fuer Deutschland inkl. Stadtverkehr ---
+        // --- DB: beste Abdeckung für Deutschland inkl. Stadtverkehr ---
         if (($this->cfg['db']['enabled'] ?? false) === true) {
             $db  = new DbVendo($this->http, $this->cfg['db']);
             $res = $db->locations($query, $limit);
@@ -134,7 +134,7 @@ final class Locations
             }
         }
 
-        // --- OeBB: ergaenzt AT/CH-Halte, die die DB nicht kennt ---
+        // --- ÖBB: ergänzt AT/CH-Halte, die die DB nicht kennt ---
         $oebb = new OebbHafas($this->http, $this->cfg['oebb']);
         $res  = $oebb->locations($query, $limit);
         $sources['oebb'] = $res['ok'];
@@ -146,7 +146,7 @@ final class Locations
             $errors[] = $res['error'];
         }
 
-        // --- MVG: schliesst die Muenchner Nahverkehrsluecke (Odeonsplatz &Co) ---
+        // --- MVG: schließt die Münchner Nahverkehrslücke (Odeonsplatz &Co) ---
         if (($this->cfg['mvg']['enabled'] ?? false) === true) {
             $mvg = new Mvg($this->http, $this->cfg['mvg']);
             $res = $mvg->locations($query, $limit);
@@ -161,9 +161,9 @@ final class Locations
         }
 
         // Zweiter Pass: MVG-only-Treffer (mvg:...-IDs) mit HAFAS-Treffern
-        // gleichen Namens zusammenfuehren, damit "Marienplatz" nicht zweimal
+        // gleichen Namens zusammenführen, damit "Marienplatz" nicht zweimal
         // in der Liste steht. Der HAFAS-Eintrag gewinnt die Anzeige, die MVG
-        // steuert nur zusaetzliche Verkehrsmittel bei.
+        // steuert nur zusätzliche Verkehrsmittel bei.
         $this->foldMvgIntoHafas($byId);
 
         if ($byId === []) {
@@ -175,7 +175,7 @@ final class Locations
             ];
         }
 
-        // Endgueltige Reihenfolge: erst wie gut der Name passt, dann wie weit
+        // Endgültige Reihenfolge: erst wie gut der Name passt, dann wie weit
         // vorn die Quelle den Treffer selbst sieht, zuletzt die Bedeutung der
         // Station. Treffer, deren Name gar nicht passt, fliegen raus - HAFAS
         // sucht unscharf und liefert sonst Orte, die niemand gemeint hat.
@@ -189,7 +189,7 @@ final class Locations
             $out[] = $row;
         }
 
-        // Bleibt nichts uebrig, lieber die unscharfen Treffer zeigen als nichts.
+        // Bleibt nichts übrig, lieber die unscharfen Treffer zeigen als nichts.
         if ($out === []) {
             $out = array_values($byId);
             foreach ($out as &$r) {
@@ -200,11 +200,11 @@ final class Locations
 
         usort($out, static function ($a, $b) {
             // Effektive Namens-Passung: reine MVG-Halte (kein Fahrplan) werden
-            // um 2 abgewertet. So laesst ein exakter Bushaltestellen-Treffer
-            // ("Marienplatz" in Kleinstaedten, relevance 5, noJourneys) den
-            // "Muenchen Marienplatz" (relevance 4, routbar) vorbei. Ohne diese
-            // Abwertung gewinnen die MVG-Bus-Halte ausschliesslich per Namen,
-            // obwohl von ihnen keine Fahrplansuche moeglich ist.
+            // um 2 abgewertet. So lässt ein exakter Bushaltestellen-Treffer
+            // ("Marienplatz" in Kleinstädten, relevance 5, noJourneys) den
+            // "München Marienplatz" (relevance 4, routbar) vorbei. Ohne diese
+            // Abwertung gewinnen die MVG-Bus-Halte ausschließlich per Namen,
+            // obwohl von ihnen keine Fahrplansuche möglich ist.
             $aRel = $a['relevance'] - (($a['noJourneys'] ?? false) ? 2 : 0);
             $bRel = $b['relevance'] - (($b['noJourneys'] ?? false) ? 2 : 0);
             if ($aRel !== $bRel) {
@@ -219,7 +219,7 @@ final class Locations
         $out = array_slice($out, 0, $limit);
         foreach ($out as &$row) {
             unset($row['score'], $row['rank'], $row['relevance']);
-            // Interne Merge-Felder gehoeren nicht ins JSON.
+            // Interne Merge-Felder gehören nicht ins JSON.
             unset($row['place']);
         }
         unset($row);
@@ -228,8 +228,8 @@ final class Locations
     }
 
     /**
-     * Fuehrt Treffer beider Quellen zusammen. Gleiche EVA = gleicher Ort;
-     * fehlende Angaben werden aus der jeweils anderen Quelle ergaenzt.
+     * Führt Treffer beider Quellen zusammen. Gleiche EVA = gleicher Ort;
+     * fehlende Angaben werden aus der jeweils anderen Quelle ergänzt.
      */
     private function merge(array &$byId, array $loc): void
     {
@@ -240,7 +240,7 @@ final class Locations
         }
 
         $old = $byId[$key];
-        // Das hoehere Gewicht gewinnt, fehlende Felder werden aufgefuellt.
+        // Das höhere Gewicht gewinnt, fehlende Felder werden aufgefüllt.
         $byId[$key] = [
             'id'           => $old['id'] !== '' ? $old['id'] : $loc['id'],
             'name'         => $old['name'] !== '' ? $old['name'] : $loc['name'],
@@ -257,7 +257,7 @@ final class Locations
     }
 
     /**
-     * MVG-only-Eintraege (id-Prefix "mvg:") mit HAFAS-Eintraegen gleichen
+     * MVG-only-Einträge (id-Prefix "mvg:") mit HAFAS-Einträgen gleichen
      * Namens verschmelzen. HAFAS liefert oft kombinierte Namen ("München,
      * Marienplatz"), MVG splittet in `place` + `name`. Deshalb werden beide
      * Seiten in einen sortierten Wort-Kanon gebracht: Reihenfolge egal,
@@ -292,7 +292,7 @@ final class Locations
             )));
             $target['lat'] = $target['lat'] ?? $row['lat'];
             $target['lon'] = $target['lon'] ?? $row['lon'];
-            // MVG-Portfolio kann die Bedeutung erhoehen (U-Bahn-Anschluss zaehlt).
+            // MVG-Portfolio kann die Bedeutung erhöhen (U-Bahn-Anschluss zählt).
             $target['score'] = $this->scoreOf($target['products']);
             $byId[$anchor[$canon]] = $target;
             unset($byId[$key]);
@@ -300,8 +300,8 @@ final class Locations
     }
 
     /**
-     * Sortierter Wort-Kanon fuer den Merge-Vergleich. Kleinschreibung,
-     * Umlaute aufgeloest, Kommas & Bindestriche entfernt, dann Woerter
+     * Sortierter Wort-Kanon für den Merge-Vergleich. Kleinschreibung,
+     * Umlaute aufgelöst, Kommas & Bindestriche entfernt, dann Wörter
      * alphabetisch sortiert. "München, Marienplatz" -> "marienplatz muenchen".
      */
     private static function nameCanon(string $s): string
@@ -319,8 +319,8 @@ final class Locations
         return [
             'id'           => (string) ($loc['evaId'] ?? ''),
             'name'         => (string) ($loc['name'] ?? ''),
-            // Ort/Stadt-Teil fuer den Namen-Merge mit MVG. Die DB liefert ihn
-            // nicht separat, deshalb faellt der Vergleich auf den Namen zurueck.
+            // Ort/Stadt-Teil für den Namen-Merge mit MVG. Die DB liefert ihn
+            // nicht separat, deshalb fällt der Vergleich auf den Namen zurück.
             'place'        => '',
             'country'      => (string) ($loc['country'] ?? ''),
             'lat'          => $loc['lat'] ?? null,
@@ -328,8 +328,8 @@ final class Locations
             'products'     => $products,
             'longDistance' => (bool) array_intersect($products, ['ICE', 'EC_IC']),
             'score'        => $this->scoreOf($products),
-            // Verschachtelte Raenge: bei Gleichstand gewinnt die DB, weil sie
-            // den Nahverkehr feiner aufloest.
+            // Verschachtelte Ränge: bei Gleichstand gewinnt die DB, weil sie
+            // den Nahverkehr feiner auflöst.
             'rank'         => $rank * 2,
             'noJourneys'   => false,
         ];
@@ -357,11 +357,11 @@ final class Locations
     }
 
     /**
-     * MVG-Treffer. Fuer HAFAS unbekannte Halte lassen sich mit diesen IDs
+     * MVG-Treffer. Für HAFAS unbekannte Halte lassen sich mit diesen IDs
      * nicht anrouten - das Flag noJourneys sagt dem Frontend, dass die
-     * Verbindungssuche fuer diesen Halt nicht funktioniert. In der Praxis
+     * Verbindungssuche für diesen Halt nicht funktioniert. In der Praxis
      * wird das aber selten sichtbar, weil `foldMvgIntoHafas` die meisten
-     * MVG-Eintraege in die zugehoerigen HAFAS-Treffer verschmilzt.
+     * MVG-Einträge in die zugehörigen HAFAS-Treffer verschmilzt.
      */
     private function fromMvg(array $loc, int $rank): array
     {
@@ -376,8 +376,8 @@ final class Locations
             'products'     => $products,
             'longDistance' => (bool) ($loc['longDistance'] ?? false),
             'score'        => $this->scoreOf($products),
-            // MVG darf im Zweifel nach DB/OeBB gereiht werden - HAFAS-Halte
-            // sind fuer die App wertvoller, weil sie anroutbar sind.
+            // MVG darf im Zweifel nach DB/ÖBB gereiht werden - HAFAS-Halte
+            // sind für die App wertvoller, weil sie anroutbar sind.
             'rank'         => $rank * 2 + 5,
             'noJourneys'   => true,
         ];

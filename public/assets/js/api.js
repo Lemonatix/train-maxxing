@@ -58,10 +58,10 @@ export const api = {
   trainDetails: (jid, opts) => call('traindetails', { jid }, opts),
 
   /**
-   * Naechste Verbindungen ab einem Umsteigebahnhof.
+   * Nächste Verbindungen ab einem Umsteigebahnhof.
    *
-   * Zwei Verwendungen: ein Treffer als Rueckfallebene an der Karte, drei als
-   * Auswahl waehrend der Fahrt, wenn der Anschluss zu platzen droht.
+   * Zwei Verwendungen: ein Treffer als Rückfallebene an der Karte, drei als
+   * Auswahl während der Fahrt, wenn der Anschluss zu platzen droht.
    */
   nextConnection: (params, opts) =>
     call('nextconnection', {
@@ -82,11 +82,11 @@ export const api = {
   works: (opts) => call('works', { days: 30 }, opts),
 
   /**
-   * Bahnsteige und Umsteigeweg aus OpenStreetMap.
+   * Die nummerierten Bahnsteige eines Bahnhofs aus OpenStreetMap.
    *
-   * Mit from/to wird zusaetzlich der Fussweg zwischen den beiden Gleisen
-   * berechnet - serverseitig, damit nicht das ganze Wegenetz des Bahnhofs
-   * durch die Leitung muss.
+   * from/to sind die beiden Gleise des Umstiegs; der Server sagt damit, ob
+   * sie am selben Bahnsteig liegen. Beide dürfen leer bleiben - dann kommt
+   * schlicht der ganze Bahnhof zurück.
    */
   platforms: (lat, lon, from, to, opts) =>
     call('platforms', {
@@ -117,7 +117,7 @@ export const api = {
         products: (params.products || []).join(','),
         via: (params.via || []).join(','),
         minchange: params.minChange || '',
-        // Blaetter-Kontext der vorigen Antwort; leer = erste Seite.
+        // Blätter-Kontext der vorigen Antwort; leer = erste Seite.
         scroll: params.scroll || '',
       },
       opts

@@ -41,6 +41,8 @@ export const TRAIN_TYPES = {
   WB:  { label: 'WB', long: 'WESTbahn', country: 'at', comfort: 7, longDistance: true,
          features: ['Steckdosen', 'WLAN'] },
   RE:  { label: 'RE', long: 'Regional-Express', country: 'de', comfort: 4, longDistance: false },
+  IRE: { label: 'IRE', long: 'Interregio-Express', country: 'de', comfort: 4, longDistance: false },
+  MEX: { label: 'MEX', long: 'Metropolexpress', country: 'de', comfort: 4, longDistance: false },
   REX: { label: 'REX', long: 'RegionalExpress', country: 'at', comfort: 4, longDistance: false },
   RB:  { label: 'RB', long: 'Regionalbahn', country: 'de', comfort: 3, longDistance: false },
   R:   { label: 'R', long: 'Regionalzug', country: 'ch', comfort: 3, longDistance: false },
@@ -76,8 +78,18 @@ export const TRAIN_MODELS = [
   { id: 'ice2',    label: 'ICE 2',        series: ['402'],        categories: ['ICE'], comfort: 7 },
   { id: 'icel',    label: 'ICE L',        series: ['6110'],       categories: ['ICE'],
     note: 'Talgo, niederflurig.', comfort: 7 },
-  { id: 'ic2',     label: 'IC 2 (Doppelstock)', series: ['2462', '4110'], categories: ['IC'],
-    note: 'Enger als der klassische IC.', comfort: 5 },
+  // ZWEI VERSCHIEDENE ZÜGE, EIN NAME. Die DB nennt beide "IC 2", gemeint sind
+  // aber der Bombardier-Doppelstock (BR 2462) und der Stadler KISS (BR 4110) —
+  // unterschiedliche Fahrzeuge, unterschiedlich angenehm. Sie standen hier
+  // lange in einem Eintrag, und wer den einen meiden und den anderen suchen
+  // wollte, konnte das nicht ausdrücken.
+  //
+  // Die ID 'ic2' bleibt beim Twindexx, damit gespeicherte Bewertungen nicht
+  // verlorengehen — sie stecken unter dieser ID im localStorage.
+  { id: 'ic2',     label: 'IC 2 (Twindexx)', series: ['2462'],       categories: ['IC'],
+    note: 'Bombardier-Doppelstock. Enger als der klassische IC.', comfort: 5 },
+  { id: 'ic2kiss', label: 'IC 2 (KISS)',     series: ['4110'],       categories: ['IC'],
+    note: 'Stadler-Doppelstock, geräumiger und laufruhiger als der Twindexx.', comfort: 6 },
   { id: 'ic1',     label: 'IC (Wagenzug)', series: [],            categories: ['IC'],
     note: 'Klassischer lokbespannter Zug.', comfort: 6 },
   { id: 'giruno',  label: 'Giruno (RABe 501)', series: ['501'],   categories: ['ECE', 'EC'],
@@ -98,9 +110,126 @@ export const TRAIN_MODELS = [
     sole: true, comfort: 7 },
 ];
 
+/**
+ * Fahrzeuge, die sich aus der VERBINDUNG ergeben statt aus der Wagenreihung.
+ *
+ * WOZU DAS NÖTIG IST: Die Baureihe steht in keinem Fahrplan. Die einzige
+ * harte Quelle ist die Wagenreihung — und die gilt nur für deutschen
+ * Fernverkehr, nur am Reisetag, und sie hängt an einem privaten Dienst, der
+ * gelegentlich ausfällt (siehe check.php). Ohne sie blieb es bei der
+ * Gattung, obwohl auf vielen Strecken gar nichts anderes fahren KANN.
+ *
+ * Genau das steht hier: Strecken und Gattungen, auf denen der Umlauf
+ * eindeutig ist. Das ist kein Raten — eine Regel gehört nur hierher, wenn
+ * dort tatsächlich nur ein Fahrzeugtyp verkehrt.
+ *
+ * FELDER
+ *   model       ID aus TRAIN_MODELS
+ *   categories  Gattungen, für die die Regel gilt
+ *   between     zwei Muster; beide müssen unter den Halten des Abschnitts
+ *               vorkommen, in beliebiger Richtung. Weggelassen = die
+ *               Gattung allein genügt schon.
+ *   note        warum die Zuordnung eindeutig ist — steht als Tooltip dran
+ *
+ * SELBST ERGÄNZEN: eine Zeile dazuschreiben, mehr ist es nicht. Wer eine
+ * Strecke kennt, auf der der Umlauf feststeht, trägt sie hier ein.
+ */
+export const FLEET_RULES = [
+  {
+    model: 'giruno',
+    categories: ['ECE'],
+    note: 'Die Gattung ECE führt die SBB ausschließlich für ihre Giruno-Züge.',
+  },
+  {
+    model: 'astoro',
+    categories: ['EC'],
+    between: [/z(ü|ue)rich/i, /m(ü|ue)nchen/i],
+    note: 'Zürich–München fährt seit der Elektrifizierung über Lindau mit ETR 610.',
+  },
+];
+
+/**
+ * Passt eine Regel auf diesen Abschnitt?
+ *
+ * Gesucht wird in den HALTEN, nicht nur in Start und Ziel: ein EC
+ * München–Zürich, den man erst ab Memmingen benutzt, ist derselbe Zug.
+ */
+function ruleMatches(rule, leg) {
+  const cat = (leg.category || '').trim().toUpperCase();
+  const typLabel = typeOf(leg).label.toUpperCase();
+  if (!rule.categories.some((c) => c.toUpperCase() === cat || c.toUpperCase() === typLabel)) {
+    return false;
+  }
+  if (!rule.between) return true;
+
+  const namen = [
+    leg.from?.name, leg.to?.name, leg.direction,
+    ...(leg.stops || []).map((s) => s.name),
+  ].filter(Boolean).join(' | ');
+
+  return rule.between.every((muster) => muster.test(namen));
+}
+
 const MODEL_BY_ID = Object.fromEntries(TRAIN_MODELS.map((m) => [m.id, m]));
 
-/** Normalisiert die uneinheitlichen Gattungskürzel der APIs. */
+/**
+ * Sammelkürzel, hinter denen keine Gattung steckt, sondern eine Betreiberart.
+ *
+ * Die Fahrplandaten führen für alles, was nicht die DB selbst fährt, ein
+ * Sammelkürzel statt der Gattung: die HLB-Regionalbahn Frankfurt–Gießen kommt
+ * als "DPN" (ÖBB-HAFAS) bzw. "DRB" (bahn.de) herein, obwohl am Bahnsteig
+ * "RB 37" steht. Vorher landeten diese Züge samt und sonders bei
+ * "Unbekannte Gattung" — und damit auch bei der Komfortbewertung und beim
+ * Deutschlandticket auf der falschen Seite.
+ *
+ * Die eigentliche Gattung steckt in der LINIE ("RB37", "RE98"); das Kürzel
+ * sagt nur, ob Nah- oder Fernverkehr. Es dient deshalb als Rückfallebene,
+ * nachdem die Linie ausgewertet wurde.
+ */
+const OPERATOR_CODES = {
+  // Nahverkehr in privater Hand — die mit Abstand häufigste Gruppe.
+  DPN: 'RB', DRB: 'RB', NBE: 'RB', RNV: 'RB', VIA: 'RB', AKN: 'RB',
+  ALX: 'RB', BRB: 'RB', ERB: 'RB', HLB: 'RB', ME: 'RB', NWB: 'RB',
+  WFB: 'RB', EVB: 'RB', OLA: 'RB', VBG: 'RB', WEG: 'RB',
+  // Betreiberkürzel, die manche Antworten anstelle der Gattung führen.
+  DB: 'RB', ÖBB: 'RB', OEBB: 'RB', SBB: 'RB',
+  // Fernverkehr in privater Hand (FlixTrain, Urlaubs-Express …).
+  DPF: 'IC', DPE: 'IC',
+};
+
+/** Produktnamen der APIs, wenn weder Gattung noch Linie weiterhelfen. */
+const PRODUCT_NAMES = [
+  [/nahreisezug|regional|nahverkehr/i, 'RB'],
+  [/s-?bahn/i, 'S'],
+  [/u-?bahn/i, 'U'],
+  [/stra(ss|ß)enbahn|tram/i, 'Tram'],
+  [/bus/i, 'Bus'],
+  [/intercity-?express/i, 'ICE'],
+  [/eurocity/i, 'EC'],
+  [/intercity/i, 'IC'],
+];
+
+/**
+ * Die Gattung aus einer Linienbezeichnung ziehen: "RB37" → RB, "S8" → S.
+ *
+ * Nur der Buchstabenkopf zählt, und nur wenn wir ihn kennen — "RB37" ist
+ * eindeutig, "M79" (Meridian) wäre geraten.
+ */
+function typeFromLine(line) {
+  const m = String(line || '').trim().toUpperCase().match(/^([A-ZÄÖÜ]{1,4})\s?\d/);
+  if (!m) return null;
+  const head = m[1];
+  return TRAIN_TYPES[head] || (OPERATOR_CODES[head] ? TRAIN_TYPES[OPERATOR_CODES[head]] : null);
+}
+
+/**
+ * Normalisiert die uneinheitlichen Gattungskürzel der APIs.
+ *
+ * Vier Stufen, in dieser Reihenfolge: die Gattung selbst, die Linie, das
+ * Betreiber-Sammelkürzel, der ausgeschriebene Produktname. Erst wenn alle
+ * vier nichts hergeben, ist die Gattung wirklich unbekannt — und dann steht
+ * wenigstens das rohe Kürzel als Beschriftung da.
+ */
 export function typeOf(leg) {
   if (!leg || leg.mode !== 'train') return UNKNOWN_TYPE;
   const raw = (leg.category || '').trim().toUpperCase();
@@ -111,8 +240,18 @@ export function typeOf(leg) {
 
   if (raw === 'TRAM' || raw === 'STR') return TRAIN_TYPES.Tram;
   if (raw === 'BUS' || raw === 'SEV') return TRAIN_TYPES.Bus;
-  // Manche Betreiber liefern nur ihr Kürzel für Regionalverkehr.
-  if (['DB', 'ÖBB', 'OEBB', 'SBB', 'BRB', 'MEX', 'ALX'].includes(raw)) return TRAIN_TYPES.RB;
+
+  // Die Linie ist die verlässlichste Quelle, sobald die Gattung ein
+  // Sammelkürzel ist: "RB37" steht so auch am Bahnsteig.
+  const fromLine = typeFromLine(leg.line) || typeFromLine(leg.name);
+  if (fromLine) return fromLine;
+
+  if (OPERATOR_CODES[head]) return TRAIN_TYPES[OPERATOR_CODES[head]];
+
+  const produkt = `${leg.categoryName || ''} ${leg.name || ''}`;
+  for (const [muster, id] of PRODUCT_NAMES) {
+    if (muster.test(produkt)) return TRAIN_TYPES[id];
+  }
 
   return { ...UNKNOWN_TYPE, label: raw || '?' };
 }
@@ -120,7 +259,7 @@ export function typeOf(leg) {
 /**
  * Bestimmt das Fahrzeugmodell eines Abschnitts.
  *
- * @returns {{model: object|null, certainty: 'series'|'sole'|'none'}}
+ * @returns {{model: object|null, certainty: 'series'|'learned'|'route'|'sole'|'none', note?: string}}
  */
 export function modelOf(leg) {
   if (!leg || leg.mode !== 'train') return { model: null, certainty: 'none' };
@@ -132,12 +271,22 @@ export function modelOf(leg) {
     const parts = String(leg.series).split(/[^0-9]+/).filter(Boolean);
     for (const m of TRAIN_MODELS) {
       if (m.series.some((s) => parts.includes(s))) {
-        return { model: m, certainty: 'series' };
+        // Gelernt heißt: dieser Zug führte die Baureihe bei einer FRÜHEREN
+        // Fahrt. Umläufe sind stabil, aber nicht garantiert - deshalb ein
+        // eigener Grad, damit die Anzeige es dazusagen kann.
+        return { model: m, certainty: leg.seriesLearned != null ? 'learned' : 'series' };
       }
     }
   }
 
-  // 2. Gattung, die nur ein Modell kennt.
+  // 2. Strecke und Gattung, auf denen nur ein Fahrzeug verkehrt.
+  for (const rule of FLEET_RULES) {
+    if (ruleMatches(rule, leg) && MODEL_BY_ID[rule.model]) {
+      return { model: MODEL_BY_ID[rule.model], certainty: 'route', note: rule.note };
+    }
+  }
+
+  // 3. Gattung, die nur ein Modell kennt.
   const sole = TRAIN_MODELS.filter((m) => m.sole && m.categories.includes(cat));
   if (sole.length === 1) return { model: sole[0], certainty: 'sole' };
 
@@ -158,7 +307,7 @@ export function candidateModels(category) {
  */
 export function applyPreferences(leg, prefs) {
   const type = typeOf(leg);
-  const { model, certainty } = modelOf(leg);
+  const { model, certainty, note } = modelOf(leg);
 
   let comfort = type.comfort;
   const hits = [];
@@ -180,6 +329,7 @@ export function applyPreferences(leg, prefs) {
     hits,
     model,
     certainty,
+    note,
   };
 }
 

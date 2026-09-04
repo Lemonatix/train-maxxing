@@ -1,19 +1,19 @@
 <?php
 /**
- * MVG (Muenchner Verkehrsgesellschaft) - oeffentliche Web-API.
+ * MVG (Münchner Verkehrsgesellschaft) - öffentliche Web-API.
  *
  * WOZU BRAUCHT MAN DAS?
  *
- * HAFAS (OeBB, DB) findet Fernbahnhoefe und S-/U-Bahn-Knoten, verpasst aber
- * regelmaessig die reinen Muenchner Nahverkehrshalte. "Odeonsplatz" oder
- * "Sendlinger Tor" haben keine EVA-Nummer, weil dort kein Fernverkehr haelt,
- * und tauchen daher in der HAFAS-Suche oft gar nicht auf. Fuer eine Karte,
- * die den Muenchner Nahverkehr sichtbar machen soll, ist das eine Luecke.
+ * HAFAS (ÖBB, DB) findet Fernbahnhöfe und S-/U-Bahn-Knoten, verpasst aber
+ * regelmäßig die reinen Münchner Nahverkehrshalte. "Odeonsplatz" oder
+ * "Sendlinger Tor" haben keine EVA-Nummer, weil dort kein Fernverkehr hält,
+ * und tauchen daher in der HAFAS-Suche oft gar nicht auf. Für eine Karte,
+ * die den Münchner Nahverkehr sichtbar machen soll, ist das eine Lücke.
  *
- * Deshalb fragen wir MVG zusaetzlich ab. Die API laeuft ohne Auth und
- * liefert die vollstaendige DIVA-Datenbank aller Muenchner Halte inklusive
- * Koordinaten und Verkehrsmittel. Zusaetzlich holen wir Stoerungsmeldungen
- * ab: die App zeigt sie als kompakten Live-Ticker fuer die Region.
+ * Deshalb fragen wir MVG zusätzlich ab. Die API läuft ohne Auth und
+ * liefert die vollständige DIVA-Datenbank aller Münchner Halte inklusive
+ * Koordinaten und Verkehrsmittel. Zusätzlich holen wir Störungsmeldungen
+ * ab: die App zeigt sie als kompakten Live-Ticker für die Region.
  *
  * WAS DIESE API NICHT KANN:
  *
@@ -23,17 +23,17 @@
  *   - EVA-Nummern - die IDs (globalId "de:09162:2") sind DELFI-Kennungen,
  *     nicht EVA. HAFAS akzeptiert sie nicht.
  *
- * Fuer alles, was HAFAS ohnehin findet, gewinnt HAFAS im Merge - MVG
- * ergaenzt dann nur fehlende Produkte (UBAHN/TRAM) und Koordinaten.
+ * Für alles, was HAFAS ohnehin findet, gewinnt HAFAS im Merge - MVG
+ * ergänzt dann nur fehlende Produkte (UBAHN/TRAM) und Koordinaten.
  */
 final class Mvg
 {
     /**
      * MVG-Transporttypen auf die HAFAS-/DB-Produktnamen abbilden, mit denen
      * Locations.php rechnet. So wird "München, Marienplatz" von allen drei
-     * Quellen mit denselben Massstaeben bewertet.
+     * Quellen mit denselben Maßstäben bewertet.
      *
-     * BAHN = Fernverkehr (fuer den bringt MVG nichts Neues, aber vollstaendige
+     * BAHN = Fernverkehr (für den bringt MVG nichts Neues, aber vollständige
      * Zuordnung schadet nicht), REGIONAL_BUS = Landkreis-Busse.
      */
     private const TRANSPORT_TO_PRODUCT = [
@@ -47,7 +47,7 @@ final class Mvg
         'SCHIFF'       => 'SCHIFF',
     ];
 
-    /** ICE / EC / IC — fuer diese Kennzeichnung greift "Fernverkehrshalt". */
+    /** ICE / EC / IC — für diese Kennzeichnung greift "Fernverkehrshalt". */
     private const LONG_DISTANCE_PRODUCTS = ['EC_IC'];
 
     private Http $http;
@@ -60,7 +60,7 @@ final class Mvg
     }
 
     /**
-     * Ortssuche in Muenchen und Umgebung.
+     * Ortssuche in München und Umgebung.
      *
      * @return array{ok:bool,error:?string,data:array}
      */
@@ -99,12 +99,12 @@ final class Mvg
             )));
             $products = $this->productsFromTransportTypes($transports);
             if ($products === []) {
-                continue; // Halt ohne bekanntes Verkehrsmittel: ueberspringen
+                continue; // Halt ohne bekanntes Verkehrsmittel: überspringen
             }
 
             $out[] = [
                 // Eigener Prefix, damit MVG-IDs mit HAFAS-IDs nicht kollidieren
-                // koennen; Locations.php erkennt daran auch noJourneys=true.
+                // können; Locations.php erkennt daran auch noJourneys=true.
                 'id'           => 'mvg:' . $globalId,
                 'name'         => (string) ($item['name'] ?? ''),
                 'place'        => (string) ($item['place'] ?? ''),
@@ -123,10 +123,10 @@ final class Mvg
     }
 
     /**
-     * Aktuelle Stoerungs- und Baustellen-Meldungen der MVG.
+     * Aktuelle Störungs- und Baustellen-Meldungen der MVG.
      *
-     * Der Endpoint liefert unabhaengig vom Ort das gesamte Netz - die
-     * Auswahl ist einheitlich Muenchen (SWM + MVV + DDB fuer S-Bahn).
+     * Der Endpoint liefert unabhängig vom Ort das gesamte Netz - die
+     * Auswahl ist einheitlich München (SWM + MVV + DDB für S-Bahn).
      *
      * @return array{ok:bool,error:?string,data:array}
      */
@@ -168,9 +168,9 @@ final class Mvg
             $out[] = [
                 'id'          => (string) ($m['id'] ?? ($m['title'] ?? '')),
                 'type'        => (string) ($m['type'] ?? ''),
-                // Die MVG liefert Absaetze und Fettungen als HTML mit; das
-                // Frontend setzt alles per textContent und wuerde die Tags
-                // sonst woertlich anzeigen.
+                // Die MVG liefert Absätze und Fettungen als HTML mit; das
+                // Frontend setzt alles per textContent und würde die Tags
+                // sonst wörtlich anzeigen.
                 'title'       => Text::plain((string) ($m['title'] ?? '')),
                 'description' => Text::plain((string) ($m['description'] ?? '')),
                 'validFrom'   => self::toIsoTime($m['validFrom'] ?? null),
@@ -181,7 +181,7 @@ final class Mvg
         }
 
         // Aktive Meldungen zuerst, dann nach Beginn absteigend - so steht die
-        // frischeste akute Stoerung immer oben.
+        // frischeste akute Störung immer oben.
         $now = time();
         usort($out, static function ($a, $b) use ($now) {
             $aActive = self::isActive($a, $now) ? 0 : 1;
@@ -211,8 +211,8 @@ final class Mvg
     /**
      * MVG akzeptiert Anfragen auch ohne User-Agent, aber sie loggen ihn zur
      * Missbrauchsanalyse. Wir identifizieren uns kooperativ statt uns zu
-     * verstecken - der Endpoint ist ausdruecklich fuer die Web-App gedacht,
-     * kein Grund fuer Spielchen.
+     * verstecken - der Endpoint ist ausdrücklich für die Web-App gedacht,
+     * kein Grund für Spielchen.
      */
     private function userAgent(): string
     {

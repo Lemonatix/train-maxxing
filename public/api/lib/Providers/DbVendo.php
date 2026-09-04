@@ -1,30 +1,30 @@
 <?php
 /**
- * DB (bahn.de Web-API) - unsere Quelle fuer ECHTE Preise.
+ * DB (bahn.de Web-API) - unsere Quelle für ECHTE Preise.
  *
  * ZWEI DINGE, DIE HIER WICHTIG SIND:
  *
  * 1. TLS-FINGERPRINT
- *    bahn.de laeuft hinter Akamai Bot Manager. Der wertet den TLS-ClientHello
+ *    bahn.de läuft hinter Akamai Bot Manager. Der wertet den TLS-ClientHello
  *    aus, nicht die Header. Mit cURL-Standardeinstellungen kommt IMMER ein
- *    403 "OPS_BLOCKED" zurueck - auch von einem privaten Anschluss aus.
+ *    403 "OPS_BLOCKED" zurück - auch von einem privaten Anschluss aus.
  *    Deshalb wird dieser Provider mit Http::withBrowserTls() betrieben.
  *    Nachgemessen: ohne Cipher-Liste 403, mit 200.
  *
  * 2. NUR BAHNCARDS
- *    Die Angebots-API kennt ausschliesslich BahnCards. Halbtax, GA,
+ *    Die Angebots-API kennt ausschließlich BahnCards. Halbtax, GA,
  *    Vorteirtscard und KlimaTicket werden STILL IGNORIERT - die API liefert
- *    denselben Preis wie ohne Ermaessigung und meldet keinen Fehler.
- *    Nachgemessen Zuerich->Muenchen: ohne Abo 34,19 EUR, BahnCard 50
+ *    denselben Preis wie ohne Ermäßigung und meldet keinen Fehler.
+ *    Nachgemessen Zürich->München: ohne Abo 34,19 EUR, BahnCard 50
  *    29,57 EUR, Halbtax 34,19 EUR (= wirkungslos), Unsinn-Wert ebenfalls
- *    34,19 EUR. Schweizer und oesterreichische Abos rechnet daher Fares.php
- *    auf den Laenderanteil - klar als Schaetzung gekennzeichnet.
+ *    34,19 EUR. Schweizer und österreichische Abos rechnet daher Fares.php
+ *    auf den Länderanteil - klar als Schätzung gekennzeichnet.
  */
 final class DbVendo
 {
     /**
-     * Nur diese Werte wirken tatsaechlich. Bewusst kurz gehalten - alles
-     * andere wuerde falsche Sicherheit vortaeuschen.
+     * Nur diese Werte wirken tatsächlich. Bewusst kurz gehalten - alles
+     * andere würde falsche Sicherheit vortäuschen.
      */
     private const DISCOUNT_MAP = [
         'bc25'  => 'BAHNCARD25',
@@ -32,7 +32,7 @@ final class DbVendo
         'bc100' => 'BAHNCARD100',
     ];
 
-    /** UIC-Laendercode aus dem EVA-Praefix. Zuverlaessiger als adminID. */
+    /** UIC-Ländercode aus dem EVA-Präfix. Zuverlässiger als adminID. */
     private const EVA_COUNTRY = [
         '80' => 'de', '81' => 'at', '85' => 'ch',
         '83' => 'it', '84' => 'nl', '87' => 'fr', '88' => 'be',
@@ -70,7 +70,7 @@ final class DbVendo
             if (!is_array($item)) {
                 continue;
             }
-            // Adressen und Sehenswuerdigkeiten sind fuer eine Zugsuche nutzlos.
+            // Adressen und Sehenswürdigkeiten sind für eine Zugsuche nutzlos.
             if (($item['type'] ?? 'ST') !== 'ST') {
                 continue;
             }
@@ -167,11 +167,11 @@ final class DbVendo
     }
 
     /**
-     * Bestpreise ueber den Tag, in Zeitfenstern.
+     * Bestpreise über den Tag, in Zeitfenstern.
      *
-     * Beantwortet die Frage "lohnt es sich, zwei Stunden spaeter zu fahren?".
-     * Die DB liefert dazu sechs Intervalle mit dem jeweils guenstigsten
-     * Angebot. Die Antwort ist mit ueber 1 MB gross, weil sie zu jedem
+     * Beantwortet die Frage "lohnt es sich, zwei Stunden später zu fahren?".
+     * Die DB liefert dazu sechs Intervalle mit dem jeweils günstigsten
+     * Angebot. Die Antwort ist mit über 1 MB groß, weil sie zu jedem
      * Intervall die kompletten Verbindungen mitschickt - wir behalten nur die
      * Preise.
      *
@@ -205,7 +205,7 @@ final class DbVendo
         ];
 
         // Der Bestpreis liegt neben der Verbindungssuche, nicht darunter.
-        // (rtrim waere hier falsch: es entfernt Zeichen, keine Zeichenkette.)
+        // (rtrim wäre hier falsch: es entfernt Zeichen, keine Zeichenkette.)
         $url = preg_replace('#/fahrplan$#', '/tagesbestpreis', $this->cfg['bahnde']['journeys'])
             ?? $this->cfg['bahnde']['journeys'];
 
@@ -252,8 +252,8 @@ final class DbVendo
 
         foreach ($abs as $a) {
             // Soll- UND Ist-Zeit. Die DB liefert die Echtzeit direkt in der
-            // Suchantwort mit - anders als HAFAS, das dafuer je Abschnitt eine
-            // eigene Abfrage braucht. Das Feld heisst 'echtzeit'.
+            // Suchantwort mit - anders als HAFAS, das dafür je Abschnitt eine
+            // eigene Abfrage braucht. Das Feld heißt 'echtzeit'.
             $dep     = self::iso($a['abfahrt']['sollzeit'] ?? null);
             $arr     = self::iso($a['ankunft']['sollzeit'] ?? null);
             $depReal = self::iso($a['abfahrt']['echtzeit'] ?? null);
@@ -299,7 +299,7 @@ final class DbVendo
                     'departure'   => $dep,
                     'arrival'     => $arr,
                     'durationMin' => (int) round(((int) ($a['abschnittsDauer'] ?? 0)) / 60),
-                    // Wechselt der Halt, muss man tatsaechlich ein Stueck gehen.
+                    // Wechselt der Halt, muss man tatsächlich ein Stück gehen.
                     'changesPlace' => ($from['name'] ?? '') !== ($to['name'] ?? ''),
                 ];
                 continue;
@@ -325,13 +325,13 @@ final class DbVendo
                 ];
             }
 
-            // Gruende fuer die Verspaetung, soweit die DB sie nennt
-            // ("Verspaetung eines vorausfahrenden Zuges", "Polizeieinsatz").
+            // Gründe für die Verspätung, soweit die DB sie nennt
+            // ("Verspätung eines vorausfahrenden Zuges", "Polizeieinsatz").
             //
-            // Nur risNotizen: das sind die Betriebsgruende zum Zuglauf.
+            // Nur risNotizen: das sind die Betriebsgründe zum Zuglauf.
             // himMeldungen enthalten daneben Bahnhofsinfos ("Aufzug in Celle
-            // ausser Betrieb"), die an einer Fahrt Frankfurt-Mannheim nichts
-            // zu suchen haben. Die relevanten Stoerungsmeldungen zeigt ohnehin
+            // außer Betrieb"), die an einer Fahrt Frankfurt-Mannheim nichts
+            // zu suchen haben. Die relevanten Störungsmeldungen zeigt ohnehin
             // die Live-Verfolgung.
             $remarks = [];
             foreach (($a['risNotizen'] ?? []) as $n) {
@@ -360,7 +360,7 @@ final class DbVendo
                 'occupancy'    => $this->occupancyOf($a),
                 'category'     => trim((string) ($vm['kategorie'] ?? '')),
                 'categoryName' => trim((string) ($vm['produktGattung'] ?? '')),
-                'line'         => trim((string) ($vm['linienNummer'] ?? '')),
+                'line'         => self::lineOf($vm),
                 'trainNumber'  => trim((string) ($vm['nummer'] ?? '')),
                 'name'         => trim((string) ($vm['name'] ?? '')),
                 'direction'    => trim((string) ($vm['richtung'] ?? '')),
@@ -372,9 +372,9 @@ final class DbVendo
                 'departureReal' => $depReal,
                 'arrival'       => $arr,
                 'arrivalReal'   => $arrReal,
-                // Die groessere der beiden Abweichungen: an der Abfahrt sieht
-                // man, ob der Zug schon spaet dran ist, an der Ankunft, ob er
-                // die Verspaetung unterwegs noch aufholt.
+                // Die größere der beiden Abweichungen: an der Abfahrt sieht
+                // man, ob der Zug schon spät dran ist, an der Ankunft, ob er
+                // die Verspätung unterwegs noch aufholt.
                 'delay'         => self::maxDelay([[$dep, $depReal], [$arr, $arrReal]]),
                 'hasRealtime'   => $depReal !== null || $arrReal !== null,
                 'remarks'       => $remarks,
@@ -399,7 +399,7 @@ final class DbVendo
         $first = $legs[0] ?? null;
         $last  = $legs[count($legs) - 1] ?? null;
 
-        // Groesste Verspaetung ueber alle Abschnitte - das ist die Zahl, die
+        // Größte Verspätung über alle Abschnitte - das ist die Zahl, die
         // an der Verbindung interessiert.
         $delay = null;
         foreach ($legs as $l) {
@@ -427,14 +427,14 @@ final class DbVendo
     }
 
     /**
-     * DB-Zeitstempel in vollstaendiges ISO-8601 mit Zonenangabe umwandeln.
+     * DB-Zeitstempel in vollständiges ISO-8601 mit Zonenangabe umwandeln.
      *
      * WARUM DAS NOETIG IST: Die DB liefert "2026-08-22T00:47:00" - deutsche
-     * Ortszeit OHNE Offset. Die OeBB liefert "2026-08-22T00:47:00+02:00".
+     * Ortszeit OHNE Offset. Die ÖBB liefert "2026-08-22T00:47:00+02:00".
      * Ohne Normalisierung interpretiert PHP den DB-Wert in der Zeitzone des
-     * Servers. Auf einem deutschen Webspace faellt das nicht auf, auf einem
+     * Servers. Auf einem deutschen Webspace fällt das nicht auf, auf einem
      * UTC-Server liegen beide Quellen zwei Stunden auseinander - der Abgleich
-     * ueber Ab- und Ankunftszeit findet dann gar nichts mehr oder, schlimmer,
+     * über Ab- und Ankunftszeit findet dann gar nichts mehr oder, schlimmer,
      * das Falsche. Auch Fares.php und das Frontend rechnen mit dem Offset.
      *
      * Werte, die bereits eine Zone tragen, bleiben unangetastet.
@@ -456,7 +456,7 @@ final class DbVendo
     }
 
     /**
-     * Groesste Verspaetung in Minuten aus Paaren von Soll- und Ist-Zeit.
+     * Größte Verspätung in Minuten aus Paaren von Soll- und Ist-Zeit.
      *
      * @param array<int,array{0:?string,1:?string}> $pairs
      */
@@ -484,8 +484,8 @@ final class DbVendo
      * Auslastung je Klasse, wie sie die DB meldet.
      *
      * Die Stufen sind: 0 unbekannt, 1 gering, 2 mittel, 3 hoch,
-     * 4 Zug ausgebucht. Wir geben beide Klassen zurueck, damit man in der
-     * Anzeige die passende waehlen kann.
+     * 4 Zug ausgebucht. Wir geben beide Klassen zurück, damit man in der
+     * Anzeige die passende wählen kann.
      *
      * @return array{first:?int,second:?int}|null
      */
@@ -511,13 +511,13 @@ final class DbVendo
     }
 
     /**
-     * Ist dieser Abschnitt ein Fussweg?
+     * Ist dieser Abschnitt ein Fußweg?
      *
      * Verlassen kann man sich auf das Feld 'typ' nicht: im Nahverkehr fehlt es
-     * regelmaessig komplett, und dann wuerde ein Fussweg als Fahrzeug ohne
+     * regelmäßig komplett, und dann würde ein Fußweg als Fahrzeug ohne
      * Gattung durchgehen und im Frontend als "Unbekannt" erscheinen.
-     * Zuverlaessiger ist das Verkehrsmittel selbst - ein Fussweg hat weder
-     * Gattung noch Liniennummer und heisst schlicht "Fußweg".
+     * Zuverlässiger ist das Verkehrsmittel selbst - ein Fußweg hat weder
+     * Gattung noch Liniennummer und heißt schlicht "Fußweg".
      */
     private function isWalk(array $abschnitt, array $vm): bool
     {
@@ -531,12 +531,43 @@ final class DbVendo
             return true;
         }
 
-        // Weder Gattung noch Nummer: da faehrt nichts.
+        // Weder Gattung noch Nummer: da fährt nichts.
         $kat = trim((string) ($vm['kategorie'] ?? ''));
         $nr  = trim((string) ($vm['nummer'] ?? ''));
         $gat = trim((string) ($vm['produktGattung'] ?? ''));
 
         return $kat === '' && $nr === '' && $gat === '';
+    }
+
+    /**
+     * Die Linienbezeichnung, wie sie am Bahnsteig steht.
+     *
+     * 'linienNummer' ist im Nahverkehr regelmäßig LEER - bei allen Zügen,
+     * die nicht die DB selbst fährt, ist sie es praktisch immer. Die Linie
+     * steht dann nur im 'mittelText': die HLB-Regionalbahn Frankfurt-Gießen
+     * liefert kategorie=DRB, linienNummer=null, mittelText="RB37". Ohne
+     * diesen Rückgriff blieb von dem Zug nur "DRB 24628" übrig - eine
+     * Betriebsnummer, die auf keiner Anzeigetafel steht.
+     *
+     * Im Fernverkehr ist 'mittelText' dagegen die Zugnummer mit Gattung davor
+     * ("ICE 2374"). Das ist keine Linie, und als solche ausgegeben würde sie
+     * die Zuordnung gleichnamiger Züge durcheinanderbringen - deshalb fällt
+     * alles heraus, was die Zugnummer enthält.
+     */
+    private static function lineOf(array $vm): string
+    {
+        $linie = trim((string) ($vm['linienNummer'] ?? ''));
+        if ($linie !== '') {
+            return $linie;
+        }
+
+        $mittel = trim((string) ($vm['mittelText'] ?? ''));
+        $nummer = trim((string) ($vm['nummer'] ?? ''));
+        if ($mittel === '' || ($nummer !== '' && str_contains($mittel, $nummer))) {
+            return '';
+        }
+
+        return $mittel;
     }
 
     private function operatorOf(array $vm): string
@@ -554,7 +585,7 @@ final class DbVendo
      *
      * Die IDs sehen so aus:
      *   A=1@O=Zürich HB@X=8540211@Y=47378177@U=80@L=8503000@
-     * X ist die Laenge, Y die Breite, beide mal 1e6. Ein eigenes Feld dafuer
+     * X ist die Länge, Y die Breite, beide mal 1e6. Ein eigenes Feld dafür
      * gibt es in den Halten nicht - deshalb dieser Weg.
      *
      * @return array{lat:?float,lon:?float}
@@ -616,10 +647,10 @@ final class DbVendo
     {
         if ($res['status'] === 403 || str_contains($res['body'], 'OPS_BLOCKED')) {
             return 'DB blockt die Anfrage (OPS_BLOCKED). Meist fehlt die Browser-TLS-Cipher-Reihenfolge '
-                 . '- pruef, ob cURL auf diesem Server TLS 1.3 unterstuetzt.';
+                 . '- prüf, ob cURL auf diesem Server TLS 1.3 unterstützt.';
         }
         if ($res['status'] === 429) {
-            return 'DB drosselt die Anfragen (429). Bitte spaeter erneut versuchen.';
+            return 'DB drosselt die Anfragen (429). Bitte später erneut versuchen.';
         }
         return null;
     }

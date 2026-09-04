@@ -2,12 +2,12 @@
 /**
  * Verkehrsmittel-Gruppen.
  *
- * Eine Definition fuer alle drei Stellen, die sie brauchen: den HAFAS-Filter
+ * Eine Definition für alle drei Stellen, die sie brauchen: den HAFAS-Filter
  * (Bitmaske), den DB-Filter (Namensliste) und das Frontend (Auswahlliste).
  *
- * Die Bitwerte sind nicht geraten, sondern nachgemessen: fuer jede Gruppe
+ * Die Bitwerte sind nicht geraten, sondern nachgemessen: für jede Gruppe
  * wurden Verbindungen abgefragt und die gelieferten prodCtx.catOut den
- * prodL.cls-Werten gegenuebergestellt.
+ * prodL.cls-Werten gegenübergestellt.
  *
  *   Bit 0 (1)    ICE, RJ, RJX
  *   Bit 1 (2)    Schienenersatzverkehr
@@ -21,7 +21,7 @@
  *   Bit 12 (4096) WESTbahn
  *
  * Bit 7, 10 und 11 kamen in keiner Testantwort vor; sie liegen in 'other',
- * damit nichts unbeabsichtigt herausfaellt.
+ * damit nichts unbeabsichtigt herausfällt.
  */
 final class Products
 {
@@ -89,8 +89,8 @@ final class Products
     }
 
     /**
-     * HAFAS-Bitmaske aus den gewaehlten Gruppen.
-     * Leere Auswahl bedeutet "keine Einschraenkung".
+     * HAFAS-Bitmaske aus den gewählten Gruppen.
+     * Leere Auswahl bedeutet "keine Einschränkung".
      *
      * @param string[] $ids
      */
@@ -109,7 +109,7 @@ final class Products
     }
 
     /**
-     * Produktgattungen fuer die DB-Angebots-API.
+     * Produktgattungen für die DB-Angebots-API.
      *
      * @param string[] $ids
      * @return string[]
@@ -126,14 +126,14 @@ final class Products
             }
         }
         // Ganz ohne Gattung liefert die DB nichts - dann lieber alles anfragen
-        // und die Filterung dem Fahrplan ueberlassen.
+        // und die Filterung dem Fahrplan überlassen.
         if ($out === []) {
             return ['ICE', 'EC_IC', 'IR', 'REGIONAL', 'SBAHN', 'BUS', 'SCHIFF', 'UBAHN', 'TRAM', 'ANRUFPFLICHTIG'];
         }
         return array_keys($out);
     }
 
-    /** Katalog fuer das Frontend. */
+    /** Katalog für das Frontend. */
     public static function catalogue(): array
     {
         $out = [];

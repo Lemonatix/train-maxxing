@@ -4,37 +4,37 @@
  *
  * Routen (alle GET):
  *   ?action=health                          Welche Quellen sind erreichbar?
- *   ?action=catalogue                       Abo-Katalog fuer das Frontend
+ *   ?action=catalogue                       Abo-Katalog für das Frontend
  *   ?action=locations&q=Bern                Ortssuche (inkl. MVG-Halte)
  *   ?action=journeys&from=..&to=..&date=..  Verbindungen inkl. Preis
  *   ?action=livetrains&bbox=..              Live-Positionen im Ausschnitt
- *   ?action=traindetails&jid=..             Zuglauf mit Halten und Verspaetung
- *   ?action=bestprices&from=..&to=..&date=.. Preisstrecke fuer eine Woche
- *   ?action=nextconnection&from=..&to=..    Naechster Anschluss nach einem knappen Umstieg
- *   ?action=fxrate                          EZB-Tageskurse (fuer CHF neben EUR)
- *   ?action=platforms&lat=..&lon=..         Bahnsteiglage aus OSM fuer den Umstiegsplan
+ *   ?action=traindetails&jid=..             Zuglauf mit Halten und Verspätung
+ *   ?action=bestprices&from=..&to=..&date=.. Preisstrecke für eine Woche
+ *   ?action=nextconnection&from=..&to=..    Nächster Anschluss nach einem knappen Umstieg
+ *   ?action=fxrate                          EZB-Tageskurse (für CHF neben EUR)
+ *   ?action=platforms&lat=..&lon=..         Bahnsteiglage aus OSM für den Umstiegsplan
  *   ?action=works                           Bauarbeiten im Netz, mit Abschnitt und Zeitraum
- *   ?action=disruptions                     MVG-Stoerungsticker Muenchen
+ *   ?action=disruptions                     MVG-Störungsticker München
  *
  * Strategie bei journeys:
- *   1. Fahrplan von der OeBB holen (zuverlaessig, mit Zuggattung + Laendercodes)
- *   2. Preise von DB dazuholen und ueber Ab-/Ankunftszeit zuordnen
- *   3. Was ohne echten Preis bleibt, wird in Fares.php geschaetzt
+ *   1. Fahrplan von der ÖBB holen (zuverlässig, mit Zuggattung + Ländercodes)
+ *   2. Preise von DB dazuholen und über Ab-/Ankunftszeit zuordnen
+ *   3. Was ohne echten Preis bleibt, wird in Fares.php geschätzt
  */
 
 declare(strict_types=1);
 
-// Fallbacks fuer die mbstring-Extension. Auf produktiven Hostings ist sie
-// praktisch immer da; fuer schlanke lokale CLI-Setups ohne php-mbstring
-// koennen die Kernfunktionen aus mbstring hier durch strlen/strtolower
-// ersetzt werden, ohne dass die Ortssuche kaputt geht. Fuer reine
-// Laengenpruefungen und Cache-Keys reicht die ASCII-Semantik voellig.
+// Fallbacks für die mbstring-Extension. Auf produktiven Hostings ist sie
+// praktisch immer da; für schlanke lokale CLI-Setups ohne php-mbstring
+// können die Kernfunktionen aus mbstring hier durch strlen/strtolower
+// ersetzt werden, ohne dass die Ortssuche kaputt geht. Für reine
+// Längenprüfungen und Cache-Keys reicht die ASCII-Semantik völlig.
 if (!function_exists('mb_strlen')) {
     /** @return int */
     function mb_strlen(string $s, ?string $encoding = null): int
     {
-        // strlen zaehlt Bytes; fuer die Untergrenze "mindestens N Zeichen"
-        // ist das eine sichere Ueberschaetzung (jedes UTF-8-Zeichen >= 1 Byte).
+        // strlen zählt Bytes; für die Untergrenze "mindestens N Zeichen"
+        // ist das eine sichere Überschätzung (jedes UTF-8-Zeichen >= 1 Byte).
         return strlen($s);
     }
 }
@@ -53,13 +53,13 @@ require __DIR__ . '/lib/Products.php';
 require __DIR__ . '/lib/Shops.php';
 require __DIR__ . '/lib/Locations.php';
 require __DIR__ . '/lib/Punctuality.php';
+require __DIR__ . '/lib/Fleet.php';
 require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
 require __DIR__ . '/lib/Providers/CoachSequence.php';
 require __DIR__ . '/lib/Providers/Mvg.php';
 require __DIR__ . '/lib/Providers/Overpass.php';
 require __DIR__ . '/lib/Providers/StreckenInfo.php';
-require __DIR__ . '/lib/StationPlan.php';
 require __DIR__ . '/lib/RailGeometry.php';
 
 $config = require __DIR__ . '/config.php';
@@ -91,11 +91,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
 $cache = new Cache((string) $config['cache_dir']);
 $http  = new Http((int) $config['http_timeout']);
 
-// Gelegentlich aufraeumen, damit der Cache-Ordner nicht unbegrenzt waechst.
+// Gelegentlich aufräumen, damit der Cache-Ordner nicht unbegrenzt wächst.
 //
 // NICHT KUERZER ALS DIE LAENGSTE HALTBARKEIT: Der Standardwert von gc() ist
-// ein Tag, und der warf taeglich genau die Eintraege weg, die am teuersten zu
-// beschaffen sind - Bahnsteige gelten sieben Tage, Streckenverlaeufe dreissig.
+// ein Tag, und der warf täglich genau die Einträge weg, die am teuersten zu
+// beschaffen sind - Bahnsteige gelten sieben Tage, Streckenverläufe dreißig.
 // Overpass durfte sie danach jedes Mal neu liefern.
 $maxTtl = max([86400, ...array_map('intval', array_values($config['cache_ttl'] ?? []))]);
 if (random_int(1, 100) === 1) {
@@ -171,12 +171,12 @@ function handleHealth(Http $http, array $config, Cache $cache): void
         'providers'    => [],
     ];
 
-    // OeBB
+    // ÖBB
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
     $t0   = microtime(true);
     $r    = $oebb->locations('Wien', 1);
     $out['providers']['oebb'] = [
-        'label'   => 'OeBB HAFAS (Fahrplan, Zuggattungen)',
+        'label'   => 'ÖBB HAFAS (Fahrplan, Zuggattungen)',
         'ok'      => $r['ok'],
         'error'   => $r['error'],
         'ms'      => (int) round((microtime(true) - $t0) * 1000),
@@ -195,13 +195,13 @@ function handleHealth(Http $http, array $config, Cache $cache): void
         'critical' => false,
     ];
 
-    // MVG - nur wenn aktiviert, sonst ist der Health-Check laenger als noetig.
+    // MVG - nur wenn aktiviert, sonst ist der Health-Check länger als nötig.
     if (($config['providers']['mvg']['enabled'] ?? false) === true) {
         $mvg = new Mvg($http, $config['providers']['mvg']);
         $t0  = microtime(true);
         $r   = $mvg->locations('Marienplatz', 1);
         $out['providers']['mvg'] = [
-            'label'   => 'MVG (Muenchner Nahverkehr, Stoerungsticker)',
+            'label'   => 'MVG (Münchner Nahverkehr, Störungsticker)',
             'ok'      => $r['ok'],
             'error'   => $r['error'],
             'ms'      => (int) round((microtime(true) - $t0) * 1000),
@@ -225,7 +225,7 @@ function handleLocations(Http $http, array $config, Cache $cache): void
         ok(['locations' => $cached, 'cached' => true]);
     }
 
-    // Beide Quellen: die DB kennt den deutschen Stadtverkehr, die OeBB die
+    // Beide Quellen: die DB kennt den deutschen Stadtverkehr, die ÖBB die
     // kleinen Halte in AT und CH.
     $loc = new Locations($http, $config['providers']);
     $res = $loc->search($q, 10);
@@ -239,24 +239,24 @@ function handleLocations(Http $http, array $config, Cache $cache): void
 }
 
 /**
- * Zuege, die gerade im Kartenausschnitt unterwegs sind.
+ * Züge, die gerade im Kartenausschnitt unterwegs sind.
  * Kurz gecacht, damit Zoomen und Verschieben nicht jedes Mal eine Anfrage
- * ausloest.
+ * auslöst.
  */
 function handleLiveTrains(Http $http, array $config, Cache $cache): void
 {
     $bbox = array_map('trim', explode(',', (string) ($_GET['bbox'] ?? '')));
     if (count($bbox) !== 4) {
-        fail('Parameter "bbox" erwartet vier Werte: sued,west,nord,ost', 400);
+        fail('Parameter "bbox" erwartet vier Werte: süd,west,nord,ost', 400);
     }
 
     [$south, $west, $north, $east] = array_map('floatval', $bbox);
     if ($south >= $north || $west >= $east) {
-        fail('Ungueltiger Kartenausschnitt.', 400);
+        fail('Ungültiger Kartenausschnitt.', 400);
     }
-    // Zu grosse Ausschnitte liefern nur Rauschen und belasten die Quelle.
+    // Zu große Ausschnitte liefern nur Rauschen und belasten die Quelle.
     if (($north - $south) > 6 || ($east - $west) > 10) {
-        ok(['trains' => [], 'note' => 'Ausschnitt zu gross - bitte weiter hineinzoomen.']);
+        ok(['trains' => [], 'note' => 'Ausschnitt zu groß - bitte weiter hineinzoomen.']);
     }
 
     $products = array_values(array_filter(
@@ -275,7 +275,7 @@ function handleLiveTrains(Http $http, array $config, Cache $cache): void
     $res  = $oebb->liveTrains($south, $west, $north, $east, 40, Products::bitmask($products));
 
     if (!$res['ok']) {
-        // Live-Positionen sind Beiwerk - ein Fehler darf die Karte nicht stoeren.
+        // Live-Positionen sind Beiwerk - ein Fehler darf die Karte nicht stören.
         ok(['trains' => [], 'error' => $res['error']]);
     }
 
@@ -284,8 +284,8 @@ function handleLiveTrains(Http $http, array $config, Cache $cache): void
 }
 
 /**
- * Der komplette Lauf eines Zuges mit Halten und Verspaetung.
- * Kurz gecacht - Echtzeitdaten aendern sich, aber nicht im Sekundentakt.
+ * Der komplette Lauf eines Zuges mit Halten und Verspätung.
+ * Kurz gecacht - Echtzeitdaten ändern sich, aber nicht im Sekundentakt.
  */
 function handleTrainDetails(Http $http, array $config, Cache $cache): void
 {
@@ -304,10 +304,10 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
     $res  = $oebb->journeyDetails($jid);
 
     if (!$res['ok']) {
-        fail('Zugdetails nicht verfuegbar: ' . $res['error'], 502);
+        fail('Zugdetails nicht verfügbar: ' . $res['error'], 502);
     }
 
-    // Beobachtete Verspaetung in die eigene Statistik aufnehmen. So fuellt
+    // Beobachtete Verspätung in die eigene Statistik aufnehmen. So füllt
     // sich die Historie mit der Nutzung, ohne dass jemand Daten einkaufen muss.
     $t = $res['data'];
     if (($t['hasRealtime'] ?? false) && ($t['trainNumber'] ?? '') !== '') {
@@ -326,7 +326,7 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
 }
 
 /**
- * Bestpreise ueber den Tag - beantwortet, ob sich eine andere Abfahrtszeit lohnt.
+ * Bestpreise über den Tag - beantwortet, ob sich eine andere Abfahrtszeit lohnt.
  */
 function handleBestPrices(Http $http, array $config, Cache $cache): void
 {
@@ -371,20 +371,20 @@ function handleBestPrices(Http $http, array $config, Cache $cache): void
 }
 
 /**
- * Die naechsten Anschluesse ab einem Umsteigebahnhof.
+ * Die nächsten Anschlüsse ab einem Umsteigebahnhof.
  *
  * WOZU: Bei ein bis vier Minuten Umsteigezeit ist die Frage nicht "schaffe ich
- * das", sondern "was passiert, wenn nicht". Und waehrend der Fahrt, wenn der
- * Zubringer Verspaetung hat, wird daraus "was nehme ich stattdessen".
+ * das", sondern "was passiert, wenn nicht". Und während der Fahrt, wenn der
+ * Zubringer Verspätung hat, wird daraus "was nehme ich stattdessen".
  *
- * Deshalb liefert der Endpunkt vollstaendige Verbindungen (mit Abschnitten,
+ * Deshalb liefert der Endpunkt vollständige Verbindungen (mit Abschnitten,
  * Halten und Zuglauf-IDs), nicht nur eine Kurzfassung: die Live-Verfolgung
- * soll direkt auf eine davon umschalten koennen, ohne neu zu suchen.
+ * soll direkt auf eine davon umschalten können, ohne neu zu suchen.
  *
  * Bewusst ein eigener Endpunkt und kein Teil von handleJourneys: die Suche
- * braucht eine zusaetzliche HAFAS-Abfrage je betroffenem Umstieg. Im
- * Suchlauf wuerde das jede Suche spuerbar verlangsamen, obwohl die Antwort
- * nur fuer die wenigen Faelle gebraucht wird, in denen es eng wird.
+ * braucht eine zusätzliche HAFAS-Abfrage je betroffenem Umstieg. Im
+ * Suchlauf würde das jede Suche spürbar verlangsamen, obwohl die Antwort
+ * nur für die wenigen Fälle gebraucht wird, in denen es eng wird.
  */
 function handleNextConnection(Http $http, array $config, Cache $cache): void
 {
@@ -404,11 +404,11 @@ function handleNextConnection(Http $http, array $config, Cache $cache): void
     }
 
     $travelClass = ((string) ($_GET['class'] ?? '2')) === '1' ? 1 : 2;
-    // Zugnummer des Anschlusses, den man verpasst haette - der darf nicht
-    // als eigene Rueckfallebene zurueckkommen.
+    // Zugnummer des Anschlusses, den man verpasst hätte - der darf nicht
+    // als eigene Rückfallebene zurückkommen.
     $exclude = trim((string) ($_GET['exclude'] ?? ''));
-    // Wie viele Alternativen. Eine reicht fuer den Hinweis an der Karte,
-    // waehrend der Fahrt will man die Wahl haben.
+    // Wie viele Alternativen. Eine reicht für den Hinweis an der Karte,
+    // während der Fahrt will man die Wahl haben.
     $limit = max(1, min(3, (int) ($_GET['limit'] ?? 1)));
 
     $discounts = array_values(array_filter(
@@ -439,7 +439,7 @@ function handleNextConnection(Http $http, array $config, Cache $cache): void
     );
 
     if (!$res['ok']) {
-        // Beiwerk: lieber keine Rueckfallebene zeigen als die Karte kaputt machen.
+        // Beiwerk: lieber keine Rückfallebene zeigen als die Karte kaputt machen.
         ok(['connections' => [], 'error' => $res['error']]);
     }
 
@@ -454,12 +454,12 @@ function handleNextConnection(Http $http, array $config, Cache $cache): void
         if ($dep === null || $dep < $planned) {
             continue;
         }
-        // Denselben Zug noch einmal anzubieten waere sinnlos.
+        // Denselben Zug noch einmal anzubieten wäre sinnlos.
         if ($exclude !== '' && firstTrainNumber($j) === $exclude) {
             continue;
         }
 
-        // Vollstaendig aufbereiten, damit die Live-Verfolgung ohne weitere
+        // Vollständig aufbereiten, damit die Live-Verfolgung ohne weitere
         // Abfrage auf diese Verbindung umschalten kann.
         $j = annotateTransfers($j);
         $j = Fares::apply($j, $discounts, $travelClass);
@@ -480,8 +480,8 @@ function handleNextConnection(Http $http, array $config, Cache $cache): void
 /**
  * Zeitstempel als 'YYYY-MM-DD HH:MM' in seiner eigenen Zone.
  *
- * DateTimeImmutable uebernimmt den Offset aus dem String, format() gibt ihn
- * also in Ortszeit zurueck - unabhaengig von date_default_timezone_get().
+ * DateTimeImmutable übernimmt den Offset aus dem String, format() gibt ihn
+ * also in Ortszeit zurück - unabhängig von date_default_timezone_get().
  */
 function wallClock(?string $iso): ?string
 {
@@ -507,7 +507,7 @@ function firstTrainNumber(array $journey): string
 }
 
 /**
- * Kurzbezeichnungen der Zuege einer Verbindung, z.B. ["ICE 599", "RE 5"].
+ * Kurzbezeichnungen der Züge einer Verbindung, z.B. ["ICE 599", "RE 5"].
  *
  * @return string[]
  */
@@ -529,20 +529,20 @@ function trainLabels(array $journey): array
 }
 
 /**
- * Wechselkurse der Europaeischen Zentralbank.
+ * Wechselkurse der Europäischen Zentralbank.
  *
  * WOZU: Die Preise kommen von der DB und damit in Euro. Wer eine Fahrt
- * Muenchen-Zuerich einordnen will, denkt aber in beiden Waehrungen. Ein
+ * München-Zürich einordnen will, denkt aber in beiden Währungen. Ein
  * Gegenwert in Franken beantwortet das, ohne dass wir Preise aus einer
  * zweiten Quelle bräuchten.
  *
- * WARUM DIE EZB: keine Registrierung, kein Schluessel, offizieller
+ * WARUM DIE EZB: keine Registrierung, kein Schlüssel, offizieller
  * Referenzkurs, und sie nennt das Datum dazu. Der Referenzkurs ist bewusst
  * KEIN Bankkurs - beim Kartenzahlen kommen Aufschläge dazu. Deshalb wird er
- * in der Anzeige auch als Naeherung gekennzeichnet.
+ * in der Anzeige auch als Näherung gekennzeichnet.
  *
- * Die Kurse werden einmal am Werktag gegen 16 Uhr veroeffentlicht; sechs
- * Stunden Cache sind entsprechend grosszuegig genug.
+ * Die Kurse werden einmal am Werktag gegen 16 Uhr veröffentlicht; sechs
+ * Stunden Cache sind entsprechend großzügig genug.
  */
 function handleFxRate(Http $http, array $config, Cache $cache): void
 {
@@ -582,35 +582,35 @@ function handleFxRate(Http $http, array $config, Cache $cache): void
 }
 
 /**
- * Bahnsteige eines Bahnhofs, fuer den Umstiegsplan.
+ * Bahnsteige eines Bahnhofs, für den Umstiegsplan.
  *
- * Beantwortet die Frage, die bei vier Minuten Umsteigezeit wirklich zaehlt:
- * wie weit ist es vom Ankunfts- zum Abfahrtsgleis, und muss ich dabei die
- * Ebene wechseln.
+ * Beantwortet die Frage, die bei vier Minuten Umsteigezeit wirklich zählt:
+ * liegen Ankunfts- und Abfahrtsgleis nebeneinander oder an entgegengesetzten
+ * Enden, und muss ich dabei die Ebene wechseln.
  *
- * Quelle ist OpenStreetMap. Das ist bewusst KEIN Gebaeudeplan - Treppen und
- * Laufwege sind dort zu luecken haft erfasst, um daraus einen Fussweg zu
+ * Quelle ist OpenStreetMap. Das ist bewusst KEIN Gebäudeplan - Treppen und
+ * Laufwege sind dort zu lückenhaft erfasst, um daraus einen Fußweg zu
  * rechnen. Geliefert werden Lage und Ebene der Bahnsteige, alles Weitere
- * waere geraten.
+ * wäre geraten.
  */
 /**
- * Grosse Baustellen im Netz, mit betroffenem Abschnitt und Zeitraum.
+ * Große Baustellen im Netz, mit betroffenem Abschnitt und Zeitraum.
  *
  * ZWEI QUELLEN, weil keine allein reicht:
  *
- *   strecken.info (DB InfraGO) fuer DEUTSCHLAND. Liefert Totalsperrungen im
+ *   strecken.info (DB InfraGO) für DEUTSCHLAND. Liefert Totalsperrungen im
  *   ganzen Netz, mit Betriebsstelle, Zeitraum, Art der Arbeiten und
  *   Streckennummer.
  *
- *   HAFAS Information Manager der OeBB fuer OESTERREICH und die Schweiz.
+ *   HAFAS Information Manager der ÖBB für OESTERREICH und die Schweiz.
  *
- * Deutschland steht vorn: das Netz ist das groesste im deutschsprachigen
- * Raum, und die oesterreichische Quelle liefert ohnehin fast nur Meldungen
- * zu Nebenbahnen. Faellt eine Quelle aus, bleibt die andere - eine leere
+ * Deutschland steht vorn: das Netz ist das größte im deutschsprachigen
+ * Raum, und die österreichische Quelle liefert ohnehin fast nur Meldungen
+ * zu Nebenbahnen. Fällt eine Quelle aus, bleibt die andere - eine leere
  * Liste gibt es nur, wenn beide schweigen.
  *
- * STRECKENVERLAUF: Die OeBB liefert ihn mit. Fuer die deutschen Abschnitte
- * wird er ueber die Streckennummer aus OpenStreetMap geholt (RailGeometry),
+ * STRECKENVERLAUF: Die ÖBB liefert ihn mit. Für die deutschen Abschnitte
+ * wird er über die Streckennummer aus OpenStreetMap geholt (RailGeometry),
  * nach und nach und dauerhaft gecacht. Wo er fehlt, zeichnet die Karte die
  * Verbindung der beiden Endpunkte.
  */
@@ -638,7 +638,7 @@ function handleWorks(Http $http, array $config, Cache $cache): void
         }
     }
 
-    // --- Oesterreich und Schweiz ---------------------------------------
+    // --- Österreich und Schweiz ---------------------------------------
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
     $res  = $oebb->works($days);
     if ($res['ok']) {
@@ -652,12 +652,12 @@ function handleWorks(Http $http, array $config, Cache $cache): void
         ok(['works' => [], 'error' => implode('; ', array_filter($fehler))]);
     }
 
-    // Die wichtigsten zuerst. "Wichtig" heisst hier dreierlei, in dieser
+    // Die wichtigsten zuerst. "Wichtig" heißt hier dreierlei, in dieser
     // Reihenfolge: Deutschland, dann Fernverkehr, dann Dauer.
     //
-    // Die Reihenfolge zaehlt, weil die Liste nur die ersten Eintraege zeigt.
-    // Nach Dauer allein standen dort oesterreichische Nebenbahnen mit den
-    // laengsten Sperrungen - richtig sortiert, aber nicht das, was jemand
+    // Die Reihenfolge zählt, weil die Liste nur die ersten Einträge zeigt.
+    // Nach Dauer allein standen dort österreichische Nebenbahnen mit den
+    // längsten Sperrungen - richtig sortiert, aber nicht das, was jemand
     // sucht, der wissen will, wo im Netz gerade gebaut wird.
     usort($works, static function (array $a, array $b): int {
         $land = (int) (($b['country'] ?? '') === 'de') <=> (int) (($a['country'] ?? '') === 'de');
@@ -673,9 +673,9 @@ function handleWorks(Http $http, array $config, Cache $cache): void
         return $db <=> $da;
     });
 
-    // Streckenverlauf ergaenzen, soweit noch nicht bekannt. Nur fuer die
-    // vorderen Eintraege, und die Ergebnisse halten dreissig Tage - der
-    // Verlauf einer Strecke aendert sich nicht.
+    // Streckenverlauf ergänzen, soweit noch nicht bekannt. Nur für die
+    // vorderen Einträge, und die Ergebnisse halten dreißig Tage - der
+    // Verlauf einer Strecke ändert sich nicht.
     if (($config['providers']['overpass']['enabled'] ?? false) === true) {
         $rg = new RailGeometry($http, $cache, $config['providers']['overpass']);
         $works = $rg->enrich($works);
@@ -700,17 +700,19 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
     $station = stationData($http, $config, $cache, $lat, $lon, $why);
     if ($station === null) {
         // Grund mitgeben: ohne ihn ist im Betrieb nicht zu unterscheiden, ob
-        // Overpass ueberlastet war oder der Bahnhof schlicht nicht kartiert ist.
-        ok(['platforms' => [], 'error' => $why ?? 'Bahnhofsdaten nicht verfuegbar.']);
+        // Overpass überlastet war oder der Bahnhof schlicht nicht kartiert ist.
+        ok(['platforms' => [], 'error' => $why ?? 'Bahnhofsdaten nicht verfügbar.']);
     }
 
     $from = trim((string) ($_GET['from'] ?? ''));
     $to   = trim((string) ($_GET['to'] ?? ''));
 
-    // Ohne Gleisangaben nur die Bahnsteige - dann will jemand bloss wissen,
-    // was der Bahnhof ueberhaupt hat.
+    // Ohne Gleisangaben nur die Bahnsteige - dann will jemand bloß wissen,
+    // was der Bahnhof überhaupt hat. Das ist inzwischen der Normalfall:
+    // der Plan wird an JEDEM Umstieg angeboten, und die Gleisnummer steht
+    // im Fahrplan längst nicht immer.
     if ($from === '' || $to === '') {
-        ok(['platforms' => $station['platforms'], 'route' => null]);
+        ok(['platforms' => $station['platforms']]);
     }
 
     $find = static function (array $platforms, string $track): ?array {
@@ -727,29 +729,31 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
     $a = $find($station['platforms'], $from);
     $b = $find($station['platforms'], $to);
 
-    $route = null;
-    if ($a !== null && $b !== null && $a !== $b) {
-        $route = StationPlan::route($station['platforms'], $station['ways'], $a, $b);
-    }
-
+    // KEIN LAUFWEG MEHR. Früher wurde hier aus den Fußwegen und Treppen
+    // von OpenStreetMap der genaue Weg von Bahnsteig zu Bahnsteig gerechnet
+    // und samt Meter- und Minutenangabe angezeigt. Die Rechnung stand und
+    // fiel damit, wie vollständig ein Bahnhof innen kartiert ist - und das
+    // ist er fast nirgends. Herausgekommen sind zu oft Wege, die es so nicht
+    // gibt, und Zahlen, die genauer aussahen als sie waren. Der Plan zeigt
+    // jetzt nur noch die LAGE der beiden Bahnsteige; wie man dazwischen
+    // läuft, sieht man auf der Karte selbst.
     ok([
         'platforms' => $station['platforms'],
-        'route'     => $route,
-        // Damit die Anzeige "gleicher Bahnsteig" von "kein Weg bekannt"
+        // Damit die Anzeige "gleicher Bahnsteig" von "andere Seite der Halle"
         // unterscheiden kann.
         'samePlatform' => $a !== null && $a === $b,
     ]);
 }
 
 /**
- * Bahnsteige und Fusswege eines Bahnhofs, gecacht.
+ * Die Bahnsteige eines Bahnhofs, gecacht.
  *
  * Auf drei Nachkommastellen gerundet (~100 m): Anfragen zum selben Bahnhof
  * treffen denselben Cache-Eintrag, auch wenn die Quellen leicht abweichende
- * Mittelpunkte melden. Bahnsteige und Treppen bewegen sich nicht, deshalb
- * eine Woche - das schont den Gemeinschaftsdienst Overpass.
+ * Mittelpunkte melden. Bahnsteige bewegen sich nicht, deshalb eine Woche -
+ * das schont den Gemeinschaftsdienst Overpass.
  *
- * @return ?array{platforms:array,ways:array}
+ * @return ?array{platforms:array}
  */
 function stationData(Http $http, array $config, Cache $cache, float $lat, float $lon, ?string &$error = null): ?array
 {
@@ -759,7 +763,7 @@ function stationData(Http $http, array $config, Cache $cache, float $lat, float 
     $cached = $cache->get($key, $long);
     if ($cached !== null) {
         // Ein LEERES Ergebnis darf nicht eine Woche lang gelten. Overpass
-        // antwortet unter Last mit Zeitueberschreitungen; die Antwort ist dann
+        // antwortet unter Last mit Zeitüberschreitungen; die Antwort ist dann
         // formal in Ordnung, aber leer. Ohne diese Unterscheidung merkt sich
         // der Cache einen einmaligen Aussetzer als "Bahnhof nicht kartiert" -
         // und der Umstiegsplan bleibt tagelang weg.
@@ -824,8 +828,10 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         ? max(1, min(60, (int) $_GET['minchange']))
         : null;
 
-    // Weiterblaettern: Kontext aus der vorigen Antwort. HAFAS liefert je
-    // Anfrage nur rund sechs Treffer, spaetere Abfahrten gibt es nur so.
+    // Blättern: Kontext aus der vorigen Antwort. HAFAS liefert je Anfrage
+    // nur rund sechs Treffer, weitere Abfahrten gibt es nur so. Der Kontext
+    // trägt seine Richtung selbst - der aus 'scrollBack' führt zu früheren
+    // Abfahrten, der aus 'scroll' zu späteren.
     $scroll = trim((string) ($_GET['scroll'] ?? ''));
 
     $cacheKey = 'jny:' . implode('|', [
@@ -841,7 +847,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 
     $notices = [];
 
-    // --- 1. Fahrplan von der OeBB -------------------------------------
+    // --- 1. Fahrplan von der ÖBB -------------------------------------
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
     $sched = $oebb->journeys(
         $from, $to, $date, $time, $arrival, $results, $travelClass, $viaIds,
@@ -850,9 +856,9 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 
     $journeys    = $sched['ok'] ? $sched['data'] : [];
 
-    // Beim Weiterblaettern liegt das Zeitfenster woanders als in $time. Fuer
-    // die Preisabfrage zaehlt, wann die gelieferten Verbindungen tatsaechlich
-    // fahren - sonst holt die DB Preise fuer den falschen Tagesabschnitt.
+    // Beim Weiterblättern liegt das Zeitfenster woanders als in $time. Für
+    // die Preisabfrage zählt, wann die gelieferten Verbindungen tatsächlich
+    // fahren - sonst holt die DB Preise für den falschen Tagesabschnitt.
     $priceDate = $date;
     $priceTime = $time;
     if ($scroll !== '' && $journeys !== []) {
@@ -863,7 +869,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
                 $priceDate = $d->format('Y-m-d');
                 $priceTime = $d->format('H:i');
             } catch (Exception $e) {
-                // Bleibt beim urspruenglichen Zeitfenster.
+                // Bleibt beim ursprünglichen Zeitfenster.
             }
         }
     }
@@ -873,10 +879,10 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 
     // --- 2. Preise von der DB, notfalls auch den Fahrplan --------------
     //
-    // Die OeBB kennt nur Stationen mit echter EVA-Nummer. Nahverkehrshalte
-    // wie "Sendlinger Tor, Muenchen" haben lokale Kennungen und werden dort
+    // Die ÖBB kennt nur Stationen mit echter EVA-Nummer. Nahverkehrshalte
+    // wie "Sendlinger Tor, München" haben lokale Kennungen und werden dort
     // mit "location missing or invalid" abgelehnt. Die DB kennt sie - also
-    // uebernimmt sie in dem Fall auch den Fahrplan.
+    // übernimmt sie in dem Fall auch den Fahrplan.
     if ($db !== null) {
         $priced = $db->journeys(
             $from, $to, $priceDate, $priceTime, $arrival, $travelClass, $discounts, true, $products, $minChange
@@ -888,7 +894,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
             $notices[]   = 'Fahrplan von der DB — die ÖBB kennt diese Station nicht. '
                          . 'Auf der Karte fehlt dadurch der genaue Streckenverlauf.';
         } elseif ($journeys !== [] && $priced['ok'] && $priced['data'] !== []) {
-            // Laeuft auch ohne Preise: der Merge bringt Echtzeit und Auslastung.
+            // Läuft auch ohne Preise: der Merge bringt Echtzeit und Auslastung.
             $matched = mergePrices($journeys, $priced['data']);
             if ($matched > 0) {
                 $priceSource = 'db';
@@ -896,12 +902,12 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
             }
 
             // Nur BahnCards rechnet die DB selbst. Alles andere kommt aus
-            // unserem Modell - das gehoert transparent gemacht.
+            // unserem Modell - das gehört transparent gemacht.
             $ownAbos = array_values(array_diff($discounts, $priced['usedDiscounts']));
             if ($matched > 0 && $ownAbos !== []) {
                 $notices[] = 'Die DB kennt nur BahnCards. '
                     . implode(', ', $ownAbos)
-                    . ' wird auf den Echtpreis hochgerechnet und ist damit eine Schaetzung.';
+                    . ' wird auf den Echtpreis hochgerechnet und ist damit eine Schätzung.';
             }
         } elseif (!$priced['ok'] && $journeys !== []) {
             $notices[] = $priced['error'];
@@ -918,16 +924,31 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         ok([
             'journeys' => [], 'priceSource' => $priceSource,
             'notices' => $scroll === '' ? [$hint] : [],
-            'scroll' => null, 'cached' => false,
+            'scroll' => null, 'scrollBack' => null, 'cached' => false,
         ]);
     }
 
-    // --- 3. Baureihe ergaenzen (nur am Reisetag, nur deutscher Fernverkehr) ---
+    // --- 3. Baureihe ergänzen ------------------------------------------
+    //
+    // ZWEI STUFEN. Die Wagenreihung ist die harte Quelle, aber sie gilt nur
+    // am Reisetag, nur für deutschen Fernverkehr und - aus Rücksicht auf
+    // bahn.expert - für höchstens drei Züge je Verbindung. Alles, was sie je
+    // geliefert hat, merkt sich Fleet unter der Zugnummer und füllt damit
+    // auch die Abschnitte, für die gerade nicht gefragt werden konnte: die
+    // vierte Etappe, die Rückfahrt, die Suche für nächsten Dienstag.
     if (($config['providers']['wagenreihung']['enabled'] ?? false) === true) {
         $cs = new CoachSequence($http, $config['providers']['wagenreihung'], $cache);
         foreach ($journeys as $i => $j) {
             $journeys[$i] = $cs->enrich($j, $date);
         }
+    }
+
+    $fleet = new Fleet((string) $config['cache_dir']);
+    if ($fleet->isAvailable()) {
+        foreach ($journeys as $i => $j) {
+            $journeys[$i] = $fleet->enrich($j);
+        }
+        $fleet->flush();
     }
 
     // --- 4. Umstiege bewerten, zu knappe aussortieren ------------------
@@ -937,7 +958,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 
     // Beide Quellen kennen eine Mindestumsteigezeit und wurden entsprechend
     // gefragt. Dieser Nachfilter ist nur das Sicherheitsnetz, falls doch
-    // etwas Zu-Knappes durchrutscht. Bleibt nichts uebrig, zeigen wir lieber
+    // etwas Zu-Knappes durchrutscht. Bleibt nichts übrig, zeigen wir lieber
     // die knappen Verbindungen als eine leere Liste.
     if ($minChange !== null) {
         $kept = array_values(array_filter(
@@ -953,10 +974,10 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         }
     }
 
-    // --- 5. Abos anwenden bzw. schaetzen ------------------------------
+    // --- 5. Abos anwenden bzw. schätzen ------------------------------
     foreach ($journeys as $i => $j) {
         $journeys[$i] = Fares::apply($journeys[$i], $discounts, $travelClass);
-        // Ticketshops der beruehrten Laender, Startland zuerst.
+        // Ticketshops der berührten Länder, Startland zuerst.
         $journeys[$i]['shops'] = Shops::forJourney($journeys[$i], $date, $time, $travelClass);
     }
 
@@ -976,15 +997,17 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         'priceSource' => $priceSource,
         'discounts'   => $discounts,
         'notices'     => $notices,
-        // Womit sich die naechste Seite holen laesst; null = Ende der Fahne.
+        // Womit sich die nächste Seite holen lässt; null = Ende der Fahne.
         'scroll'      => $sched['scrollF'] ?? null,
+        // Dasselbe rückwärts, für den Knopf "Frühere Verbindungen".
+        'scrollBack'  => $sched['scrollB'] ?? null,
     ];
 
     // Leere Ergebnisse NICHT cachen. Sonst friert eine einmalige leere
-    // Antwort (temporaerer Provider-Aussetzer, kaputter Konfig-Zustand,
-    // exotische Kombination) den Nutzer fuer die naechsten Minuten in
-    // "0 Verbindungen" ein, obwohl schon der naechste Live-Aufruf wieder
-    // Treffer haette.
+    // Antwort (temporärer Provider-Aussetzer, kaputter Konfig-Zustand,
+    // exotische Kombination) den Nutzer für die nächsten Minuten in
+    // "0 Verbindungen" ein, obwohl schon der nächste Live-Aufruf wieder
+    // Treffer hätte.
     if ($journeys !== []) {
         $cache->set($cacheKey, $payload);
     }
@@ -996,19 +1019,19 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 // ======================================================================
 
 /**
- * Ordnet DB-Daten den OeBB-Verbindungen zu.
+ * Ordnet DB-Daten den ÖBB-Verbindungen zu.
  *
- * Gematcht wird ueber Abfahrts- UND Ankunftszeit mit 4 Minuten Toleranz -
+ * Gematcht wird über Abfahrts- UND Ankunftszeit mit 4 Minuten Toleranz -
  * damit erwischen wir dieselbe Verbindung auch dann, wenn die beiden Systeme
  * bei Echtzeitdaten leicht auseinanderliegen.
  *
- * WICHTIG: Die Zuordnung laeuft ueber ALLE DB-Treffer, nicht nur ueber die
+ * WICHTIG: Die Zuordnung läuft über ALLE DB-Treffer, nicht nur über die
  * mit Preis. Die DB liefert Echtzeit und Auslastung auch dann, wenn sie die
  * Relation nicht verkauft - nachts oder bei Auslandsverbindungen ist das der
- * Normalfall. Wuerden wir preislose Treffer ueberspringen, ginge genau dort
- * die Verspaetungsanzeige verloren, wo sie am meisten hilft.
+ * Normalfall. Würden wir preislose Treffer überspringen, ginge genau dort
+ * die Verspätungsanzeige verloren, wo sie am meisten hilft.
  *
- * @param array $journeys wird per Referenz um Preise und Echtzeit ergaenzt
+ * @param array $journeys wird per Referenz um Preise und Echtzeit ergänzt
  * @return int Anzahl zugeordneter ECHTPREISE (nicht: zugeordneter Treffer)
  */
 function mergePrices(array &$journeys, array $priced): int
@@ -1043,7 +1066,7 @@ function mergePrices(array &$journeys, array $priced): int
             continue;
         }
 
-        // Echtzeit, Auslastung und Deutschlandticket haengen nicht am Preis.
+        // Echtzeit, Auslastung und Deutschlandticket hängen nicht am Preis.
         mergeLegFlags($journeys[$i]['legs'], $best['legs'] ?? []);
 
         if (($best['price'] ?? null) !== null) {
@@ -1057,20 +1080,20 @@ function mergePrices(array &$journeys, array $priced): int
 }
 
 /**
- * Uebertraegt DB-spezifische Angaben auf die OeBB-Abschnitte.
+ * Überträgt DB-spezifische Angaben auf die ÖBB-Abschnitte.
  *
- * Drei Faelle, die HAFAS nicht liefert:
+ * Drei Fälle, die HAFAS nicht liefert:
  *
  *   1. Die DB markiert selbst, auf welchen Teilstrecken das
- *      Deutschlandticket gilt. Ohne diese Uebertragung wuesste Fares.php
- *      nichts davon und muesste allein anhand der Gattung raten.
+ *      Deutschlandticket gilt. Ohne diese Übertragung wüsste Fares.php
+ *      nichts davon und müsste allein anhand der Gattung raten.
  *   2. Auslastungsangaben.
- *   3. ECHTZEIT. Die DB schickt Ist-Zeiten und Verspaetungsgruende direkt in
- *      der Suchantwort mit. HAFAS braeuchte dafuer je Abschnitt eine eigene
- *      Abfrage - deshalb ist das hier der billigste Weg zu Verspaetungen
+ *   3. ECHTZEIT. Die DB schickt Ist-Zeiten und Verspätungsgründe direkt in
+ *      der Suchantwort mit. HAFAS bräuchte dafür je Abschnitt eine eigene
+ *      Abfrage - deshalb ist das hier der billigste Weg zu Verspätungen
  *      schon in der Trefferliste.
  *
- * Zugeordnet wird ueber die Zugnummer, ersatzweise ueber die Gattung.
+ * Zugeordnet wird über die Zugnummer, ersatzweise über die Gattung.
  */
 function mergeLegFlags(array &$legs, array $dbLegs): void
 {
@@ -1087,7 +1110,7 @@ function mergeLegFlags(array &$legs, array $dbLegs): void
         }
     }
 
-    // Eigene Zugabschnitte in derselben Reihenfolge - Grundlage fuer den
+    // Eigene Zugabschnitte in derselben Reihenfolge - Grundlage für den
     // Positionsabgleich weiter unten.
     $ownTrains = [];
     foreach ($legs as $i => $leg) {
@@ -1104,10 +1127,10 @@ function mergeLegFlags(array &$legs, array $dbLegs): void
         $num = trim((string) ($leg['trainNumber'] ?? ''));
         $match = $num !== '' ? ($byNumber[$num] ?? null) : null;
 
-        // Bei S-Bahnen nennt die DB die Linie ("S8"), die OeBB die Zugnummer
-        // ("35884") - ueber die Nummer findet sich da nichts. Haben beide
+        // Bei S-Bahnen nennt die DB die Linie ("S8"), die ÖBB die Zugnummer
+        // ("35884") - über die Nummer findet sich da nichts. Haben beide
         // Quellen gleich viele Zugabschnitte, ist die Position eindeutig
-        // genug: die Verbindung wurde ja bereits ueber Ab- UND Ankunftszeit
+        // genug: die Verbindung wurde ja bereits über Ab- UND Ankunftszeit
         // zugeordnet.
         if ($match === null && $sameShape) {
             $pos = array_search($i, $ownTrains, true);
@@ -1127,7 +1150,7 @@ function mergeLegFlags(array &$legs, array $dbLegs): void
             $legs[$i]['operator'] = $match['operator'];
         }
 
-        // Echtzeit uebernehmen, wenn die DB welche hat.
+        // Echtzeit übernehmen, wenn die DB welche hat.
         foreach (['departureReal', 'arrivalReal', 'delay'] as $k) {
             if (($match[$k] ?? null) !== null) {
                 $legs[$i][$k] = $match[$k];
@@ -1145,17 +1168,17 @@ function mergeLegFlags(array &$legs, array $dbLegs): void
 /**
  * Markiert knappe Umstiege.
  *
- * Die Umsteigezeit ist die Luecke zwischen Ankunft des einen und Abfahrt des
- * naechsten Zuges. Was knapp ist, haengt vom Bahnhof ab - als Faustregel
- * gelten unter 5 Minuten als riskant und unter 10 als knapp. Fusswege
- * zwischen den Zuegen werden mitgerechnet, denn die zaehlen ja auch.
+ * Die Umsteigezeit ist die Lücke zwischen Ankunft des einen und Abfahrt des
+ * nächsten Zuges. Was knapp ist, hängt vom Bahnhof ab - als Faustregel
+ * gelten unter 5 Minuten als riskant und unter 10 als knapp. Fußwege
+ * zwischen den Zügen werden mitgerechnet, denn die zählen ja auch.
  *
  * Liegen Ist-Zeiten vor (von der DB), wird ZUSAETZLICH mit ihnen gerechnet:
- * ein im Fahrplan bequemer Umstieg kann durch eine Verspaetung schon vor der
+ * ein im Fahrplan bequemer Umstieg kann durch eine Verspätung schon vor der
  * Abfahrt geplatzt sein. Das steht dann als eigener Wert an der Verbindung,
  * damit die Anzeige Plan und Wirklichkeit auseinanderhalten kann.
  *
- * Zusaetzlich wird die knappste Umsteigezeit der ganzen Verbindung vermerkt,
+ * Zusätzlich wird die knappste Umsteigezeit der ganzen Verbindung vermerkt,
  * damit die Liste danach warnen kann.
  */
 function annotateTransfers(array $journey): array
@@ -1168,7 +1191,7 @@ function annotateTransfers(array $journey): array
         if (($legs[$i]['mode'] ?? '') !== 'train') {
             continue;
         }
-        // Naechsten Zug suchen; Fusswege dazwischen ueberspringen.
+        // Nächsten Zug suchen; Fußwege dazwischen überspringen.
         $next = null;
         for ($k = $i + 1; $k < count($legs); $k++) {
             if (($legs[$k]['mode'] ?? '') === 'train') {
@@ -1213,7 +1236,7 @@ function annotateTransfers(array $journey): array
         : ($minGap < 5 ? 'risky' : ($minGap < 10 ? 'tight' : 'ok'));
     $journey['minTransferLive'] = $minLiveGap;
 
-    // Groesste Verspaetung ueber alle Abschnitte, fuer die Trefferliste.
+    // Größte Verspätung über alle Abschnitte, für die Trefferliste.
     $delay = null;
     foreach ($legs as $l) {
         if (($l['delay'] ?? null) !== null) {
@@ -1245,14 +1268,14 @@ function toTimestamp(?string $iso): ?int
 }
 
 /**
- * MVG-Stoerungsticker.
+ * MVG-Störungsticker.
  *
- * Aktive Meldungen der Muenchner Verkehrsgesellschaft. Beste Aktualitaet ist
- * nicht das Ziel - die App zeigt einen Ueberblick, die Detailseite bleibt
- * die MVG-App. Deshalb kurz cachen (2 Minuten), das schuetzt auch die MVG.
+ * Aktive Meldungen der Münchner Verkehrsgesellschaft. Beste Aktualität ist
+ * nicht das Ziel - die App zeigt einen Überblick, die Detailseite bleibt
+ * die MVG-App. Deshalb kurz cachen (2 Minuten), das schützt auch die MVG.
  *
  * Bei ausgeschaltetem MVG-Provider oder Fehler wird eine leere Liste
- * zurueckgegeben statt hart zu scheitern - der Ticker ist Beiwerk, kein
+ * zurückgegeben statt hart zu scheitern - der Ticker ist Beiwerk, kein
  * Kernfeature.
  */
 function handleDisruptions(Http $http, array $config, Cache $cache): void

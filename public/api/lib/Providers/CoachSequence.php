@@ -1,12 +1,12 @@
 <?php
 /**
- * Wagenreihung und Baureihe ueber bahn.expert.
+ * Wagenreihung und Baureihe über bahn.expert.
  *
  * WARUM NICHT DIREKT BEI DER DB:
  * Der DB-Endpunkt reisebegleitung/wagenreihung/vehicle-sequence antwortet auf
- * jede von aussen gebaute Anfrage mit HTTP 422 - die noetige
- * Parameterkombination liess sich nicht ermitteln. bahn.expert spricht mit
- * denselben Daten (Quelle "DB-risTransports") und liefert sie ueber eine
+ * jede von außen gebaute Anfrage mit HTTP 422 - die nötige
+ * Parameterkombination ließ sich nicht ermitteln. bahn.expert spricht mit
+ * denselben Daten (Quelle "DB-risTransports") und liefert sie über eine
  * erreichbare Schnittstelle.
  *
  * WAS ES LIEFERT:
@@ -18,7 +18,7 @@
  *   - nur deutscher Fernverkehr (ICE, IC, EC)
  *   - nur am Reisetag, meist erst wenige Stunden vor Abfahrt
  *   - bahn.expert ist ein privat betriebenes Projekt, kein offizieller Dienst.
- *     Deshalb: aggressiv cachen, hoechstens ein Zug pro Abschnitt, und bei
+ *     Deshalb: aggressiv cachen, höchstens ein Zug pro Abschnitt, und bei
  *     jedem Fehler stillschweigend ohne Baureihe weitermachen.
  *
  * OFFIZIELLE ALTERNATIVE:
@@ -40,7 +40,7 @@ final class CoachSequence
     }
 
     /**
-     * Ergaenzt die Abschnitte einer Verbindung um 'series' und 'seriesName'.
+     * Ergänzt die Abschnitte einer Verbindung um 'series' und 'seriesName'.
      *
      * @param string $travelDate YYYY-MM-DD
      */
@@ -113,7 +113,7 @@ final class CoachSequence
 
         // bahn.expert erwartet UTC-Zeitstempel im JavaScript-Format.
         $planned = $dep->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.000\Z');
-        // Der Abfahrtstag des Zuglaufs; Mitternacht des Reisetags genuegt.
+        // Der Abfahrtstag des Zuglaufs; Mitternacht des Reisetags genügt.
         $initial = $dep->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\T00:00:00.000\Z');
 
         // tRPC/superjson: erst eine Feldkarte, dann die Werte in Indexreihenfolge.
@@ -135,7 +135,7 @@ final class CoachSequence
         ];
 
         // Doppelt kodieren: der Dienst erwartet einen JSON-STRING, der das
-        // Array enthaelt - nicht das Array selbst. Ohne die zweite Kodierung
+        // Array enthält - nicht das Array selbst. Ohne die zweite Kodierung
         // antwortet er mit "[object Object] is not valid JSON".
         $inner = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         $outer = json_encode($inner === false ? '[]' : $inner, JSON_UNESCAPED_SLASHES);
@@ -168,9 +168,9 @@ final class CoachSequence
      * Liest Baureihe und Wagen aus der superjson-Antwort.
      *
      * Das Format ist referenzbasiert: Element 0 ist die Wurzel, jeder Wert
-     * darin ist ein Index in dasselbe Array. -1 steht fuer "nicht vorhanden".
-     * Statt das Format allgemein aufzuloesen, navigieren wir gezielt - das
-     * ist kuerzer und bricht nicht, wenn anderswo etwas unbekannt ist.
+     * darin ist ein Index in dasselbe Array. -1 steht für "nicht vorhanden".
+     * Statt das Format allgemein aufzulösen, navigieren wir gezielt - das
+     * ist kürzer und bricht nicht, wenn anderswo etwas unbekannt ist.
      */
     private function extract(array $arr): ?array
     {

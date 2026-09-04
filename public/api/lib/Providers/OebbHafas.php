@@ -1,15 +1,15 @@
 <?php
 /**
- * OeBB HAFAS (fahrplan.oebb.at/bin/mgate.exe).
+ * ÖBB HAFAS (fahrplan.oebb.at/bin/mgate.exe).
  *
- * Das ist unsere primaere Fahrplanquelle fuer CH/DE/AT. Sie liefert:
+ * Das ist unsere primäre Fahrplanquelle für CH/DE/AT. Sie liefert:
  *   - Verbindungen mit Zeiten, Dauer, Umstiegen
- *   - Zuggattung (ICE, RJX, EC, IC, NJ, ...) und Zugnummer  -> Basis fuer den Nerd-Mode
- *   - Laendercode pro Station                               -> Basis fuer Abo-Anteile (GA/Klimaticket)
+ *   - Zuggattung (ICE, RJX, EC, IC, NJ, ...) und Zugnummer  -> Basis für den Nerd-Mode
+ *   - Ländercode pro Station                               -> Basis für Abo-Anteile (GA/Klimaticket)
  *
- * Sie liefert bewusst KEINE Preise: das HAFAS-Tarifobjekt enthaelt bei OeBB nur
+ * Sie liefert bewusst KEINE Preise: das HAFAS-Tarifobjekt enthält bei ÖBB nur
  * einen Deeplink in den Ticketshop. Preise kommen aus dem DB-Provider bzw. der
- * Schaetzung in Fares.php.
+ * Schätzung in Fares.php.
  */
 final class OebbHafas
 {
@@ -19,20 +19,20 @@ final class OebbHafas
      */
     private const CLS_LONG_DISTANCE = 1 | 2 | 4;
 
-    /** Stuetzpunkte je Abschnitt fuer die Karte - haelt die Antwort klein. */
+    /** Stützpunkte je Abschnitt für die Karte - hält die Antwort klein. */
     private const MAX_GEOMETRY_POINTS = 60;
 
-    /** Laender, deren Baustellen hier interessieren. */
+    /** Länder, deren Baustellen hier interessieren. */
     private const DACH = ['de', 'at', 'ch'];
 
-    /** Die ersten beiden Ziffern einer UIC-Stationsnummer als Laendercode. */
+    /** Die ersten beiden Ziffern einer UIC-Stationsnummer als Ländercode. */
     private const UIC_COUNTRY = ['80' => 'de', '81' => 'at', '85' => 'ch'];
 
     /**
      * Ab wie vielen Tagen eine Meldung als Baustelle gilt.
      *
-     * Darunter ist es eine Stoerung: eine Weichenstoerung am Dienstag gehoert
-     * nicht in eine Uebersicht, die zeigen soll, wo im Netz gerade gross
+     * Darunter ist es eine Störung: eine Weichenstörung am Dienstag gehört
+     * nicht in eine Übersicht, die zeigen soll, wo im Netz gerade groß
      * gebaut wird. Eine Woche trennt beides sauber.
      */
     private const MIN_DAYS = 7;
@@ -43,8 +43,8 @@ final class OebbHafas
     /**
      * HAFAS-Produktklassen auf die Gattungsnamen der DB abbilden.
      * Nur so lassen sich Treffer beider Quellen gleich bewerten - sonst
-     * gewinnt ein oesterreichischer Dorfhalt gegen einen Muenchner
-     * U-Bahn-Knoten, bloss weil er pauschal eingestuft wurde.
+     * gewinnt ein österreichischer Dorfhalt gegen einen Münchner
+     * U-Bahn-Knoten, bloß weil er pauschal eingestuft wurde.
      */
     private const CLS_TO_PRODUCT = [
         1    => 'ICE',
@@ -81,30 +81,30 @@ final class OebbHafas
     }
 
     /**
-     * Grosse Bauarbeiten und Stoerungen im Netz (HAFAS Information Manager).
+     * Große Bauarbeiten und Störungen im Netz (HAFAS Information Manager).
      *
      * Liefert Meldungen mit betroffenem ABSCHNITT (von-Ort, bis-Ort),
-     * Gueltigkeitszeitraum und Koordinaten - also genau das, was sich auf
-     * einer Karte darstellen laesst: welche Strecke ist wie lange betroffen.
+     * Gültigkeitszeitraum und Koordinaten - also genau das, was sich auf
+     * einer Karte darstellen lässt: welche Strecke ist wie lange betroffen.
      *
      * WAS HIER RAUSFAELLT, und warum: HimSearch liefert alles, was im
      * Betrieb gerade Bestand hat - vom mehrmonatigen Streckenumbau bis zum
-     * nicht barrierefreien Bahnsteig. Fuer eine Uebersicht "wo wird gerade
-     * gross gebaut" ist das zu fein. Deshalb drei Siebe:
+     * nicht barrierefreien Bahnsteig. Für eine Übersicht "wo wird gerade
+     * groß gebaut" ist das zu fein. Deshalb drei Siebe:
      *
-     *   1. KATEGORIE. HAFAS trennt Betriebsmeldungen (1-3: Stoerung,
+     *   1. KATEGORIE. HAFAS trennt Betriebsmeldungen (1-3: Störung,
      *      Bauarbeiten, Ausfall) von Reisehinweisen (4). Ohne diesen Filter
      *      stehen 117 "ACHTUNG: Starker Reisetag"-Hinweise in der Liste.
-     *   2. LAND. Diese Instanz gehoert der OeBB und kennt auch Meldungen aus
+     *   2. LAND. Diese Instanz gehört der ÖBB und kennt auch Meldungen aus
      *      Ungarn, Slowenien und Italien. Hier interessiert der
      *      deutschsprachige Raum.
      *   3. DAUER. Was in wenigen Tagen vorbei ist, ist keine Baustelle,
-     *      sondern eine Stoerung. Siehe MIN_DAYS.
+     *      sondern eine Störung. Siehe MIN_DAYS.
      *
-     * ABDECKUNG: Der Schwerpunkt liegt bei Oesterreich - nachgemessen ueber
-     * 500 Meldungen: 452 mit oesterreichischem, 17 mit deutschem und 9 mit
+     * ABDECKUNG: Der Schwerpunkt liegt bei Österreich - nachgemessen über
+     * 500 Meldungen: 452 mit österreichischem, 17 mit deutschem und 9 mit
      * schweizerischem Anfangsbahnhof. Eine deutschlandweite Quelle braucht
-     * einen eigenen Provider; im README steht, was dafuer noetig waere.
+     * einen eigenen Provider; im README steht, was dafür nötig wäre.
      *
      * @param int $days Vorausschau in Tagen
      * @return array{ok:bool,error:?string,data:array}
@@ -118,14 +118,14 @@ final class OebbHafas
             'timeE'  => '235900',
             // Hoch angesetzt, weil die Auswahl weiter unten stattfindet: von
             // 500 Meldungen bleiben nach Kategorie, Land, Dauer und
-            // Entdoppelung rund drei Dutzend uebrig.
+            // Entdoppelung rund drei Dutzend übrig.
             'maxNum' => max(1, min(500, $max)),
             // Der STRECKENVERLAUF des betroffenen Abschnitts, nicht nur seine
             // Endpunkte. Ohne ihn bleibt der Karte nur eine gerade Linie
-            // zwischen zwei Bahnhoefen - und die laeuft quer durchs Gelaende,
+            // zwischen zwei Bahnhöfen - und die läuft quer durchs Gelände,
             // wo die Schiene einen Bogen macht.
             //
-            // Der Schalter gehoert in 'req', nicht in 'cfg': dort quittiert
+            // Der Schalter gehört in 'req', nicht in 'cfg': dort quittiert
             // ihn HAFAS mit "Parse fail".
             'getPolyline' => true,
         ]);
@@ -158,9 +158,9 @@ final class OebbHafas
                 continue;
             }
 
-            // Bei grenzueberschreitenden Abschnitten zaehlt die Seite, die
-            // hierher gehoert: Villach-Jesenice ist fuer uns eine
-            // oesterreichische Baustelle, keine slowenische.
+            // Bei grenzüberschreitenden Abschnitten zählt die Seite, die
+            // hierher gehört: Villach-Jesenice ist für uns eine
+            // österreichische Baustelle, keine slowenische.
             $land = self::country($from);
             if (!in_array($land, self::DACH, true)) {
                 $land = self::country($to);
@@ -185,7 +185,7 @@ final class OebbHafas
                 'title' => $head,
                 // HAFAS liefert den Text mit HTML-Fragmenten; die Anzeige
                 // setzt alles per textContent, also hier schon bereinigen -
-                // und kuerzen, siehe summarise().
+                // und kürzen, siehe summarise().
                 'text'  => self::summarise(Text::plain((string) ($m['text'] ?? '')), $head),
                 'from'  => self::worksPlace($from),
                 'to'    => self::worksPlace($to),
@@ -195,9 +195,9 @@ final class OebbHafas
                 'geometry' => $this->worksGeometry($m, $edgeL, $common),
                 'category' => (int) $catId,
                 'products' => self::productsFromCls((int) ($m['prod'] ?? 0)),
-                // Faehrt hier Fernverkehr? Zwei Wege dorthin, weil HAFAS die
-                // Produktklasse der MELDUNG in vier von fuenf Faellen auf
-                // null laesst: dann entscheiden die beiden Endbahnhoefe.
+                // Fährt hier Fernverkehr? Zwei Wege dorthin, weil HAFAS die
+                // Produktklasse der MELDUNG in vier von fünf Fällen auf
+                // null lässt: dann entscheiden die beiden Endbahnhöfe.
                 'longDistance' => self::isLongDistance($m, $from, $to),
             ];
         }
@@ -208,10 +208,10 @@ final class OebbHafas
     /**
      * Streckenverlauf des betroffenen Abschnitts.
      *
-     * Eine Meldung verweist ueber `edgeRefL` auf ein oder mehrere Kanten des
+     * Eine Meldung verweist über `edgeRefL` auf ein oder mehrere Kanten des
      * Netzes; jede Kante bringt ihren eigenen Polylinienzug mit. Aneinander-
-     * gehaengt ergibt das den tatsaechlichen Verlauf - bei einer Sperrung
-     * ueber mehrere Betriebsstellen also den ganzen Zug der Strecke, nicht
+     * gehängt ergibt das den tatsächlichen Verlauf - bei einer Sperrung
+     * über mehrere Betriebsstellen also den ganzen Zug der Strecke, nicht
      * die Luftlinie zwischen erstem und letztem Bahnhof.
      *
      * @return array<int,array{0:float,1:float}>
@@ -231,26 +231,26 @@ final class OebbHafas
         return $this->thin($points, self::MAX_GEOMETRY_POINTS);
     }
 
-    /** Laendercode einer HAFAS-Station, klein geschrieben. */
+    /** Ländercode einer HAFAS-Station, klein geschrieben. */
     private static function country(array $loc): string
     {
         $code = strtolower((string) (($loc['countryCodeL'] ?? [])[0] ?? ''));
         if ($code !== '') {
             return $code;
         }
-        // Rueckfallebene: die ersten beiden Ziffern der UIC-Nummer sind der
-        // Laendercode - 80 Deutschland, 81 Oesterreich, 85 Schweiz.
+        // Rückfallebene: die ersten beiden Ziffern der UIC-Nummer sind der
+        // Ländercode - 80 Deutschland, 81 Österreich, 85 Schweiz.
         return self::UIC_COUNTRY[substr((string) ($loc['extId'] ?? ''), 0, 2)] ?? '';
     }
 
     /**
-     * Faehrt auf dem betroffenen Abschnitt Fernverkehr?
+     * Fährt auf dem betroffenen Abschnitt Fernverkehr?
      *
      * Erst die Produktklasse der Meldung selbst - die ist eindeutig, steht
-     * aber nur bei rund einem Fuenftel der Meldungen. Sonst entscheiden die
-     * Endbahnhoefe: sind BEIDE Fernverkehrshalte, liegt der Abschnitt auf
-     * einer Fernverkehrsstrecke. Nur einer reicht nicht, sonst zaehlt jede
-     * Nebenbahn mit, die irgendwo in einen Hauptbahnhof muendet.
+     * aber nur bei rund einem Fünftel der Meldungen. Sonst entscheiden die
+     * Endbahnhöfe: sind BEIDE Fernverkehrshalte, liegt der Abschnitt auf
+     * einer Fernverkehrsstrecke. Nur einer reicht nicht, sonst zählt jede
+     * Nebenbahn mit, die irgendwo in einen Hauptbahnhof mündet.
      */
     private static function isLongDistance(array $msg, array $from, array $to): bool
     {
@@ -281,13 +281,13 @@ final class OebbHafas
      *
      * HAFAS meldet je Linie, je Richtung und je Zeitabschnitt neu:
      * Wampersdorf-Ebenfurth stand viermal in der Liste, wortgleich, nur mit
-     * anderen Datumsgrenzen. Der Schluessel ignoriert deshalb sowohl die
+     * anderen Datumsgrenzen. Der Schlüssel ignoriert deshalb sowohl die
      * Richtung (Hartberg-Fehring ist dieselbe Sperrung wie
      * Fehring-Hartberg) als auch den Zeitraum - und der zusammengefasste
      * Eintrag bekommt den weitesten Zeitraum aller Einzelmeldungen.
      *
-     * Auch der Titel geht nur bis zum Schraegstrich in den Schluessel ein:
-     * "Bauarbeiten - Schienenersatzverkehr/geaenderte Fahrzeiten" und
+     * Auch der Titel geht nur bis zum Schrägstrich in den Schlüssel ein:
+     * "Bauarbeiten - Schienenersatzverkehr/geänderte Fahrzeiten" und
      * ".../vorverlegte Abfahrtszeit" beschreiben dieselbe Baustelle.
      *
      * @param array<int,array> $works
@@ -314,10 +314,10 @@ final class OebbHafas
             if ($vorhanden['end'] !== null && ($w['end'] === null || $w['end'] > $vorhanden['end'])) {
                 $vorhanden['end'] = $w['end'];
             }
-            // Fernverkehr aus irgendeiner der Teilmeldungen zaehlt.
+            // Fernverkehr aus irgendeiner der Teilmeldungen zählt.
             $vorhanden['longDistance'] = $vorhanden['longDistance'] || $w['longDistance'];
-            // Und der ausfuehrlichere Streckenverlauf gewinnt: dieselbe
-            // Baustelle wird je Linie gemeldet, und nicht jede Linie faehrt
+            // Und der ausführlichere Streckenverlauf gewinnt: dieselbe
+            // Baustelle wird je Linie gemeldet, und nicht jede Linie fährt
             // den ganzen gesperrten Abschnitt.
             if (count($w['geometry']) > count($vorhanden['geometry'])) {
                 $vorhanden['geometry'] = $w['geometry'];
@@ -331,11 +331,11 @@ final class OebbHafas
     /**
      * Aus dem Meldungstext einen Satz machen, der in eine Zeile passt.
      *
-     * Die HAFAS-Texte sind 280 bis 340 Zeichen lang und zu vier Fuenfteln
-     * Formelware: "Wir haben fuer Sie einen Schienenersatzverkehr
+     * Die HAFAS-Texte sind 280 bis 340 Zeichen lang und zu vier Fünfteln
+     * Formelware: "Wir haben für Sie einen Schienenersatzverkehr
      * eingerichtet. Bitte beachten Sie, dass in den Bussen des
-     * Schienenersatzverkehres keine Fahrradmitnahme moeglich ist ...". In
-     * der Liste lief das ueber den Rand hinaus und verdraengte genau die
+     * Schienenersatzverkehres keine Fahrradmitnahme möglich ist ...". In
+     * der Liste lief das über den Rand hinaus und verdrängte genau die
      * Angaben, wegen derer man hinschaut: Abschnitt und Zeitraum.
      *
      * Behalten wird der erste Satz - er nennt die Sache. Wiederholt er nur
@@ -348,13 +348,13 @@ final class OebbHafas
             return '';
         }
 
-        // In Saetze zerlegen. Das Satzende ist ein Punkt gefolgt von
-        // Leerzeichen und Grossbuchstabe - "z.B." und "ca." beenden so
+        // In Sätze zerlegen. Das Satzende ist ein Punkt gefolgt von
+        // Leerzeichen und Großbuchstabe - "z.B." und "ca." beenden so
         // keinen Satz.
         $saetze = preg_split('/(?<=[.!?])\\s+(?=\\p{Lu})/u', $text) ?: [$text];
 
-        // Saetze, die nichts hinzufuegen. Der erste wiederholt den Abschnitt,
-        // der ohnehin danebensteht; die uebrigen sind Formelware, die in
+        // Sätze, die nichts hinzufügen. Der erste wiederholt den Abschnitt,
+        // der ohnehin danebensteht; die übrigen sind Formelware, die in
         // jeder zweiten Meldung wortgleich vorkommt.
         $leer = '/(kann dieser Zug .* nicht fahren'
             . '|^Bitte beachten Sie'
@@ -428,15 +428,15 @@ final class OebbHafas
                 'lon'          => isset($l['crd']['x']) ? $l['crd']['x'] / 1000000 : null,
                 'longDistance' => ($pCls & self::CLS_LONG_DISTANCE) !== 0,
                 // Gleiche Produktnamen wie bei der DB, damit beide Quellen
-                // nach denselben Massstaeben bewertet werden koennen.
+                // nach denselben Maßstäben bewertet werden können.
                 'products'     => self::productsFromCls($pCls),
             ];
         }
 
-        // Reihenfolge bewusst NICHT veraendern: HAFAS sortiert bereits nach
+        // Reihenfolge bewusst NICHT verändern: HAFAS sortiert bereits nach
         // eigenem Relevanzgewicht. Namen mit "(U)" sind keine U-Bahn-Stationen,
-        // sondern Meta-Stationen, die alle Bahnsteige eines Bahnhofs buendeln -
-        // fuer eine Verbindungssuche genau die richtige Wahl.
+        // sondern Meta-Stationen, die alle Bahnsteige eines Bahnhofs bündeln -
+        // für eine Verbindungssuche genau die richtige Wahl.
         return ['ok' => true, 'error' => null, 'data' => $out];
     }
 
@@ -448,8 +448,8 @@ final class OebbHafas
      * @param string $date    YYYY-MM-DD
      * @param string $time    HH:MM
      * @param bool   $arrival true = $time ist Ankunftszeit
-     * @param ?string $scroll  Blaetter-Kontext aus einer frueheren Antwort
-     * @return array{ok:bool,error:?string,data:array,scrollF:?string}
+     * @param ?string $scroll  Blätter-Kontext aus einer früheren Antwort
+     * @return array{ok:bool,error:?string,data:array,scrollF:?string,scrollB:?string}
      */
     public function journeys(
         string $fromId,
@@ -469,10 +469,10 @@ final class OebbHafas
             'arrLocL'     => [['type' => 'S', 'lid' => 'A=1@L=' . $toId . '@']],
             'outDate'     => str_replace('-', '', $date),
             'outTime'     => str_replace(':', '', $time) . '00',
-            // Zwischenhalte brauchen wir doppelt: fuer den Streckenverlauf im
-            // Nerd-Mode und fuer die exakte Laenderaufteilung in Fares.php.
+            // Zwischenhalte brauchen wir doppelt: für den Streckenverlauf im
+            // Nerd-Mode und für die exakte Länderaufteilung in Fares.php.
             'getPasslist' => true,
-            // Polylines sind die Geometrie fuer die Karte.
+            // Polylines sind die Geometrie für die Karte.
             'getPolyline' => true,
             'getTariff'   => true,
             'trfReq'      => [
@@ -487,22 +487,24 @@ final class OebbHafas
             $req['outFrwd'] = false;
         }
 
-        // Weiterblaettern. HAFAS deckelt numF je Anfrage bei rund sechs
-        // Treffern - mehr gibt es nur ueber den Kontext aus der vorigen
-        // Antwort, der an die Stelle von Datum und Uhrzeit tritt.
+        // Blättern. HAFAS deckelt numF je Anfrage bei rund sechs Treffern -
+        // mehr gibt es nur über den Kontext aus der vorigen Antwort, der an
+        // die Stelle von Datum und Uhrzeit tritt. In welche RICHTUNG geblättert
+        // wird, steckt im Kontext selbst ('3|OF|…' vorwärts, '3|OB|…'
+        // rückwärts) - hier ist beides derselbe Parameter.
         if ($scroll !== null && $scroll !== '') {
             unset($req['outDate'], $req['outTime']);
             $req['ctxScr'] = $scroll;
         }
 
         // Mindestumsteigezeit. HAFAS wirft dann nicht nur zu knappe
-        // Verbindungen weg, sondern sucht auch andere Wege - etwa ueber eine
-        // Nachbarhaltestelle, zu der man laeuft.
+        // Verbindungen weg, sondern sucht auch andere Wege - etwa über eine
+        // Nachbarhaltestelle, zu der man läuft.
         if ($minChangeMin !== null && $minChangeMin >= 0) {
             $req['minChgTime'] = $minChangeMin;
         }
 
-        // Verkehrsmittel einschraenken. 0 heisst "keine Einschraenkung".
+        // Verkehrsmittel einschränken. 0 heißt "keine Einschränkung".
         if ($productMask > 0) {
             $req['jnyFltrL'] = [[
                 'type'  => 'PROD',
@@ -520,7 +522,7 @@ final class OebbHafas
 
         $res = $this->call('TripSearch', $req);
         if (!$res['ok']) {
-            return $res + ['scrollF' => null];
+            return $res + ['scrollF' => null, 'scrollB' => null];
         }
 
         $body   = $res['data']['res'] ?? [];
@@ -539,16 +541,18 @@ final class OebbHafas
             'ok'      => true,
             'error'   => null,
             'data'    => $journeys,
-            // Kontext fuer die naechste Seite - spaetere Abfahrten.
+            // Kontext für die nächste Seite - spätere Abfahrten.
             'scrollF' => isset($body['outCtxScrF']) ? (string) $body['outCtxScrF'] : null,
+            // Und derselbe Kontext rückwärts - frühere Abfahrten.
+            'scrollB' => isset($body['outCtxScrB']) ? (string) $body['outCtxScrB'] : null,
         ];
     }
 
     /**
-     * Zuege, die gerade in einem Kartenausschnitt unterwegs sind.
+     * Züge, die gerade in einem Kartenausschnitt unterwegs sind.
      *
      * HAFAS berechnet die Position aus Fahrplan und Echtzeitlage
-     * (trainPosMode CALC). Das ist keine GPS-Ortung, kommt der Realitaet aber
+     * (trainPosMode CALC). Das ist keine GPS-Ortung, kommt der Realität aber
      * nahe genug, um zu sehen wo ein Zug gerade steckt.
      *
      * @param float $south,$west,$north,$east Grad
@@ -602,7 +606,7 @@ final class OebbHafas
                 'trainNumber' => self::trainNumber($ctx, $name),
                 'name'        => $name,
                 'direction'   => trim((string) ($jny['dirTxt'] ?? '')),
-                // Mit dieser Kennung laesst sich der Lauf im Detail nachladen.
+                // Mit dieser Kennung lässt sich der Lauf im Detail nachladen.
                 'jid'         => (string) ($jny['jid'] ?? ''),
             ];
         }
@@ -612,7 +616,7 @@ final class OebbHafas
 
     /**
      * Der komplette Lauf eines Zuges: alle Halte mit Soll- und Ist-Zeiten,
-     * Gleisen und Verspaetung.
+     * Gleisen und Verspätung.
      *
      * @param string $jid Kennung aus liveTrains()
      * @return array{ok:bool,error:?string,data:array}
@@ -656,7 +660,7 @@ final class OebbHafas
             $depPlan = $this->hafasTime($date, $st['dTimeS'] ?? null, $st['dTZOffset'] ?? null);
             $depReal = $this->hafasTime($date, $st['dTimeR'] ?? null, $st['dTZOffset'] ?? null);
 
-            // Verspaetung an der Abfahrt, ersatzweise an der Ankunft.
+            // Verspätung an der Abfahrt, ersatzweise an der Ankunft.
             $delay = null;
             if ($depPlan !== null && $depReal !== null) {
                 $delay = $this->diffMinutes($depPlan, $depReal);
@@ -684,11 +688,22 @@ final class OebbHafas
             ];
         }
 
-        // Meldungen (Bauarbeiten, Störungen) sind fuer die Anzeige nuetzlich.
+        // Meldungen (Bauarbeiten, Störungen) sind für die Anzeige nützlich.
+        //
+        // AUSSTATTUNG IST KEINE MELDUNG: HAFAS mischt unter msgL auch die
+        // Zugattribute, und die kommen mit type 'A' - "Klimaanlage",
+        // "Fahrradmitnahme begrenzt möglich", "Fahrzeuggebundene
+        // Einstiegshilfe". Ungefiltert stand in der Live-Verfolgung jedes
+        // Regionalzuges genau das und sonst nichts, wo man Störungen
+        // erwartet. Was die HIM-Meldungen betrifft (himL), bleibt alles
+        // stehen - das sind die echten Meldungen.
         $messages = [];
         foreach (($jny['msgL'] ?? []) as $m) {
             $rem = ($common['remL'] ?? [])[$m['remX'] ?? -1] ?? null;
             $him = ($common['himL'] ?? [])[$m['himX'] ?? -1] ?? null;
+            if ($him === null && ($rem['type'] ?? '') === 'A') {
+                continue;
+            }
             $txt = Text::plain((string) ($him['head'] ?? $rem['txtN'] ?? ''));
             if ($txt !== '' && !in_array($txt, $messages, true)) {
                 $messages[] = $txt;
@@ -722,9 +737,9 @@ final class OebbHafas
     /**
      * Anzeigename eines Produkts, z.B. "ICE 516".
      *
-     * HAFAS liefert zwei Namen und haelt sich nicht daran, welcher von beiden
-     * die Zugnummer traegt: mal steht sie im langen (`name`), mal nur im
-     * kurzen (`nameS`). Genommen wird deshalb der laengere - er enthaelt den
+     * HAFAS liefert zwei Namen und hält sich nicht daran, welcher von beiden
+     * die Zugnummer trägt: mal steht sie im langen (`name`), mal nur im
+     * kurzen (`nameS`). Genommen wird deshalb der längere - er enthält den
      * anderen praktisch immer und dazu die Nummer.
      */
     private static function productName(array $prod): string
@@ -732,8 +747,8 @@ final class OebbHafas
         $saeubern = static function (string $v): string {
             $v = trim((string) preg_replace('/\s+/u', ' ', $v));
             // "S 33 (Zug-Nr. 20326)" -> "S 33". Der Klammerzusatz ist eine
-            // Anzeigehilfe von HAFAS und gehoert in keine Beschriftung: bei
-            // einer S-Bahn heisst der Zug nach seiner LINIE, und die
+            // Anzeigehilfe von HAFAS und gehört in keine Beschriftung: bei
+            // einer S-Bahn heißt der Zug nach seiner LINIE, und die
             // Zugnummer steht ohnehin getrennt in `prodCtx.num`.
             return trim((string) preg_replace('/\s*\((?:Zug-Nr\.|Zugnr\.?|Nr\.)[^)]*\)\s*$/ui', '', $v));
         };
@@ -750,10 +765,10 @@ final class OebbHafas
     /**
      * Liniennummer eines Produkts, sofern es eine Linie ist.
      *
-     * Fernverkehr hat keine: ein ICE 593 faehrt heute so und morgen anders,
+     * Fernverkehr hat keine: ein ICE 593 fährt heute so und morgen anders,
      * die Nummer IST der Zug. Nahverkehr hat eine, und dort ist es umgekehrt -
      * die Linie ist das, was am Bahnsteig angeschrieben steht und wonach
-     * gefragt wird. Zurueckgegeben wird, was HAFAS in `prodCtx.line` fuehrt:
+     * gefragt wird. Zurückgegeben wird, was HAFAS in `prodCtx.line` führt:
      * mal nur die Zahl ("33"), mal mit Gattung ("RE3").
      */
     private static function lineName(array $ctx): string
@@ -764,11 +779,11 @@ final class OebbHafas
     /**
      * Zugnummer.
      *
-     * In `prodCtx.num` steht sie nur, wenn HAFAS sie getrennt fuehrt - in den
-     * Positionsmeldungen (JourneyGeoPos) fehlt sie regelmaessig, und die
-     * Karte zeigte dann bloss "ICE" statt "ICE 516". Fehlt sie, wird sie aus
+     * In `prodCtx.num` steht sie nur, wenn HAFAS sie getrennt führt - in den
+     * Positionsmeldungen (JourneyGeoPos) fehlt sie regelmäßig, und die
+     * Karte zeigte dann bloß "ICE" statt "ICE 516". Fehlt sie, wird sie aus
      * dem Produktnamen gezogen. Gattungen ohne Nummer (S-Bahn, Bus) liefern
-     * erwartungsgemaess einen leeren String.
+     * erwartungsgemäß einen leeren String.
      */
     private static function trainNumber(array $ctx, string $name): string
     {
@@ -824,8 +839,8 @@ final class OebbHafas
 
                 $legs[] = [
                     'mode'         => 'train',
-                    // Kennung des konkreten Zuglaufs. Damit laesst sich zu
-                    // diesem Abschnitt spaeter die Echtzeitlage nachladen
+                    // Kennung des konkreten Zuglaufs. Damit lässt sich zu
+                    // diesem Abschnitt später die Echtzeitlage nachladen
                     // (action=traindetails) - Grundlage der Live-Verfolgung.
                     'jid'          => (string) ($jny['jid'] ?? ''),
                     'geometry'     => $this->geometryOf($jny, $common),
@@ -847,9 +862,9 @@ final class OebbHafas
                     'cancelled'    => (bool) ($jny['isCncl'] ?? false),
                 ];
             } else {
-                // Alles ausser einer Fahrt ist ein Weg zu Fuss: WALK, TRSF,
+                // Alles außer einer Fahrt ist ein Weg zu Fuß: WALK, TRSF,
                 // aber auch seltenere Typen wie DEVI oder KISS. Sie hier
-                // aufzufuehren waere zu eng - was kein JNY ist, faehrt nicht.
+                // aufzuführen wäre zu eng - was kein JNY ist, fährt nicht.
                 $legs[] = [
                     'mode'        => 'walk',
                     'kind'        => strtolower($type),
@@ -858,7 +873,7 @@ final class OebbHafas
                     'departure'   => $depTime,
                     'arrival'     => $arrTime,
                     'durationMin' => $this->diffMinutes($depTime, $arrTime),
-                    // Wechselt der Halt, geht man wirklich ein Stueck.
+                    // Wechselt der Halt, geht man wirklich ein Stück.
                     'changesPlace' => ($fromLoc['name'] ?? '') !== ($toLoc['name'] ?? ''),
                 ];
             }
@@ -870,18 +885,18 @@ final class OebbHafas
 
         $trainLegs = array_values(array_filter($legs, static fn($l) => $l['mode'] === 'train'));
         if ($trainLegs === []) {
-            return null; // reine Fussweg-"Verbindungen" interessieren uns nicht
+            return null; // reine Fußweg-"Verbindungen" interessieren uns nicht
         }
 
         $depAll = $this->hafasTime($baseDate, $con['dep']['dTimeS'] ?? null, $con['dep']['dTZOffset'] ?? null);
         $arrAll = $this->hafasTime($baseDate, $con['arr']['aTimeS'] ?? null, $con['arr']['aTZOffset'] ?? null);
 
-        // Buchungs-Deeplink: HAFAS liefert bei OeBB einen fertigen Shop-Link.
+        // Buchungs-Deeplink: HAFAS liefert bei ÖBB einen fertigen Shop-Link.
         $bookingUrl = $con['trfRes']['clickout'] ?? null;
 
-        // Identitaet der Verbindung. NICHT cid nehmen: das ist nur der Index
+        // Identität der Verbindung. NICHT cid nehmen: das ist nur der Index
         // innerhalb einer Antwort ("C-0") und wiederholt sich beim
-        // Weiterblaettern auf jeder Seite. ctxRecon bezeichnet dagegen genau
+        // Weiterblättern auf jeder Seite. ctxRecon bezeichnet dagegen genau
         // diese eine Verbindung; fehlt es, tun es Ab- und Ankunftszeit.
         $recon = trim((string) ($con['ctxRecon'] ?? ''));
         $ident = $recon !== ''
@@ -897,18 +912,18 @@ final class OebbHafas
             'legs'        => $legs,
             'countries'   => array_keys($countries),
             'bookingUrl'  => $bookingUrl,
-            'price'       => null, // wird spaeter von DB-Provider oder Fares.php gefuellt
+            'price'       => null, // wird später von DB-Provider oder Fares.php gefüllt
             'source'      => 'oebb',
         ];
     }
 
     /**
-     * Geometrie eines Abschnitts als [[lat, lon], ...] fuer die Karte.
+     * Geometrie eines Abschnitts als [[lat, lon], ...] für die Karte.
      *
      * HAFAS liefert die Linien Google-encoded in common.polyL; der Abschnitt
-     * verweist ueber jny.polyG.polyXL auf die Eintraege. Wir duennen auf
-     * hoechstens MAX_GEOMETRY_POINTS Stuetzpunkte aus - fuer eine
-     * Uebersichtskarte reicht das und die Antwort bleibt klein.
+     * verweist über jny.polyG.polyXL auf die Einträge. Wir dünnen auf
+     * höchstens MAX_GEOMETRY_POINTS Stützpunkte aus - für eine
+     * Übersichtskarte reicht das und die Antwort bleibt klein.
      *
      * @return array<int,array{0:float,1:float}>
      */
@@ -977,7 +992,7 @@ final class OebbHafas
         return $points;
     }
 
-    /** Gleichmaessiges Ausduennen; Anfang und Ende bleiben erhalten. */
+    /** Gleichmäßiges Ausdünnen; Anfang und Ende bleiben erhalten. */
     private function thin(array $points, int $max): array
     {
         $n = count($points);
@@ -996,9 +1011,9 @@ final class OebbHafas
 
     /**
      * Zwischenhalte eines Abschnitts.
-     * Die Laendercodes hier sind die Grundlage dafuer, dass Fares.php eine
+     * Die Ländercodes hier sind die Grundlage dafür, dass Fares.php eine
      * grenzquerende Fahrt korrekt aufteilen kann (z.B. Wien-Salzburg = AT,
-     * Salzburg-Muenchen = DE) statt sie pauschal zu halbieren.
+     * Salzburg-München = DE) statt sie pauschal zu halbieren.
      */
     private function mapStops(array $stopL, array $locL, string $baseDate): array
     {
@@ -1032,7 +1047,7 @@ final class OebbHafas
             'name'     => (string) ($loc['name'] ?? ''),
             'country'  => strtolower((string) ($loc['countryCodeL'][0] ?? '')),
             'platform' => $platform !== null && $platform !== '' ? $platform : null,
-            // Koordinaten brauchen wir fuer die Distanz- und damit Preisschaetzung.
+            // Koordinaten brauchen wir für die Distanz- und damit Preisschätzung.
             'lat'      => isset($loc['crd']['y']) ? $loc['crd']['y'] / 1000000 : null,
             'lon'      => isset($loc['crd']['x']) ? $loc['crd']['x'] / 1000000 : null,
         ];
@@ -1129,7 +1144,7 @@ final class OebbHafas
             return ['ok' => false, 'error' => $res['error'] ?? ('HTTP ' . $res['status']), 'data' => []];
         }
         if ($res['json'] === null) {
-            return ['ok' => false, 'error' => 'Ungueltige Antwort (kein JSON)', 'data' => []];
+            return ['ok' => false, 'error' => 'Ungültige Antwort (kein JSON)', 'data' => []];
         }
 
         $body = $res['json'];

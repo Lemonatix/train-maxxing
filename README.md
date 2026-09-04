@@ -247,88 +247,72 @@ Entscheidung unter `train-maxxing:theme` ab. Die hellen Werte stehen in
 `:root`, die dunklen in `[data-theme="dark"]` — alle Komponenten leiten ihre
 Farben davon ab.
 
-### Umstiegsplan: Bahnhofsskizze mit Laufweg
+### Umstiegsplan: wo die beiden Gleise liegen
 
 Bei vier Minuten Umsteigezeit ist die Gleisnummer allein wertlos: entscheidend
 ist, ob man zwanzig Meter weiter oder ans andere Hallenende muss. Die
 Fahrplanquellen wissen das nicht, OpenStreetMap teilweise schon.
 
-Grosse Bahnhöfe sind dort oft **innen kartiert** — München Hbf mit über 600
-Fusswegen und Treppen samt Ebenenangabe. `?action=platforms&from=8&to=14` baut
-daraus ein Wegenetz, sucht mit Dijkstra den Weg zwischen den beiden Gleisen und
-liefert Länge, geschätzte Gehzeit und ob Treppen dabei sind.
+`?action=platforms` liefert die **nummerierten Bahnsteige** eines Bahnhofs mit
+Umriss und Ebene. Der Plan zeigt sie auf derselben Karte wie überall sonst, nur
+im **Bahnhofsmodus** (`new RouteMap(el, { mode: 'station' })`) — Kacheln als
+Untergrund, ziehen und zoomen inklusive. Ankunftsgleis blau, Abfahrtsgleis
+grün, der Rest als Orientierung ringsum. Das spart eine zweite
+Kartenmaschinerie; die SBB nimmt dafür das MapLibre-SDK, hier reichen die
+vorhandenen `<img>`-Kacheln mit SVG darüber.
 
-**Gezeigt wird das als Karte, nicht als Skizze.** Vorher war es ein eigenes SVG
-mit ein paar Balken darauf: massstäblich zwar, aber ohne Bezug zu irgendetwas,
-nicht zoombar — und ein Umstieg über mehrere Ebenen lag darin als ein Strich
-übereinander, in dem sich Bahnsteig, Unterführung und Halle nicht unterscheiden
-liessen. Vorbild für den Ersatz ist die SBB-App: eine Karte, auf den Umstieg
-gezoomt, mit einem Umschalter für die Ebene.
+**Kein Laufweg mehr — und das war eine Korrektur, keine Vereinfachung.** Hier
+stand einmal eine Dijkstra-Suche über die Fußwege und Treppen aus OSM, mit
+Länge, geschätzter Gehzeit und Treppenwarnung. Sie war rechnerisch in Ordnung
+und trotzdem falsch, weil ihre Voraussetzung fast nie erfüllt ist: sie
+funktioniert nur an einem Bahnhof, der **innen vollständig kartiert** ist.
+Selbst dort, wo es reichte, kam ein Weg heraus, der so nicht existiert — durch
+eine Unterführung, die man in Wirklichkeit gar nicht nimmt —, und Meter- und
+Minutenangaben suggerierten eine Genauigkeit, die dahinter nie stand. Ein
+Umsteigeplan, der einen falschen Weg selbstbewusst einzeichnet, ist schlechter
+als einer, der nur die Lage zeigt und den Rest dem Bahnhof überlässt: dort
+hängen Schilder.
 
-Es ist dieselbe Kartenkomponente wie überall sonst, nur im **Bahnhofsmodus**
-(`new RouteMap(el, { mode: 'station' })`) — Kacheln als Untergrund, ziehen und
-zoomen inklusive. Das spart eine zweite Kartenmaschinerie; die SBB nimmt dafür
-das MapLibre-SDK, hier reichen die vorhandenen `<img>`-Kacheln mit SVG darüber.
+Geblieben ist damit die Frage, die sich überhaupt beantworten lässt — *liegen
+die beiden Bahnsteige nebeneinander oder an entgegengesetzten Enden?* Wo beide
+Gleisnummern bekannt sind, sind sie hervorgehoben; ein Ebenenwechsel wird
+dazugesagt, denn der kostet mehr Zeit, als die Entfernung vermuten lässt.
 
-**Der Ebenenumschalter** braucht eine Angabe, die es vorher nicht gab: zu
-welcher Ebene jeder Punkt des Weges gehört. `StationPlan` gibt sie jetzt als
-`levels` neben `path` zurück. Sie zu bestimmen ist Stückwerk — ein Wegknoten
-kann zu mehreren Ebenen gehören (eine Treppe trägt in OSM beide, die sie
-verbindet), und viele Wege tragen gar keine Angabe. Deshalb wird von vorne
-durchgegangen und die zuletzt sichere Ebene mitgeführt: passt sie noch zur
-Auswahl des nächsten Punktes, bleibt sie; sonst wechselt sie. Anfang und Ende
-bekommen die Ebene ihres Bahnsteigs — die kennt OSM meist, auch wo sie an den
-Wegen fehlt.
+Weggefallen sind mit dem Weg auch `StationPlan.php` und die Fußwege in der
+Overpass-Abfrage. Letztere waren der größte Teil der Antwort — die Abfrage ist
+seither deutlich kleiner, und Overpass ist ein Gemeinschaftsdienst.
 
-Was auf einer anderen Ebene liegt, verschwindet nicht, sondern wird blass
-gezeichnet: sonst verliert man beim Umschalten die Orientierung, weil das halbe
-Bild wegfällt. Gibt es nur eine Ebene, bleibt der Umschalter ganz weg, statt
-untätig herumzustehen.
+**Der Plan erscheint an jedem Umstieg, nicht nur an den knappen.** Vorher galten
+zwei Bedingungen zugleich: die Umsteigezeit musste unter zehn Minuten liegen
+*und* beide Gleisnummern mussten im Fahrplan stehen. Damit fiel er bei den
+allermeisten Umstiegen aus — knapp ist nur eine Minderheit, und ob Gleise
+mitgeliefert werden, hängt am Bahnhof und am Betreiber. Jetzt reicht ein
+Umstieg. Fehlen die Nummern, zeigt der Plan den Bahnhof mit allen erfassten
+Gleisen; auch das beantwortet „ein Bahnsteig oder eine halbe Halle". Kosten
+entstehen dadurch keine: geladen wird erst beim Aufklappen.
 
-Für München Hbf, Gleis 8 → 14: *„Rund 645 m Fussweg, etwa 9 min."* Gemessen
-wird von Bahnsteigmitte zu Bahnsteigmitte — siehe unten. Zum Vergleich: die DB
-setzt für München Hbf 10 Minuten Mindestumsteigezeit an, die SBB für Zürich HB
-Gleis 7 → 31 rund vier; die Rechnung kommt dort auf 3,7.
+**Der Ebenenumschalter** bleibt. Was auf einer anderen Ebene liegt,
+verschwindet nicht, sondern wird blass gezeichnet: sonst verliert man beim
+Umschalten die Orientierung, weil das halbe Bild wegfällt. Gibt es nur eine
+Ebene, bleibt der Umschalter ganz weg, statt untätig herumzustehen.
 
-Sechs Dinge, die dabei zu beachten waren:
+**Der Ausschnitt folgt den beiden Gleisen, nicht dem Bahnhof.** Ein großer
+Bahnhof ist vierhundert Meter lang; passt er ganz ins Bild, sind die zwei
+Bahnsteige, um die es geht, zwei Striche unter achtundzwanzig. Sind die
+Nummern unbekannt, ist der Überblick über alle das Richtige — dann gibt es
+nichts Engeres zu zeigen.
 
-- **Treppen werden vierfach gewichtet**, Aufzüge fünffach. Für die Frage
-  „schaffe ich den Umstieg" zählt Zeit, nicht Entfernung.
-- **Zugänge, die zu beiden Bahnsteigen gehören, dürfen kein Ziel sein.** Sonst
-  endet die Suche sofort beim Startknoten und meldet null Meter — bei
-  benachbarten Bahnsteigen in einer Halle passiert genau das.
-- **Der Weg beginnt in der Bahnsteigmitte, nicht am nächsten Zugang.** Ein
-  Zugang liegt irgendwo auf einem 400 m langen Bahnsteig, und bis dorthin ist
-  man schon gelaufen. Ohne diesen Anteil meldete Ulm Hbf für Gleis 8 → 2
-  „rund 40 m" — gemessen zwischen den Nordenden zweier Bahnsteige, während der
-  Weg in Wirklichkeit durch die Unterführung führt. Mit Anfahrt und Abgang:
-  214 m.
-- **Der Bahnsteig selbst ist begehbar.** In OSM ist er eine *Fläche*, kein Weg;
-  Treppen enden darauf und hängen deshalb im Wegenetz in der Luft. Zürich HB
-  zerfiel so in 179 unverbundene Inseln, und von 276 Gleispaaren waren 60
-  berechenbar. Die Zugänge eines Bahnsteigs werden deshalb der Länge nach
-  aufgereiht und verbunden — eine Kette, keine Verbindung jeder mit jedem,
-  sonst kürzte der Weg quer über die Gleise ab. Danach: 276 von 276.
-- **Ebenen zählen, bevor Entfernungen zählen.** In der Draufsicht liegt ein
-  Tiefbahnsteig genau unter dem oberirdischen. Rein nach Entfernung gemessen
-  sind die Treppen der Ebene −4 also „direkt an Gleis 7", und die Suche startete
-  dort, wo sie ankommen sollte: Zürich HB meldete für Gleis 7 → 31 drei Minuten
-  *ebenen* Weges über vier Ebenen hinweg.
-- **Ein einzelner gemeinsamer Zugang heisst nichts.** Zugänge, die zu beiden
-  Bahnsteigen gehören, flogen früher pauschal aus der Zielmenge — sonst hätte
-  die Suche null Meter gemeldet. Seit die Anfahrt zur Bahnsteigmitte
-  mitzählt, ist das nicht mehr nötig und war sogar schädlich: an einem
-  Kopfbahnhof münden alle Bahnsteige in dieselbe Querhalle. „Nebenan" gilt
-  deshalb nur noch, wenn die Bahnsteige *sämtliche* Zugänge teilen.
+Zwei Dinge, die beim Erfassen der Gleisnummern zu beachten waren:
+
 - **Bahnsteigabschnitte auf die nackte Nummer abbilden.** Ulm Hbf führt in OSM
   „4 Nord", „4 Süd", „5a", „5b" — und kein einziges nacktes „4". Der Fahrplan
-  sagt aber „Gleis 4". Die blosse Nummer kommt als Zweitname dazu, nachrangig:
+  sagt aber „Gleis 4". Die bloße Nummer kommt als Zweitname dazu, nachrangig:
   wo es ein echtes „4" gibt, gewinnt das.
 - **Fehlende Nummern aus den Nachbarn ergänzen.** Mannheim Hbf hat in OSM die
   Gleise 1–5 und 7–12, aber **kein 6** — jemand hat es beim Erfassen
-  ausgelassen. Fuhr der Anschlusszug von Gleis 6, entfiel deshalb der ganze
-  Umstiegsplan, obwohl der Bahnhof ringsum vollständig kartiert ist. Genau
-  daher rührt auch der Eindruck, der Plan erscheine „mal ja, mal nein" für
+  ausgelassen. Fuhr der Anschlusszug von Gleis 6, entfiel deshalb die
+  Hervorhebung, obwohl der Bahnhof ringsum vollständig kartiert ist. Genau
+  daher rührt auch der Eindruck, der Plan verhalte sich „mal so, mal so" für
   denselben Bahnhof: die Koordinaten sind stabil, die *Gleisnummern* der
   jeweiligen Verbindung sind es nicht.
 
@@ -362,8 +346,6 @@ sein musste. Zwei Fehler steckten dahinter:
 Von den 33 abgefragten Bahnhöfen (CH/DE/AT) lieferten 28 Daten; die übrigen
 fünf liefen an dem Tag in Overpass-Fehler und sind beim nächsten Versuch
 wieder dabei. **Alle 28 haben nummerierte Bahnsteige und damit einen Plan.**
-Bei 25 davon lässt sich zusätzlich ein Laufweg berechnen; an drei (Basel SBB,
-Leipzig, Graz) fehlen die Fusswege in OSM, dort bleibt es bei der Lage.
 
 Die Lücken in der Nummerierung sind meistens **echt**, keine Datenlücken:
 Hamburg Hbf und Berlin Hbf haben schlicht keine Gleise 9 und 10, Genf keine 8
@@ -373,31 +355,22 @@ Nürnberg 10 und 11 sowie Bern 11.
 
 Nach der Korrektur, nachgemessen:
 
-| Bahnhof | Bahnsteige mit Nummer | berechenbare Gleispaare |
-|---|---|---|
-| Zürich HB | 24 (Gleis 3–18, 31–34, 41–44) | 276 / 276 |
-| Mannheim Hbf | 12 (vorher 1) | — |
-| Frankfurt Hbf | 28 (vorher 0) | — |
-| Stuttgart Hbf | 17 (vorher 1) | nur benachbarte — die Fusswege fehlen dort in OSM |
-| München Hbf | 17 | 136 / 136 |
-| Bern | 16 | 120 / 120 |
-| Ulm Hbf | 18 (Abschnitte) | — |
-| Winterthur | 10 | 45 / 45 |
-| Olten | 14 | 78 / 91 (der Rest sind Bussteige) |
+| Bahnhof | Bahnsteige mit Nummer |
+|---|---|
+| Zürich HB | 24 (Gleis 3–18, 31–34, 41–44) |
+| Mannheim Hbf | 12 (vorher 1) |
+| Frankfurt Hbf | 28 (vorher 0) |
+| Stuttgart Hbf | 17 (vorher 1) |
+| München Hbf | 17 |
+| Bern | 16 |
+| Ulm Hbf | 18 (Abschnitte) |
+| Winterthur | 10 |
+| Olten | 14 |
 
-Der Plan erscheint nur, wenn **beide** Gleise gefunden werden; sonst sagt die
-Anzeige, was fehlt — und unterscheidet dabei „Dienst gerade überlastet" von
-„Bahnhof nicht kartiert". Vorher stand in beiden Fällen dieselbe Zeile, und in
-einem davon war sie falsch.
-
-**Der Ausschnitt folgt dem Laufweg, nicht dem Bahnhof.** Ein grosser Bahnhof
-ist vierhundert Meter lang; passt er ganz ins Bild, ist der Umsteigeweg ein
-Strich von zwei Zentimetern irgendwo darin — und die Frage, um die es geht
-(„wo muss ich lang"), bleibt unbeantwortet. Massgebend sind deshalb der Weg
-selbst und die beiden beteiligten Gleise. Die übrigen Bahnsteige werden
-weiterhin gezeichnet, als Orientierung; was nicht in den Ausschnitt passt,
-schneidet das SVG ab, und die Gleisnummer steht dort, wo der Bahnsteig ins
-Bild kommt, statt an seinem Anfang ausserhalb.
+Findet OpenStreetMap für den Bahnhof gar nichts, sagt die Anzeige, was fehlt —
+und unterscheidet dabei „Dienst gerade überlastet" von „Bahnhof nicht
+kartiert". Vorher stand in beiden Fällen dieselbe Zeile, und in einem davon war
+sie falsch.
 
 **Overpass ist der wunde Punkt.** Der Dienst stellt Anfragen bei Last in eine
 Warteschlange — gemessen: elf Sekunden für eine *triviale* Abfrage —, und die
@@ -429,23 +402,22 @@ Ein Fallstrick, der beim Bauen aufgefallen ist: Würzburg Hbf liefert vierzehn
 Objekte mit den Nummern 1–14 — das ist aber der **Busbahnhof davor**
 (`bus=yes`, `highway=platform`). Ohne den Filter in `Overpass.php` hätte die
 App Bussteige als Zuggleise angezeigt. Ausgeschlossen wird nur, was sich
-ausdrücklich als Nicht-Bahn ausweist; ein fehlendes `train`-Tag heisst bei
+ausdrücklich als Nicht-Bahn ausweist; ein fehlendes `train`-Tag heißt bei
 Bahnsteigen meist nur, dass es niemand eingetragen hat.
 
 **Das Aufräumen darf die teuren Einträge nicht wegwerfen.** Der Cache-Ordner
 wird gelegentlich durchgesehen, damit er nicht unbegrenzt wächst — mit dem
 Standardwert von einem Tag. Genau der traf aber jeden Tag die Einträge, die am
 teuersten zu beschaffen sind: Bahnsteige gelten sieben Tage, Streckenverläufe
-dreissig, und Overpass durfte sie danach jedes Mal neu liefern. Die Grenze
+dreißig, und Overpass durfte sie danach jedes Mal neu liefern. Die Grenze
 richtet sich jetzt nach der längsten eingestellten Haltbarkeit.
 
-Wo die Fusswege fehlen, bleibt es bei der Lage ohne Weg — die Anzeige sagt das
-dann auch. Geladen wird erst beim Aufklappen: Overpass ist ein kostenlos
-betriebener Gemeinschaftsdienst, ungefragte Abfragen für jeden sichtbaren
-Umstieg wären unfair. Bahnsteige und Wege kommen in **einer** Abfrage und
-werden sieben Tage gecacht (rund 70 KB je Bahnhof).
+Geladen wird erst beim Aufklappen: Overpass ist ein kostenlos betriebener
+Gemeinschaftsdienst, ungefragte Abfragen für jeden sichtbaren Umstieg wären
+unfair. Die Bahnsteige eines Bahnhofs werden sieben Tage gecacht.
 
-### Grosse Baustellen im Netz
+
+### Große Baustellen im Netz
 
 `?action=works` liefert Bauarbeiten mit **betroffenem Abschnitt** (von Bahnhof
 A bis Bahnhof B), Zeitraum und — soweit ermittelbar — dem tatsächlichen
@@ -457,6 +429,15 @@ kam man gar nicht heran. Alle auf einmal auszuschütten wäre aber auch nichts:
 hundert Zeilen unter der Karte liest niemand. Also je Land ein aufklappbarer
 Block mit Anzahl in der Überschrift, das erste offen, und innerhalb eines
 Landes schiebt ein Knopf die nächsten acht nach.
+
+**Jede Meldung lässt sich aufklappen.** Zugeklappt steht da, was für die
+Übersicht zählt: Abschnitt, Thema, wie lange noch. Der eigentliche Satz —
+*„Totalsperrung — Brückenarbeiten (Strecke 3640)."* — hing vorher nur im
+`title`-Attribut, und auf einem Berührungsbildschirm gibt es kein Darüberfahren:
+dort war er schlicht unerreichbar. Aufgeklappt steht er als Satz da, mit dem
+vollständigen Zeitraum und den betroffenen Streckennummern darunter, und der
+Knopf „Auf der Karte zeigen" sitzt dort statt in der Kopfzeile — in einem
+`<summary>` wäre er ein Knopf im Knopf und würde beim Aufklappen mitgetroffen.
 
 **Eine eigene Karte, nicht die Routenkarte.** Baustellen und Suchergebnisse
 beantworten verschiedene Fragen und stehen einander im Weg: über einer
@@ -476,7 +457,7 @@ erst beim Aufklappen, denn eine Karte lädt Kacheln.
 Vorher gab es nur die ÖBB-Quelle, und die ist österreichlastig: nachgemessen
 über 500 Meldungen 452 mit österreichischem, 17 mit deutschem und 9 mit
 schweizerischem Anfangsbahnhof — nach Kategorie- und Dauerfilter blieb aus
-Deutschland praktisch nichts übrig. Für eine Übersicht „wo wird gerade gross
+Deutschland praktisch nichts übrig. Für eine Übersicht „wo wird gerade groß
 gebaut" war das die falsche Hälfte des Bildes. Jetzt stehen 60 deutsche
 Vorhaben vor 35 österreichischen.
 
@@ -531,7 +512,7 @@ während die Schiene einen Bogen macht. Deshalb zwei Wege zum echten Verlauf:
   beiden Endpunkte, sonst antwortet Overpass mit einer Zeitüberschreitung —
   und sucht darin per Dijkstra den Weg von einem Endpunkt zum anderen.
 
-  **Lücken schliessen:** Innerhalb eines Bahnhofs tragen die Gleise meist
+  **Lücken schließen:** Innerhalb eines Bahnhofs tragen die Gleise meist
   keine Streckennummer; sie klebt an der freien Strecke. Der Graph riss
   deshalb genau dort auseinander, wo die Endpunkte liegen. Enden zweier
   Gleisstücke, die keine vierzig Meter auseinanderliegen, werden verbunden.
@@ -539,12 +520,12 @@ während die Schiene einen Bogen macht. Deshalb zwei Wege zum echten Verlauf:
 Alle Abschnitte kommen in **einer** Overpass-Abfrage mit je einer begrenzten
 Teilabfrage — sechzig einzelne Anfragen wären unhöflich und langsam. Pro
 Aufruf werden höchstens zwölf Abschnitte nachgeladen, das Ergebnis hält
-dreissig Tage (Schienen ziehen nicht um), und die Karte wird so von Aufruf zu
+dreißig Tage (Schienen ziehen nicht um), und die Karte wird so von Aufruf zu
 Aufruf genauer. Wo es nicht klappt — keine Streckennummer, in OSM nicht
 erfasst, Overpass überlastet — bleibt es bei der geraden Linie; sie wird
 gestrichelt gezeichnet, der echte Verlauf durchgezogen.
 
-**Erfolg hält dreissig Tage, Misserfolg nur einen.** Ein leerer Eintrag heisst
+**Erfolg hält dreißig Tage, Misserfolg nur einen.** Ein leerer Eintrag heißt
 nämlich nicht zwingend „gibt es in OSM nicht" — er entsteht genauso, wenn
 Overpass an dem Tag nur einen Teil der Gleise geliefert hat. Gemessen an
 denselben zwanzig Abschnitten schwankte die Ausbeute je nach erwischter
@@ -553,12 +534,12 @@ Schwankung für einen Monat festgesetzt.
 
 Nachgemessen: **41 von 60 deutschen Abschnitten** (68 %) mit echtem
 Streckenverlauf, dazu 4 der 35 österreichischen aus den HAFAS-Polylinien. Die
-Längen sind plausibel — Berlin Zoologischer Garten bis Friedrichstrasse 4,9 km
+Längen sind plausibel — Berlin Zoologischer Garten bis Friedrichstraße 4,9 km
 Verlauf gegen 4,0 km Luftlinie, Meerbeck–Xanten 26,3 gegen 25,3.
 
 Was übrig bleibt, scheitert an der Erfassung, nicht am Verfahren: die Strecke
 zerfällt in OSM in mehrere unverbundene Teile (Hochrheinbahn Rheinfelden–
-Waldshut, Berlin Bornholmer Strasse–Schönholz) oder am gemeldeten Endpunkt
+Waldshut, Berlin Bornholmer Straße–Schönholz) oder am gemeldeten Endpunkt
 liegt gar kein Gleis (Neustadt–Puttgarden: 52 km bis zum nächsten). Dort bleibt
 die gerade Linie.
 
@@ -589,7 +570,7 @@ bzw. `--field-bg`, nicht das halbtransparente `--surface`. Der Grund ist
 handfest: über dem Glas-Panel und der Kartenkachel-Ebene ergibt dieselbe
 transparente Fläche je nach Untergrund einen anderen Kontrast. Beim `<select>`
 kam dazu, dass das aufgeklappte Menü vom System gezeichnet wird — es erbt die
-Textfarbe, malt den Hintergrund aber selbst, was im dunklen Theme fast weissen
+Textfarbe, malt den Hintergrund aber selbst, was im dunklen Theme fast weißen
 Text auf hellem Menü ergab. Transparenz bleibt deshalb den rein dekorativen
 Containern vorbehalten: `.panel`, `.map`, `.notice`.
 
@@ -626,7 +607,7 @@ ein. Wichtig: Das Skript braucht `type="module"`.
 
 ## Wie die Bewertung funktioniert
 
-### Wie ein Zug heisst
+### Wie ein Zug heißt
 
 Im Fernverkehr ist die **Zugnummer** der Name: ein ICE 593 fährt heute so und
 morgen anders, und genau so steht es an der Anzeigetafel. Im Nahverkehr ist es
@@ -658,6 +639,37 @@ Ein Nebeneffekt, der Arbeit gemacht hat: `sameTrain()` verglich zwei Meldungen
 Linie nicht mehr, denn auf der S 33 sind zu jeder Zeit mehrere Züge unterwegs.
 Verglichen wird jetzt die Zugnummer, und nur wo keine vorliegt, der
 Produktname.
+
+#### „DPN RB37 · Unbekannte Gattung"
+
+Was in den Fahrplandaten als Gattung steht, ist bei allem, was **nicht die DB
+selbst fährt**, ein Sammelkürzel des Betreibers. Die HLB-Regionalbahn
+Frankfurt–Gießen kommt bei der ÖBB als `DPN` („Nahreisezug") und bei bahn.de als
+`DRB` herein; am Bahnsteig steht `RB 37`. `TRAIN_TYPES` kennt diese Kürzel
+naturgemäss nicht, und so landeten sämtliche Privatbahnen bei „Unbekannte
+Gattung" — mit allem, was daran hängt: Komfortwert 4 statt 3, kein
+Deutschlandticket, und in der Liste stand „DPN RB37".
+
+Die eigentliche Gattung steckt in der **Linie**. `typeOf()` geht deshalb in vier
+Stufen vor: die Gattung selbst, dann der Buchstabenkopf der Linie (`RB37` → RB,
+`S8` → S), dann das Betreiberkürzel (`DPN`/`DRB`/`HLB`/… → Nahverkehr,
+`DPF` → Fernverkehr), zuletzt der ausgeschriebene Produktname („Nahreisezug",
+„Intercity-Express"). Erst wenn alle vier nichts hergeben, ist die Gattung
+wirklich unbekannt — und dann steht wenigstens das rohe Kürzel da statt eines
+Fragezeichens.
+
+Normalisiert wird **in `trainLabel()` selbst**, nicht an den Aufrufstellen: die
+Beschriftung entsteht in der Trefferliste, in der Live-Verfolgung und an den
+Zügen auf der Karte, und „DPN RE99" stand vorher an allen dreien.
+
+Serverseitig gehört dieselbe Liste in `Fares::LOCAL_CATEGORIES`, sonst fällt
+jeder dieser Züge aus dem **Deutschlandticket** heraus, obwohl es dort gilt.
+
+Der zweite Teil desselben Problems steckt in der DB-Antwort: `linienNummer` ist
+im Nahverkehr fast immer leer, die Linie steht nur im `mittelText` (`"RB37"`).
+Im Fernverkehr ist derselbe `mittelText` dagegen die Zugnummer mit Gattung davor
+(`"ICE 2374"`) — deshalb übernimmt `DbVendo::lineOf()` ihn nur, wenn er die
+Zugnummer *nicht* enthält.
 
 ### Sortierung der Trefferliste
 
@@ -756,8 +768,38 @@ Ist-Zeiten je Halt, Gleiswechsel, Meldungen. Für München kommen die
 Störungsmeldungen der MVG dazu, gefiltert auf die tatsächlich benutzten Linien.
 
 Grundlage ist die HAFAS-Journey-ID (`leg.jid`), die jeder Zugabschnitt mitbringt.
-Verbindungen, deren Fahrplan von der DB statt der ÖBB stammt, haben keine — das
-Panel sagt das dann auch.
+Verbindungen, deren Fahrplan von der DB statt der ÖBB stammt, haben keine. Die
+Verfolgung war dort früher **komplett abgeschaltet** — kein Knopf, keine
+Anzeige —, obwohl die DB Ist-Zeiten schon in der Suchantwort mitliefert. Jetzt
+zeigt sie, was bekannt ist, und frischt auf, was sich auffrischen lässt; dass
+der Stand aus der Suche stammt, steht dabei.
+
+Aus derselben Ecke kamen drei Fehler, die das Feld unbrauchbar machten:
+
+- **`sameTrain` war nie importiert.** `trainPosition()` benutzt es, um die
+  eigene Fahrt unter den gemeldeten Live-Zügen wiederzufinden. Ohne den Import
+  warf jede Positionsbestimmung einen `ReferenceError` — und weil `pushToMap()`
+  im `finally`-Zweig von `refresh()` steckt, riss das die ganze Auffrischung mit
+  sich. Und zwar genau dann, wenn man **tatsächlich im Zug saß**: vorher und
+  nachher liefert `currentEntry()` `null` und die Zeile wird gar nicht erreicht.
+- **Ausstattung stand da, wo Störungen hingehören.** HAFAS mischt unter `msgL`
+  auch die Zugattribute (Typ `A`), und so las man in der Live-Verfolgung jedes
+  Regionalzuges „Klimaanlage", „Fahrradmitnahme begrenzt möglich",
+  „Fahrzeuggebundene Einstiegshilfe" — und sonst nichts. Die werden jetzt
+  ausgefiltert; HIM-Meldungen bleiben unangetastet.
+- **Münchner Busmeldungen an einem ICE.** Die MVG-Störungen werden über die
+  Linienbezeichnung zugeordnet, und im Tram- und Busnetz heißen Linien schlicht
+  „19", „58", „722". Genau so heißt aber auch die Ersatz-Linienkennung, die
+  HAFAS im Fernverkehr aus der Zugnummer bildet — unter einem *ICE 722*
+  München–Frankfurt hingen deshalb drei Meldungen über eine verlegte
+  Bushaltestelle am Kennedyplatz. Abgeglichen wird jetzt nur noch, was auch
+  wirklich S-Bahn, U-Bahn, Tram oder Bus ist.
+
+Und eine vierte Kleinigkeit, die wie ein Totalausfall aussah: **das Feld sitzt
+unter der Karte**, der Knopf steht auf einer Verbindungskarte weiter unten. Bei
+der fünften Verbindung liegt zwischen beiden eine Bildschirmhöhe, und ein Klick
+schien nichts zu tun. Jetzt springt die Seite hin — im nächsten Frame, denn das
+Neuzeichnen der Trefferliste ändert vorher die Seitenhöhe.
 
 Die Verfolgung **überlebt Neuladen und neue Suchen**: die Verbindung liegt unter
 `train-maxxing:tracked` im localStorage und wird beim Start wieder aufgenommen,
@@ -805,12 +847,12 @@ der Zug unsichtbar, um den es geht.
 War die Position aus dem Fahrplan hochgerechnet statt gemeldet, bleibt der
 Punkt **hohl** und der Tooltip sagt es dazu. Für die Hochrechnung wird der
 Restfahrplan um die bekannte Verspätung verschoben; sonst läge ein verspäteter
-Zug ausserhalb jedes Zeitfensters und wäre gar nicht auffindbar.
+Zug außerhalb jedes Zeitfensters und wäre gar nicht auffindbar.
 
 Hochgerechnet wird zwischen zwei **Halten**, also auf der Luftlinie — und die
-schneidet jeden Bogen ab. Der Punkt sass dadurch sichtbar neben der Linie, auf
+schneidet jeden Bogen ab. Der Punkt saß dadurch sichtbar neben der Linie, auf
 der er fahren sollte, im Extremfall zig Kilometer. `snapToLine()` zieht ihn
-deshalb auf den gezeichneten Streckenverlauf des Abschnitts: Lotfusspunkt auf
+deshalb auf den gezeichneten Streckenverlauf des Abschnitts: Lotfußpunkt auf
 das nächste Segment, auf das Segment begrenzt. Gemeldete Positionen bleiben
 unangetastet — die liegen ohnehin auf dem Gleis.
 
@@ -820,7 +862,7 @@ rechnet nur alle 30 s. Aus veralteten Daten entschieden, blieb der Punkt grün
 oder verschwand beim Herauszoomen.
 
 **Wiedererkannt** wird der Zug über `sameTrain()` — Bezeichnung („ICE 516"),
-ersatzweise die blosse Nummer, wenn der Positionsmeldung die Gattung fehlt.
+ersatzweise die bloße Nummer, wenn der Positionsmeldung die Gattung fehlt.
 Die `jid` taugt dafür nur bedingt: HAFAS baut sie pro Anfrage neu auf, die
 Kennung aus der Verbindungssuche und die aus der Positionsmeldung sind deshalb
 in aller Regel verschieden.
@@ -836,8 +878,18 @@ hinter einem. Die Position verlässt den Browser nicht.
 
 Angezeigt werden **sechs Verbindungen**; der Knopf darunter klappt erst die
 restlichen geladenen auf und holt danach die nächste Seite. Das ist nötig, weil
-HAFAS je Anfrage bei rund sechs Treffern deckelt — spätere Abfahrten gibt es nur
-über den Blätter-Kontext (`outCtxScrF`) der vorigen Antwort.
+HAFAS je Anfrage bei rund sechs Treffern deckelt — weitere Abfahrten gibt es nur
+über den Blätter-Kontext der vorigen Antwort.
+
+**In beide Richtungen.** Die Uhrzeit im Formular ist ein Wunsch, kein Fahrplan:
+wer 08:00 einträgt, nimmt oft gern den 07:41 — nur suchte HAFAS ab der genannten
+Zeit ausschließlich nach vorne, und der 07:41 stand nirgends. Über der Liste
+sitzt deshalb ein zweiter Knopf für **frühere Verbindungen**. Er benutzt
+denselben Mechanismus rückwärts (`outCtxScrB` statt `outCtxScrF`) und hängt die
+Treffer an denselben Datensatz an, statt die Suche mit anderer Uhrzeit zu
+wiederholen und alles Gefundene wegzuwerfen. Sortiert wird nach Abfahrt, die
+neuen Verbindungen stehen also vorne — und die Zahl der sichtbaren Karten wächst
+entsprechend mit, sonst hätte man geladen und zugleich etwas verloren.
 
 Die Umsteigezeit steht standardmäßig auf **kürzestmöglich**. Damit tauchen auch
 Verbindungen mit vier Minuten Umstieg auf — und für genau die (1 bis 4 Minuten)
@@ -845,6 +897,11 @@ lädt die App den **nächstspäteren Anschluss** nach und schreibt ihn unter die
 Warnung: „Verpasst? 13:36 → 14:53 · SBB 19732 · S 18955 · +30 min später am Ziel."
 Die Frage bei einem Vier-Minuten-Umstieg ist nicht, ob man ihn schafft, sondern
 was passiert, wenn nicht.
+
+An **jedem** Umstieg steht außerdem der Lageplan des Umsteigebahnhofs — siehe
+oben. Er hing früher an denselben vier Minuten und verschwand damit dort, wo man
+ihn genauso braucht: auch bei zwanzig Minuten will man wissen, ob man quer durch
+den Bahnhof muss.
 
 ### Zugkomfort und die Sache mit dem ICE 4
 
@@ -855,12 +912,17 @@ ICE 3neo (BR 408) ist.
 Im Nerd-Modus bewertest du deshalb unter **Lieblingszüge** die Fahrzeuge selbst —
 ICE 4, ICE 3neo, Giruno, railjet und so weiter, jeweils von −5 (meiden) bis +5
 (bevorzugen). Die Bewertung greift, sobald das Fahrzeug bekannt ist. Dafür gibt
-es genau zwei Wege:
+es vier Wege, in dieser Reihenfolge:
 
-1. **Die Gattung lässt nur ein Fahrzeug zu.** railjet, Nightjet, WESTbahn und
+1. **Die Wagenreihung liefert die Baureihe** (BR 412 → ICE 4). Nur deutscher
+   Fernverkehr, nur am Reisetag, und nur wenn in `config.php` aktiviert — und
+   zurzeit gar nicht, siehe unten.
+2. **Derselbe Zug fuhr zuletzt mit dieser Baureihe.** Was die Wagenreihung je
+   geliefert hat, merkt sich `Fleet.php` unter der Zugnummer.
+3. **Auf dieser Strecke verkehrt nur dieses Fahrzeug.** Zürich–München ist ein
+   ETR 610, die Gattung ECE gibt es nur für den Giruno — siehe `FLEET_RULES`.
+4. **Die Gattung lässt nur ein Fahrzeug zu.** railjet, Nightjet, WESTbahn und
    TGV sind damit immer eindeutig — im UI mit „immer erkennbar" markiert.
-2. **Die Wagenreihung liefert die Baureihe** (BR 412 → ICE 4). Nur deutscher
-   Fernverkehr, nur am Reisetag, und nur wenn in `config.php` aktiviert.
 
 Ist das Fahrzeug unbekannt, greift die Gattungsbewertung aus
 `assets/js/data/trains.js` — das Tool rät nicht. An jeder Verbindung steht, ob
@@ -869,7 +931,75 @@ das Modell erkannt wurde und woher.
 Die frühere Variante mit Zugnummernbereichen ist entfallen: Nummernkreise sind
 nicht stabil genug, um daraus verlässlich auf eine Baureihe zu schließen.
 
-### Baureihe: gelöst über bahn.expert
+### Woher das Fahrzeug sonst noch kommt
+
+Die Wagenreihung ist die harte Quelle — und sie fällt oft aus. Sie gilt nur für
+deutschen Fernverkehr, nur am Reisetag, und sie hängt an einem privaten Dienst.
+**Zum Stand 4. September 2026 antwortet dieser Dienst nicht mehr** (siehe unten).
+Ohne ihn blieb es bei der Gattung, obwohl auf manchen Strecken gar nichts
+anderes fahren *kann*. Zwei Ergänzungen schließen die Lücke:
+
+**1. Strecken- und Gattungsregeln (`FLEET_RULES` in `data/trains.js`).** Wo der
+Umlauf eindeutig ist, steht er als Datenzeile da:
+
+```js
+{ model: 'astoro', categories: ['EC'], between: [/z(ü|ue)rich/i, /m(ü|ue)nchen/i],
+  note: 'Zürich–München fährt seit der Elektrifizierung über Lindau mit ETR 610.' },
+```
+
+Gesucht wird in den **Halten**, nicht nur in Start und Ziel: ein EC
+München–Zürich, den man erst ab Memmingen benutzt, ist derselbe Zug. Ohne
+`between` genügt die Gattung allein — so ist die Gattung `ECE` hinterlegt, die
+die SBB ausschließlich für ihre Giruno-Züge führt. Eine Regel gehört nur dorthin,
+wenn dort tatsächlich nur ein Fahrzeugtyp verkehrt; geraten wird nicht.
+
+**Wo eine Regel gerade *nicht* hingehört:** der IC Stuttgart–Zürich über die
+Gäubahn. Dort fuhr bis vor kurzem der Stadler KISS, inzwischen etwas anderes —
+ein fester Eintrag wäre binnen eines Fahrplanwechsels falsch und würde eine
+Sicherheit vortäuschen, die es nicht gibt. Für diesen Zug ist der richtige Weg
+die Wagenreihung: es sind deutsche Fernverkehrszüge, also genau der Fall, den
+sie abdeckt — und was sie liefert, merkt sich `Fleet` von selbst.
+
+**2. Gelernte Baureihen (`api/lib/Fleet.php`).** Jede Baureihe, die die
+Wagenreihung je geliefert hat, wird unter ihrer Zugnummer gemerkt. Beim nächsten
+Mal — morgen, nächste Woche, oder für den vierten Abschnitt, für den das
+Abfrage-Budget von drei Zügen je Verbindung nicht mehr reichte — steht sie ohne
+eine einzige weitere Anfrage bereit. Derselbe Gedanke wie bei der
+Pünktlichkeitsstatistik: die App wird mit der Nutzung besser.
+
+Umläufe sind stabil, aber nicht in Stein gemeißelt. Deshalb zählt nur die
+jüngste Beobachtung, sie verfällt nach 90 Tagen, und das Ergebnis wird als
+*gelernt* gekennzeichnet.
+
+**An jeder Verbindung steht, woher wir es wissen** — vier Wege, vier
+Verlässlichkeiten:
+
+| Grad | Bedeutung |
+|---|---|
+| `series` | nachgesehen: die Wagenreihung meldet die Baureihe |
+| `learned` | erinnert: derselbe Zug fuhr zuletzt mit dieser Baureihe |
+| `route` | geschlossen: auf dieser Strecke verkehrt nur dieses Fahrzeug |
+| `sole` | geschlossen: diese Gattung verkehrt nur mit diesem Fahrzeug |
+
+Nur `series` wird ohne Vorbehalt angezeigt; die übrigen drei sind als Schluss
+gekennzeichnet und nennen im Tooltip den Grund.
+
+### Baureihe: gelöst über bahn.expert — und wieder verloren
+
+> **Stand 4. September 2026: dieser Weg ist zu.** Der RPC-Endpunkt antwortet
+> mit `HTTP 500 {"error":"Only HTML reqüsts are supported here"}`, mit einem
+> Browser-User-Agent mit `404`. bahn.expert hat seine Schnittstelle
+> umgestellt; die alten Pfade (`/api/reihung/v4/wagen/…`) sind ebenfalls weg.
+> Der Provider fällt still zurück, wie vorgesehen — deshalb war der Ausfall
+> lange unsichtbar. **`check.php` prüft ihn jetzt ausdrücklich mit**, damit
+> genau das nicht wieder passiert.
+>
+> Solange er zu ist, kommt das Fahrzeug nur noch aus `FLEET_RULES` und aus
+> dem, was `Fleet` früher gelernt hat. Wer die Angabe braucht, wechselt auf
+> **RIS::Transports** im DB API Marketplace — dieselben Daten unter Vertrag
+> und mit Schlüssel.
+
+Wie es funktionierte, solange es funktionierte:
 
 Die Baureihe kommt jetzt aus der Wagenreihung — `ICE 4 (BR412)`, inklusive
 Wagenzahl je Klasse. Bezogen über **bahn.expert**, das dieselben Daten
@@ -926,6 +1056,16 @@ dazu, sobald Start und Ziel stehen. Alle gefundenen Routen liegen übereinander,
 die ausgewählte ist hervorgehoben. Klick auf eine Linie wählt die Verbindung,
 Klick auf eine Verbindung hebt die Linie hervor — beides synchron.
 
+**Eine Auswahl zoomt auf ihre Route.** Der Ausschnitt über *allen* Treffern
+taugt für den Überblick, aber nicht für die eine Verbindung, die man sich gerade
+ansieht: Zürich–Wien und Zürich–Wien über München liegen darin fast
+übereinander. Gezoomt wird aber nur, wenn es etwas bringt — passt die Route
+schon vollständig ins Bild und füllt es zu mindestens einem Drittel, bleibt der
+Ausschnitt stehen. Sonst spränge er bei jedem Klick in der Liste, auch wenn er
+längst passt. Eine **neue Suche** setzt den Ausschnitt dagegen immer neu: sonst
+zeigte die Karte nach Zürich–Wien weiter den Alpenraum, während die Liste
+Berlin–Hamburg führt. Beim Blättern bleibt er, wo er ist.
+
 **Zur Bedienung mit der Maus:** Der Pointer wird erst nach mehr als sechs Pixel
 Bewegung eingefangen. Vorher bleibt ein Klick ein Klick, auch wenn die Maus
 dabei leicht wackelt — sonst verschluckt `setPointerCapture` die Auswahl von
@@ -949,9 +1089,9 @@ OSM braucht keinen Schlüssel. Die Nutzungsbedingungen verlangen die
 Namensnennung — sie steht unten rechts im Bild und darf nicht entfernt werden —
 und keine Massenabfragen; eine Handvoll Kacheln je Seitenaufruf erfüllt das.
 
-**Die Karte ist schwarzweiss.** Der Hintergrund ist Hintergrund; Farbe gehört
+**Die Karte ist schwarzweiß.** Der Hintergrund ist Hintergrund; Farbe gehört
 den Routen, den Zügen und den Baustellen darüber. Die OSM-Standardkacheln sind
-bunt — grüne Wälder, gelbe Strassen, blaue Flüsse —, und darüber gingen die
+bunt — grüne Wälder, gelbe Straßen, blaue Flüsse —, und darüber gingen die
 farbigen Linien unter.
 
 **Dunkles Layout ohne zweite Quelle:** OSM hat keine dunklen Kacheln. Derselbe
@@ -960,8 +1100,8 @@ Filter erledigt das mit — `invert(1)` dreht Hell und Dunkel um. Einen
 da, das sich verdrehen könnte.
 
 **Die Werte sind an der alten Quelle geeicht**, und das war nötig. Ein erster
-Versuch mit blossem Entsättigen sah schlechter aus als CARTO zuvor. Der Grund
-liess sich messen: über eine Stadt- und eine Landkachel gemittelt liegt CARTO
+Versuch mit bloßem Entsättigen sah schlechter aus als CARTO zuvor. Der Grund
+ließ sich messen: über eine Stadt- und eine Landkachel gemittelt liegt CARTO
 „positron" bei einer Helligkeit von 0,92 und „dark matter" bei **0,05** — der
 erste Versuch landete im dunklen Layout bei **0,22**, einem flauen Mittelgrau
 statt einer dunklen Karte.
@@ -1042,7 +1182,7 @@ Name „Fußweg". Bei der ÖBB gilt umgekehrt, dass alles außer einer Fahrt (`J
 ein Weg zu Fuß ist — das deckt auch seltenere Abschnittstypen ab.
 
 Unterschieden wird dabei, ob der Halt wechselt: „Umstieg am selben Halt" ist
-etwas anderes als „Zu Fuss: Studentenstadt → Situlistraße". Letzteres bekommt
+etwas anderes als „Zu Fuß: Studentenstadt → Situlistraße". Letzteres bekommt
 eine eigene Kennzeichnung, weil so ein Fußweg oft der Grund ist, warum eine
 Verbindung schneller oder entspannter ist.
 
@@ -1194,7 +1334,7 @@ zurückgeholt — genau das war der Einwand beim ersten Versuch:
 
 | verloren | zurückgeholt mit |
 |---|---|
-| Wert sass oben links statt mittig | `display: flex` + `align-items: center` |
+| Wert saß oben links statt mittig | `display: flex` + `align-items: center` |
 | Kalender- bzw. Uhrsymbol fehlte | eingebettetes SVG als `background-image` |
 | Feld wirkte leer | `::-webkit-date-and-time-value { text-align: left }` |
 
@@ -1212,7 +1352,7 @@ ohnehin Platz.
 
 Zwei Dinge kamen fürs Tablet dazu: **16 px Schriftgrösse bis 1024 px** (sonst
 zoomt iOS beim Antippen eines Feldes hinein — die Regel stand ebenfalls nur in
-der Telefon-Abfrage), und eine etwas grössere Grundbreite je Spalte
+der Telefon-Abfrage), und eine etwas größere Grundbreite je Spalte
 (`minmax(170px, 1fr)` statt 150). Lieber eine Spalte weniger als vier zu enge.
 
 Nachgemessen bei 768 px (drei Spalten à 219 px), 375 px und 320 px, jeweils
@@ -1349,12 +1489,87 @@ Vorrang vor der eigenen Heuristik.
 BahnCard, geht sie nicht noch einmal in die Hochrechnung ein — nur die Abos, die
 die DB nicht kennt.
 
-**Genauigkeit der Schätzung:** Die Gesamtdistanz stimmt gut (gemessen: 473 km
-berechnet gegen ~462 km reale Bahnkilometer für Wien–München; 828 gegen ~860 km
-für Zürich–Wien). Ungenau wird es bei Abschnitten, die eine Grenze **ohne
-Zwischenhalt** queren — die werden hälftig geteilt, obwohl die Grenze selten in der
-Mitte liegt. Bei Fahrten aus der Schweiz fällt das kaum ins Gewicht, weil Basel,
-Buchs SG und Chiasso fast immer Halte sind.
+#### Die Preiskurve — degressiv und nachgemessen
+
+Ein Bahntarif wird mit der Entfernung billiger. Gemessen an echten
+DB-Angeboten: **31 ct/km bei 40 km, 11 ct/km bei 808 km.** Ein fester
+Kilometersatz kann das nicht abbilden — er passt entweder kurze oder lange
+Strecken, nie beide. Genau das stand hier lange: 0,24 €/km für Deutschland,
+und Freiburg–Berlin kam damit auf 118 € statt 90 €.
+
+Jetzt gilt je Land eine Kurve der Form **`preis = a · km^b`**, kalibriert an
+**85 echten Angeboten zu 19 Relationen zwischen 37 und 808 km** (gemessen am
+4. September 2026, zwei Wochen Vorlauf):
+
+| Land | Kurve | mittlerer Fehler vorher | jetzt |
+|---|---|---|---|
+| Deutschland | `1,0508 · km^0,6766` | 22 % | **18 %** |
+| Schweiz | `0,4964 · km^0,8746` | 28 % | **8 %** |
+| Österreich | `0,9500 · km^0,6900` | — | nicht gemessen, siehe unten |
+
+Über alle Relationen: der mittlere Fehler der Untergrenze fällt von **23 % auf
+17 %**, und das gezeigte Band trifft in **16 von 19** Fällen einen tatsächlich
+angebotenen Preis.
+
+**Warum der deutsche Rest nicht wegzurechnen ist:** der Sparpreis hängt an der
+Auslastung, nicht nur an der Entfernung. Stuttgart–Karlsruhe gab es am Messtag
+für 6,99 € *und* für 36,20 € — dieselbe Strecke, derselbe Tag. In der Schweiz
+ist der Preis dagegen eine reine Funktion der Entfernung, und entsprechend
+genau trifft die Kurve dort.
+
+**Die Kurve gilt je Land auf die Gesamtstrecke, nicht je Teilstück.** `a · km^b`
+ist nicht additiv: eine Fahrt von 600 km in zwanzig Halte-Abschnitte zerlegt und
+je Abschnitt bepreist ergäbe ein Vielfaches des richtigen Preises — der Sinn der
+Degression ist ja gerade, dass der einundfünfzigste Kilometer weniger kostet als
+der erste. Die Abos wirken deshalb als **Anteil**: je Land wird ausgerechnet,
+welcher Teil der Strecke wie stark rabattiert ist, und der Landespreis
+entsprechend gekürzt.
+
+**Im Nahverkehr gibt es keine Spanne.** Nachgemessen an sieben deutschen
+Nahverkehrsrelationen: jede lieferte fünf Angebote, und alle fünf hatten
+denselben Betrag. Weder Sparpreis noch Flexpreis-Aufschlag — was am Automaten
+steht, ist der Preis. Eine Spanne von 45 % vorzugaukeln wäre dort falsch.
+Was dafür streut, ist die Region: München–Augsburg kostet 21,30 €,
+Hannover–Braunschweig bei gleicher Entfernung 15,00 €. Das sind Verbund-, keine
+Entfernungstarife. Eine eigene Nahverkehrskurve wurde geprüft und wieder
+verworfen — sie war nur drei Prozentpunkte besser (22 statt 25 % Fehler) und
+hätte eine Genauigkeit vorgetäuscht, die es nicht gibt.
+
+**Österreich ist nicht gemessen** und das ist keine Nachlässigkeit: Die DB
+verkauft innerhalb Österreichs nicht — jede Anfrage kommt ohne Preis zurück —,
+und das HAFAS der ÖBB liefert zwar ein `trfRes`-Feld, aber ohne Betrag
+(nachgeprüft: `{"statusCode":"OK"}`, sonst nichts). Die hinterlegten Werte sind
+die deutsche Kurve, etwas günstiger gestellt. Wer sie besser kennt:
+`RATE_CURVE` in `api/lib/Fares.php`, `a` skaliert den Preis, `b` die Degression.
+
+#### Die Entfernung kommt aus der Polylinie
+
+Vorher: Luftlinie von Halt zu Halt, mal 1,25 als Bogenzuschlag. Das ist
+messbar zu ungenau — München–Berlin kam damit auf **753 statt 623 km**, und der
+geschätzte Preis war entsprechend zu hoch.
+
+HAFAS liefert aber den **tatsächlichen Streckenverlauf** mit (`getPolyline`).
+Nachgemessen an sechs Relationen gegen die amtliche Tarifentfernung:
+
+| Verfahren | Spanne | Mittel |
+|---|---|---|
+| Polylinie | 0,94 – 1,01 × | 0,975 |
+| Haltekette × 1,25 | 1,00 – 1,12 × | 1,065 |
+
+Die Polylinie ist also **gut doppelt so genau**; ein Korrekturfaktor von 1,025
+zentriert sie. Die Haltekette bleibt die Rückfallebene, wo keine Polylinie da
+ist (DB-Fahrpläne liefern keine).
+
+Zweistufig ist es, weil beide Quellen etwas beisteürn: die **Halte** tragen
+Ländercode und Uhrzeit — ohne sie keine Aufteilung auf Länder und keine
+Zeitfenster fürs GA Night —, die **Polylinie** die Länge. Also werden die
+Luftlinien zwischen den Halten so skaliert, dass ihre Summe der Polylinie
+entspricht.
+
+Ungenau bleibt es bei Abschnitten, die eine Grenze **ohne Zwischenhalt** queren —
+die werden hälftig geteilt, obwohl die Grenze selten in der Mitte liegt. Bei
+Fahrten aus der Schweiz fällt das kaum ins Gewicht, weil Basel, Buchs SG und
+Chiasso fast immer Halte sind.
 
 Geschätzte Preise sind **nie verbindlich**. Maßgeblich ist der Ticketshop, und der
 Buchungslink hängt an jeder Verbindung.
@@ -1386,6 +1601,7 @@ public/
         ├── Products.php          Verkehrsmittel-Gruppen und Bitmasken
         ├── Locations.php         Ortssuche aus beiden Quellen
         ├── Punctuality.php       Selbst gesammelte Pünktlichkeitsstatistik
+        ├── Fleet.php             Gelernte Baureihen je Zugnummer
         ├── Shops.php             Buchungs-Deeplinks je Land
         └── Providers/
             ├── OebbHafas.php     Fahrplan, Zuggattungen, Ländercodes, Geometrie
@@ -1402,13 +1618,13 @@ Alles per GET auf `api/`:
 | `?action=health` | Welche Quellen sind erreichbar? |
 | `?action=catalogue` | Abo-Liste fürs Frontend |
 | `?action=locations&q=Bern` | Stationssuche |
-| `?action=journeys&from=…&to=…&date=…&time=…` | Verbindungen inklusive Preis (`&scroll=…` blättert weiter) |
+| `?action=journeys&from=…&to=…&date=…&time=…` | Verbindungen inklusive Preis (`&scroll=…` blättert; der Kontext trägt seine Richtung selbst — `scroll` aus der Antwort führt zu späteren, `scrollBack` zu früheren Abfahrten) |
 | `?action=livetrains&bbox=süd,west,nord,ost` | Züge, die dort gerade fahren |
 | `?action=traindetails&jid=…` | Zuglauf mit Halten und Verspätung |
 | `?action=bestprices&from=…&to=…&date=…` | Günstigste Zeitfenster am Tag |
 | `?action=nextconnection&from=…&to=…&date=…&time=…` | Nächster Anschluss nach einem knappen Umstieg |
 | `?action=fxrate` | EZB-Tageskurse, für den Gegenwert in Franken |
-| `?action=platforms&lat=…&lon=…&from=…&to=…` | Bahnsteige und Umsteigeweg aus OpenStreetMap |
+| `?action=platforms&lat=…&lon=…&from=…&to=…` | Bahnsteige eines Bahnhofs aus OpenStreetMap (`from`/`to` = die beiden Gleise des Umstiegs) |
 | `?action=works` | Bauarbeiten im Netz, mit Abschnitt und Zeitraum |
 | `?action=disruptions` | Aktive Störungsmeldungen der MVG München |
 
@@ -1435,6 +1651,18 @@ durchgereicht werden, zusätzlich in `DbVendo::DISCOUNT_MAP` eintragen.
 die `series` (Baureihennummern). `sole: true` bedeutet: diese Gattung fährt
 praktisch nur dieses Fahrzeug, die Zuordnung ist dann auch ohne Wagenreihung
 eindeutig.
+
+**Fahrzeug aus der Strecke:** ebenfalls `data/trains.js`, `FLEET_RULES`. Eine
+Zeile je Strecke, auf der der Umlauf feststeht — `model` (eine ID aus
+`TRAIN_MODELS`), `categories`, optional `between` (zwei Muster, die beide unter
+den Halten vorkommen müssen) und `note` als Begründung fürs Tooltip. Das ist die
+Stelle, an der sich Streckenwissen am billigsten einbringen lässt.
+
+**Preisrichtwerte, genauer:** `api/lib/Fares.php`, `RATE_CURVE`. Je Land
+`a` und `b` der Kurve `preis = a · km^b` sowie die Faktoren `spar`, `flex` und
+der Mindestpreis `min`. Die deutschen und schweizerischen Werte sind an echten
+Angeboten kalibriert, die österreichischen nicht — dort ist am meisten zu
+gewinnen.
 
 **Verkehrsmittel-Gruppen:** `api/lib/Products.php`. Dort stehen Bitmaske und
 DB-Gattungsnamen nebeneinander; das Frontend zieht die Liste automatisch.
@@ -1479,13 +1707,19 @@ Für den privaten Gebrauch ist das üblich und verbreitet — aber:
   SBB- bzw. ÖBB-Shop.
 - **Keine Echtpreise auf reinen CH/AT-Relationen** wie Zürich–Wien, weil die DB
   sie nicht vertreibt.
-- **Baureihen** nur über die Wagenreihung (deutscher Fernverkehr, Reisetag) oder
-  eigene Regeln.
+- **Baureihen** nur über die Wagenreihung (deutscher Fernverkehr, Reisetag),
+  über gelernte Beobachtungen oder über Strecken- und Gattungsregeln. Die
+  Wagenreihung ist zum Stand 4. September 2026 nicht erreichbar.
+- **Preise in Österreich sind ungeprüft.** Keine der beiden Quellen liefert dort
+  einen Betrag; die Kurve ist von der deutschen abgeleitet.
 - **Nachtzüge** sind im Preisvergleich benachteiligt, weil die gesparte
   Hotelnacht nicht eingerechnet wird.
 - **Grenzabschnitte ohne Zwischenhalt** werden hälftig aufgeteilt. Bei Fahrten
   aus der Schweiz fällt das kaum ins Gewicht, weil Basel, Buchs SG und Chiasso
   fast immer Halte sind.
 - **Reservierungen und Zuschläge** sind in den Schätzungen nicht enthalten.
+- **Der Umstiegsplan zeigt keinen Laufweg.** Er sagt, wo die beiden Bahnsteige
+  liegen — nicht, wie man dazwischen läuft. Der Weg wurde einmal aus OSM
+  gerechnet und war zu oft falsch; siehe oben.
 - **Der TLS-Trick kann jederzeit brechen.** Ändert Akamai die Erkennung, kommt
   wieder `OPS_BLOCKED` und das Tool fällt auf Schätzpreise zurück.
