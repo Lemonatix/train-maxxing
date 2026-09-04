@@ -23,6 +23,13 @@ require __DIR__ . '/api/lib/Providers/Mvg.php';
 
 $config = require __DIR__ . '/api/config.php';
 
+/**
+ * So viele Aufrufe braucht ein Dienst, bevor seine Fehlerquote etwas
+ * bedeutet. Bei zweien ist einer davon "50 %", und danach richtete sich
+ * bisher das Gesamturteil der Seite.
+ */
+const MIN_PROBEN = 5;
+
 $checks = [];
 
 // --- Basis -------------------------------------------------------------
@@ -176,30 +183,50 @@ if ($verlauf === []) {
     ];
 } else {
     foreach ($verlauf as $dienst => $v) {
+        $gesamt  = $v['ok'] + $v['fail'];
         $prozent = (int) round($v['quote'] * 100);
-        // Ein einzelner Aussetzer ist normal - Overpass stellt Anfragen in
-        // eine Warteschlange. Ab einem Viertel Fehlschlägen stimmt etwas
-        // nicht, und ab der Hälfte ist der Dienst praktisch weg.
-        $state = $v['quote'] >= 0.5 ? 'fail' : ($v['quote'] >= 0.25 ? 'warn' : 'ok');
+
+        // ERST AB GENUG AUFRUFEN URTEILEN. Overpass stellt Anfragen in eine
+        // Warteschlange und lässt gelegentlich eine laufen; bei zwei
+        // Aufrufen ist einer davon "50 % Fehlerquote", und die Seite meldete
+        // daraufhin einen Fehler, obwohl schlicht zu wenig Daten da waren.
+        // Ab einem Viertel Fehlschlägen stimmt etwas nicht, ab der Hälfte
+        // ist der Dienst praktisch weg - aber eben erst ab MIN_PROBEN.
+        $genug = $gesamt >= MIN_PROBEN;
+        $state = !$genug ? 'ok'
+            : ($v['quote'] >= 0.5 ? 'fail' : ($v['quote'] >= 0.25 ? 'warn' : 'ok'));
+
         $checks[] = [
             'name'   => 'Verlauf: ' . $dienst,
             'state'  => $state,
+            // KEIN K.-o.-KRITERIUM: hier steht, wie es einem fremden Dienst
+            // in den letzten 24 Stunden ging - nicht, ob dieser Webspace das
+            // Tool tragen kann. Vorher setzte ein einzelner Aussetzer bei
+            // Overpass die Kopfzeile auf "Noch nicht startklar", während
+            // jede echte Prüfung darunter grün war.
+            'critical' => false,
             'detail' => sprintf('%d Aufrufe, davon %d fehlgeschlagen (%d %%)%s',
-                $v['ok'] + $v['fail'], $v['fail'], $prozent,
+                $gesamt, $v['fail'], $prozent,
                 $v['err'] !== '' ? ' - zuletzt: ' . $v['err'] : ''),
             'hint'   => $state === 'ok'
-                ? ''
+                ? ($genug || $v['fail'] === 0 ? '' :
+                    'Zu wenige Aufrufe für ein Urteil - ein Aussetzer unter ' . MIN_PROBEN
+                    . ' Aufrufen sagt noch nichts.')
                 : 'Ein Provider, der still degradiert, fällt sonst wochenlang niemandem auf. '
                   . 'Prüf den Endpunkt in api/config.php.',
         ];
     }
 }
 
+// Nur was als kritisch markiert ist, kippt das Gesamturteil auf "nicht
+// startklar". Alles andere ist höchstens ein Hinweis - ohne den Unterschied
+// stand über einer durchweg grünen Seite eine Fehlermeldung.
 $hasFail = false;
 $hasWarn = false;
 foreach ($checks as $c) {
-    if ($c['state'] === 'fail') { $hasFail = true; }
-    if ($c['state'] === 'warn') { $hasWarn = true; }
+    $kritisch = $c['critical'] ?? true;
+    if ($c['state'] === 'fail' && $kritisch) { $hasFail = true; }
+    if ($c['state'] === 'warn' || ($c['state'] === 'fail' && !$kritisch)) { $hasWarn = true; }
 }
 
 ?><!doctype html>

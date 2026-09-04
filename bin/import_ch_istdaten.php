@@ -44,6 +44,21 @@
 
 declare(strict_types=1);
 
+// NUR KOMMANDOZEILE - dieselbe Sperre wie in warm_cache.php, hier fehlte sie.
+//
+// Über den Webserver aufgerufen war $argv bisher nicht gesetzt, das Skript
+// starb beim ersten Zugriff mit HTTP 500 und einer Zeile im Fehlerlog. Das
+// war nur solange harmlos, wie register_argc_argv aus ist: steht es an -
+// und das tut es auf manchen Shared-Hostings -, füllt PHP $argv aus der
+// QUERY-STRING. Dann liesse sich mit
+// "?--days=60&--force" ein Import über sechzig Tage anstossen: Dutzende
+// grosse CSV-Downloads und Schreibzugriffe, ausgelöst von jedem, der die
+// URL kennt. Ein Cron-Skript hat im Web nichts verloren.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit("Nur auf der Kommandozeile.\n");
+}
+
 const CH_ISTDATEN_DATASET_URL = 'https://data.opentransportdata.swiss/dataset/ist-daten-v2';
 
 /** Wie viele Zeilen der HTML-Übersichtsseite maximal geholt werden.
