@@ -135,16 +135,17 @@ export const TRAIN_MODELS = [
  * Strecke kennt, auf der der Umlauf feststeht, trägt sie hier ein.
  */
 export const FLEET_RULES = [
-  {
-    model: 'giruno',
-    categories: ['ECE'],
-    note: 'Die Gattung ECE führt die SBB ausschließlich für ihre Giruno-Züge.',
-  },
+  // REIHENFOLGE ZÄHLT: die erste passende Regel gewinnt. Deshalb stehen die
+  // streckenscharfen Regeln VOR den pauschalen. Andersherum hätte die
+  // Gattungsregel „ECE" weiter unten den ECE Zürich–München eingefangen und
+  // ihm ein Fahrzeug angedichtet, das dort nicht verkehrt — genau das ist
+  // hier schon einmal passiert.
   {
     model: 'astoro',
-    categories: ['EC'],
+    categories: ['EC', 'ECE'],
     between: [/z(ü|ue)rich/i, /m(ü|ue)nchen/i],
-    note: 'Zürich–München fährt seit der Elektrifizierung über Lindau mit ETR 610.',
+    note: 'Zürich–München verkehrt seit der Elektrifizierung über Lindau '
+      + 'durchgehend mit dem ETR 610 (Astoro).',
   },
   {
     // GÄUBAHN. Der einzige Weg, das hier zu erfahren: die Wagenreihung
@@ -156,6 +157,14 @@ export const FLEET_RULES = [
     categories: ['IC'],
     between: [/stuttgart/i, /(z(ü|ue)rich|singen|schaffhausen)/i],
     note: 'Auf der Gäubahn Stuttgart–Zürich verkehrt der IC 2.',
+  },
+  {
+    // Pauschal und deshalb ganz unten: auf der Gotthard-Achse trifft es zu,
+    // aber die SBB führt ECE auch anderswo. Was dort ein anderes Fahrzeug
+    // ist, gehört als eigene Regel weiter oben eingetragen.
+    model: 'giruno',
+    categories: ['ECE'],
+    note: 'Die Gattung ECE führt die SBB im Regelfall für ihre Giruno-Züge.',
   },
 ];
 

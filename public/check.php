@@ -15,6 +15,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/api/lib/Http.php';
+require __DIR__ . '/api/lib/Health.php';
 require __DIR__ . '/api/lib/Cache.php';
 require __DIR__ . '/api/lib/Providers/OebbHafas.php';
 require __DIR__ . '/api/lib/Providers/DbVendo.php';
@@ -63,7 +64,10 @@ $cacheOk = $cache->isAvailable();
 $checks[] = [
     'name'   => 'Cache-Verzeichnis beschreibbar',
     'state'  => $cacheOk ? 'ok' : 'warn',
-    'detail' => $cacheOk ? (string) $config['cache_dir'] : 'nicht beschreibbar: ' . $config['cache_dir'],
+    // Kein absoluter Serverpfad: check.php ist öffentlich erreichbar, und
+    // wo das Cache-Verzeichnis liegt, geht niemanden etwas an. Ob es
+    // beschreibbar ist, ist die Auskunft, um die es geht.
+    'detail' => $cacheOk ? 'beschreibbar' : 'NICHT beschreibbar',
     'hint'   => $cacheOk ? '' : 'Das Tool läuft auch ohne Cache, wird aber langsamer und stellt mehr Anfragen. Setz in api/config.php "cache_dir" z.B. auf sys_get_temp_dir().',
 ];
 
@@ -152,6 +156,41 @@ if ($curlOk) {
                   . 'wo es sich aus der Gattung oder der Strecke zwingend ergibt (railjet, Nightjet, Giruno …). '
                   . 'bahn.expert ist ein privates Projekt und ändert seine Schnittstelle gelegentlich - '
                   . 'wer die Angabe braucht, wechselt auf RIS::Transports im DB API Marketplace.',
+        ];
+    }
+}
+
+// --- Wie lief es zuletzt? ----------------------------------------------
+//
+// Die Prüfungen oben sagen, ob ein Dienst JETZT antwortet. Das reicht nicht:
+// bahn.expert war wochenlang tot, und weil jeder Provider still degradiert,
+// hat es niemand gemerkt. Health zählt deshalb jeden Aufruf im Betrieb mit -
+// hier steht das Ergebnis der letzten 24 Stunden.
+$verlauf = Health::summary((string) $config['cache_dir']);
+if ($verlauf === []) {
+    $checks[] = [
+        'name'   => 'Verlauf der letzten 24 Stunden',
+        'state'  => 'ok',
+        'detail' => 'noch keine Aufrufe verbucht',
+        'hint'   => 'Sobald jemand sucht, sammelt sich hier, wie zuverlässig die Quellen antworten.',
+    ];
+} else {
+    foreach ($verlauf as $dienst => $v) {
+        $prozent = (int) round($v['quote'] * 100);
+        // Ein einzelner Aussetzer ist normal - Overpass stellt Anfragen in
+        // eine Warteschlange. Ab einem Viertel Fehlschlägen stimmt etwas
+        // nicht, und ab der Hälfte ist der Dienst praktisch weg.
+        $state = $v['quote'] >= 0.5 ? 'fail' : ($v['quote'] >= 0.25 ? 'warn' : 'ok');
+        $checks[] = [
+            'name'   => 'Verlauf: ' . $dienst,
+            'state'  => $state,
+            'detail' => sprintf('%d Aufrufe, davon %d fehlgeschlagen (%d %%)%s',
+                $v['ok'] + $v['fail'], $v['fail'], $prozent,
+                $v['err'] !== '' ? ' - zuletzt: ' . $v['err'] : ''),
+            'hint'   => $state === 'ok'
+                ? ''
+                : 'Ein Provider, der still degradiert, fällt sonst wochenlang niemandem auf. '
+                  . 'Prüf den Endpunkt in api/config.php.',
         ];
     }
 }

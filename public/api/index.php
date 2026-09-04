@@ -54,6 +54,7 @@ require __DIR__ . '/lib/Shops.php';
 require __DIR__ . '/lib/Locations.php';
 require __DIR__ . '/lib/Punctuality.php';
 require __DIR__ . '/lib/Fleet.php';
+require __DIR__ . '/lib/Health.php';
 require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
 require __DIR__ . '/lib/Providers/CoachSequence.php';
@@ -101,6 +102,40 @@ $maxTtl = max([86400, ...array_map('intval', array_values($config['cache_ttl'] ?
 if (random_int(1, 100) === 1) {
     $cache->gc($maxTtl + 86400);
 }
+
+/**
+ * Was eine Aktion im Rate-Limit kostet.
+ *
+ * NICHT JEDE ANFRAGE IST GLEICH TEUER, und vorher zählte sie es doch: die
+ * gecachte Abo-Liste so viel wie eine Verbindungssuche. Das trifft am Ende
+ * die eigene App. Wer die Live-Verfolgung offen hat, holt alle 30 Sekunden
+ * zwei Zugläufe; wer dabei die Karte schiebt, löst je Bewegung eine
+ * Positionsabfrage aus. Damit war das Kontingent aufgebraucht, ohne dass
+ * eine einzige Suche gelaufen wäre - und die nächste Suche bekam 429.
+ *
+ * Bepreist wird deshalb nach dem, was eine Aktion nach DRAUSSEN auslöst.
+ * Was ohnehin aus dem Cache kommt, kostet nichts.
+ */
+const RATE_COST = [
+    'health'         => 0,
+    'catalogue'      => 0,
+    'fxrate'         => 0,
+    'disruptions'    => 1,
+    'locations'      => 1,
+    'livetrains'     => 2,
+    'traindetails'   => 2,
+    'works'          => 4,
+    'platforms'      => 4,
+    'nextconnection' => 4,
+    'bestprices'     => 5,
+    'journeys'       => 5,
+];
+
+/** Voreinstellung für alles, was nicht in der Tabelle steht. */
+const RATE_COST_DEFAULT = 3;
+
+// Ab hier wird jeder Aufruf nach draußen mitgezählt - check.php zeigt es.
+Health::watch((string) $config['cache_dir']);
 
 if (!rateLimitOk($cache, $config)) {
     fail('Zu viele Anfragen. Bitte kurz warten.', 429);
@@ -957,7 +992,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     if (($config['providers']['wagenreihung']['enabled'] ?? false) === true) {
         $cs = new CoachSequence($http, $config['providers']['wagenreihung'], $cache);
         // Alle Verbindungen auf einmal: die Abfragen laufen gleichzeitig und
-        // doppelte Zuege werden nur einmal geholt - siehe enrichAll().
+        // doppelte Züge werden nur einmal geholt - siehe enrichAll().
         $journeys = $cs->enrichAll($journeys, $date);
     }
 
@@ -1325,6 +1360,11 @@ function rateLimitOk(Cache $cache, array $config): bool
         return true;
     }
 
+    $kosten = RATE_COST[(string) ($_GET['action'] ?? '')] ?? RATE_COST_DEFAULT;
+    if ($kosten === 0) {
+        return true;
+    }
+
     $ip     = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     $window = (int) $rl['per_secs'];
     $key    = 'rl:' . $ip . ':' . intdiv(time(), $window);
@@ -1333,7 +1373,7 @@ function rateLimitOk(Cache $cache, array $config): bool
     if ($hits >= (int) $rl['max']) {
         return false;
     }
-    $cache->set($key, $hits + 1);
+    $cache->set($key, $hits + $kosten);
 
     return true;
 }

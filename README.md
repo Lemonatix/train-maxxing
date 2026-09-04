@@ -302,6 +302,45 @@ Bahnsteige, um die es geht, zwei Striche unter achtundzwanzig. Sind die
 Nummern unbekannt, ist der Überblick über alle das Richtige — dann gibt es
 nichts Engeres zu zeigen.
 
+**Der Plan besteht nur noch aus Punkten — einer je Gleis.** Hier wurden
+einmal die Bahnsteigumrisse als Linien gezeichnet. Das sah nach mehr Auskunft
+aus, als darin steckte: ein Umriss sagt, wo der Bahnsteig liegt, nicht wo der
+Zug hält, und bei einem Bahnsteig zwischen zwei Gleisen ist er für beide
+derselbe. Dazu kamen die Gleisflächen aus OSM ins Bild, und am Ende war der
+Plan ein Liniengewirr, in dem die zwei Punkte untergingen, um die es geht.
+
+Zwei Gleise ohne eigenen Haltepunkt fallen dabei auf denselben Punkt — dann
+steht dort eben „2/3", und das ist ehrlicher als zwei Punkte, die Genauigkeit
+vortäuschen.
+
+Das hat die Datenmenge nebenbei zusammenfallen lassen. Die Umrisse waren der
+Löwenanteil der Antwort, und ohne sie genügt Overpass `out tags center` statt
+`out geom`:
+
+| | vorher | jetzt |
+|---|---|---|
+| Overpass-Antwort (Ulm) | 84 KB | **57 KB** |
+| Overpass-Antwort (Frankfurt) | 89 KB | **55 KB** |
+| unsere API-Antwort (Ulm, 21 Bahnsteige) | mit Umrissen | **2,3 KB** |
+
+`center` räumt zugleich einen Sonderfall weg: mit `out geom` tragen Relationen
+ihre Geometrie in den *Mitgliedern*, nicht am Objekt — wer das übersieht,
+verliert sie stumm. Genau das war passiert (siehe unten).
+
+**Auch bei gleichem Bahnsteig wird die Karte gezeigt.** Vorher endete die
+Anzeige dort bei einem Satz („Gleis gegenüber — nur die Seite wechseln"). Das
+ist zwar eine gute Nachricht, aber man will trotzdem sehen, wo im Bahnhof man
+steht — und an einem Bahnsteig mit vier Abschnitten ist „gegenüber" auch nicht
+überall dasselbe.
+
+**Der Ausschnitt richtet sich nach den beiden Gleisen — sonst nichts.**
+Liegen sie nebeneinander, wird es sehr eng, und genau das ist richtig: die
+Frage lautet „wo genau", nicht „wie sieht der Bahnhof aus". Gemessen an drei
+Umstiegen: benachbarte Gleise landen bei 20 m Maßstab, weiter auseinander
+liegende bei 50 m. Eine Untergrenze von 20 m verhindert nur den Grenzfall,
+dass zwei Punkte praktisch aufeinanderliegen und die Karte bis an die
+Zoomgrenze heranfährt.
+
 **Die Markierung sitzt auf dem GLEIS, nicht auf dem Bahnsteig.** Ein
 Bahnsteig zwischen Gleis 2 und 3 hat seinen Schwerpunkt genau zwischen beiden
 — die Punkte für „Gleis 2" und „Gleis 3" lägen übereinander. Und wo ein
@@ -310,21 +349,38 @@ Fläche zu „Gleis 4" willkürlich die eine oder die andere Hälfte; genau das 
 im Plan seltsam aus. Wo OSM einen **Haltepunkt** kennt — Ulm hat 23, Frankfurt
 29 —, sitzt die Markierung dort. Sonst weiterhin auf der Bahnsteigmitte.
 
-Drei Fehler beim Einlesen, die die Abdeckung gedrückt haben:
+Fünf Fehler, die den Plan gedrückt oder verfälscht haben:
 
-1. **Relationen fielen stumm durch.** Overpass liefert die Geometrie einer
-   Relation nicht am Objekt selbst, sondern in den `members`. Der Code prüfte
-   `lat/lon`, dann `geometry`, dann `center` — eine Relation hat nichts davon
-   und landete bei `continue`. Friedrichshafen Stadtbahnhof führt vier
-   Bahnsteige, **drei davon als Relation**; bei uns kam genau der eine an, der
-   als Weg erfasst ist. Jetzt werden die äußeren Ringe der Mitglieder
-   ausgelesen: **1 → 4 Bahnsteige.**
+1. **Relationen fielen stumm durch.** Mit `out geom` liefert Overpass die
+   Geometrie einer Relation nicht am Objekt selbst, sondern in den `members`.
+   Der Code prüfte `lat/lon`, dann `geometry`, dann `center` — eine Relation
+   hat nichts davon und landete bei `continue`. Friedrichshafen Stadtbahnhof
+   führt vier Bahnsteige, **drei davon als Relation**; bei uns kam genau der
+   eine an, der als Weg erfasst ist: **1 → 4 Bahnsteige.** Seit der Umstellung
+   auf `out tags center` stellt sich die Frage nicht mehr — `center` steht an
+   jedem Objekt.
 2. **`ref="Gleis 24"` statt `ref="24"`.** Manche Bahnhöfe schreiben das Wort
    mit hinein. Der Fahrplan sagt „24", die Suche ging leer aus, und im Plan
    stand „Gleis Gleis 24". Der Wortkopf wird jetzt abgeschnitten — aber nur,
    wenn danach eine Ziffer folgt, damit Mannheims Bussteig „Steig F" nicht zu
    einem „F" wird, das man für ein Gleis halten könnte.
-3. **Nur Bussteige sind keine Bahnsteige.** Radolfzell liefert 33 OSM-Objekte,
+3. **Ein Busbahnhof bekommt keinen Gleisplan.** Der Plan zeigt Bahnsteige aus
+   OpenStreetMap — an einer Bushaltestelle gibt es die nicht, und was der
+   350-Meter-Umkreis stattdessen einfängt, ist der nächstgelegene Bahnhof. Für
+   den Fernbus am **„München ZOB (Hackerbrücke)"** kamen so die Gleise 5–36 des
+   Hauptbahnhofs heraus, 600 m weiter — ein Plan, der eine ganz andere Station
+   zeigt und nichts davon sagt. Ist eine der beiden Seiten ein Bus, entfällt
+   der Plan.
+4. **Bussteignummern galten als Bahnhofsnummer.** Damit Zürichs `ref=13030`
+   (die Nummer des *Bahnhofs*, die dort auf 26 Haltepunkten steht) nicht als
+   „Gleis 13030" durchgeht, fliegt raus, was auf drei oder mehr Haltepunkten
+   gleich lautet. Gezählt wurden dabei aber auch **Bussteige** — und an einem
+   grossen Busbahnhof kommt dieselbe Nummer leicht dreimal vor. **München-
+   Pasing** hat so sein Gleis 10 verloren: die „10" steht dort auf drei
+   Bus-Haltepunkten, und damit flog sie aus jedem Bahnsteig heraus, auch aus
+   der Relation `ref="9;10"`, die OSM sauber führt. Gezählt werden jetzt nur
+   noch Bahnhalte (`railway=stop` oder `train=yes`); Zürich bleibt korrekt.
+5. **Nur Bussteige sind keine Bahnsteige.** Radolfzell liefert 33 OSM-Objekte,
    und **alle 33 sind Bushaltestellen** — kein einziger Bahnsteig ist dort
    erfasst. Der Plan bleibt daher leer, und das ist richtig so; die Anzeige
    sagt es auch. Nichts, was sich im Code lösen ließe: das gehört in
@@ -839,6 +895,26 @@ der fünften Verbindung liegt zwischen beiden eine Bildschirmhöhe, und ein Klic
 schien nichts zu tun. Jetzt springt die Seite hin — im nächsten Frame, denn das
 Neuzeichnen der Trefferliste ändert vorher die Seitenhöhe.
 
+#### Jeder Abschnitt erscheint, sobald er da ist
+
+Die Verfolgung wartete auf **alle** Antworten und zeichnete danach einmal.
+Die HAFAS-Abfrage je Zuglauf ist aber unterschiedlich schnell — nachgemessen
+0,3 s für den einen Abschnitt und **6,8 s** für den anderen. Man sah also
+sieben Sekunden lang „lädt …", obwohl die Hälfte längst dastand.
+
+Schlimmer noch: dahinter hingen **seriell** die Alternativensuche (eine
+vollständige Verbindungssuche) und die MVG-Meldungen — und erst danach wurde
+gezeichnet. Die Verspätung, wegen der man überhaupt hinschaut, wartete auf
+zwei Dinge, die sie gar nicht braucht.
+
+Jetzt zeichnet jeder Abschnitt für sich, sobald seine Antwort da ist, und das
+Beiwerk läuft nebeneinander und reicht nach. Gemessen am selben Umstieg:
+
+| | Feld gefüllt | erster Zug | zweiter Zug |
+|---|---|---|---|
+| vorher | — | — | erst nach allem, ~7 s |
+| jetzt | **21 ms** | **463 ms** | 5,9 s |
+
 #### Ein ausgefallener Zug ist kein knapper Umstieg
 
 Die Anschlusswache rechnete ausschließlich, ob die Lücke zwischen Ankunft und
@@ -864,15 +940,35 @@ vorher gar nicht drin: die Verbindung sah aus wie jede andere. Das Abzeichen
 steht ganz vorn in der Zeile, noch vor Verspätung und knappem Umstieg — die
 sind dann ohnehin gegenstandslos.
 
-#### Ausstattung ist keine Meldung, und dieselbe Meldung nicht dreimal
+#### Drei Sorten Rauschen, die als „Meldung" durchgingen
 
 Unter jedem Abschnitt hingen alle Meldungen des Zuglaufs, ungefiltert und in
-voller Länge. Eine Baustellenmeldung hängt aber oft an **jedem** Abschnitt
-einer Verbindung und ist mehrere Sätze lang — unter jedem Zug stand dieselbe
-Textwand. Jetzt gilt: was in dieser Verfolgung schon einmal gezeigt wurde,
-kommt kein zweites Mal; die erste Meldung steht da, der Rest wartet
-zugeklappt; und lange Texte werden auf vier Zeilen beschnitten, mit dem
-vollen Wortlaut am Titel.
+voller Länge. Nachgesehen, was HAFAS dort tatsächlich liefert:
+
+| Typ | Beispiel | Urteil |
+|---|---|---|
+| `type='A'` | „Klimaanlage", „Rollstuhlstellplatz", „Fahrradmitnahme begrenzt möglich" | **Ausstattung**, keine Meldung |
+| `code='ZN'` | „Loreley", „Wilder Kaiser", „ICE International" | **Zugname**, als Meldung sinnlos |
+| HIM-Volltext | mehrere Absätze Behördendeutsch | **zu viel**, und an jedem Abschnitt derselbe |
+
+Die ersten beiden fliegen jetzt raus. Vom HIM-Text bleibt der erste **tragende**
+Satz, gedeckelt auf 130 Zeichen — `summarise()` wirft dabei auch die Formelware
+weg („Wir bitten um Verständnis", „Bitte beachten Sie die Aushänge"). An einem
+echten Bauarbeitstext gemessen:
+
+```
+[284 Zeichen] Wegen Bauarbeiten kommt es im Streckenabschnitt zwischen Köln
+              Messe/Deutz und Köln Hbf zu Fahrplanänderungen. Bitte beachten
+              Sie die Aushänge … Wir bitten um Verständnis … Die
+              Fahrradmitnahme ist in den Ersatzzügen nicht möglich.
+      ↓
+[109 Zeichen] Wegen Bauarbeiten kommt es im Streckenabschnitt zwischen Köln
+              Messe/Deutz und Köln Hbf zu Fahrplanänderungen.
+```
+
+Dazu, unverändert: was in dieser Verfolgung schon einmal stand, kommt kein
+zweites Mal; die erste Meldung steht da, der Rest wartet zugeklappt; und
+höchstens drei je Zug.
 
 Die Verfolgung **überlebt Neuladen und neue Suchen**: die Verbindung liegt unter
 `train-maxxing:tracked` im localStorage und wird beim Start wieder aufgenommen,
@@ -1022,9 +1118,15 @@ Umlauf eindeutig ist, steht er als Datenzeile da:
 
 Gesucht wird in den **Halten**, nicht nur in Start und Ziel: ein EC
 München–Zürich, den man erst ab Memmingen benutzt, ist derselbe Zug. Ohne
-`between` genügt die Gattung allein — so ist die Gattung `ECE` hinterlegt, die
-die SBB ausschließlich für ihre Giruno-Züge führt. Eine Regel gehört nur dorthin,
-wenn dort tatsächlich nur ein Fahrzeugtyp verkehrt; geraten wird nicht.
+`between` genügt die Gattung allein. Eine Regel gehört nur dorthin, wenn dort
+tatsächlich nur ein Fahrzeugtyp verkehrt; geraten wird nicht.
+
+**Die Reihenfolge zählt: die erste passende Regel gewinnt.** Deshalb stehen die
+streckenscharfen Regeln oben und die pauschalen unten. Andersherum ist es schon
+schiefgegangen: die Gattungsregel „ECE ⇒ Giruno" stand zuerst und fing damit den
+**ECE Zürich–München** ein, der in Wirklichkeit durchgehend mit dem ETR 610
+(Astoro) fährt. Die Streckenregel für Zürich–München deckt jetzt `EC` *und*
+`ECE` ab und steht davor.
 
 **Der Fall, der die Regeln nötig macht:** der IC Stuttgart–Zürich über die
 Gäubahn. Die Wagenreihung liefert dort **nichts** — nachgeprüft am IC 187 und
@@ -1304,7 +1406,17 @@ jeweils günstigsten Angebot. Ein Klick übernimmt die Uhrzeit und sucht neu.
 Gemessen für Zürich–München: 33,99 € abends gegen 41,99 € nachts.
 
 **Pünktlichkeitshistorie** kombiniert drei Quellen, damit auch beim ersten
-Aufruf eines Zuges eine ehrliche Zahl auf dem Bildschirm steht:
+Aufruf eines Zuges eine ehrliche Zahl auf dem Bildschirm steht.
+
+Sie steht jetzt als **Abzeichen auf der Verbindungskarte** („63 % pünktlich"),
+nicht mehr nur im aufgeklappten Detailbereich — also genau dort, wo man beim
+Vergleich zweier Verbindungen hinsieht. Gezeigt wird der **schwächste**
+Abschnitt, nicht der Durchschnitt: eine Verbindung ist so pünktlich wie ihr
+unpünktlichster Zug, und bei einem Umstieg entscheidet ohnehin der. Ob die
+Zahl aus eigenen Messungen stammt oder noch aus der Baseline, sagt der
+Tooltip.
+
+Die drei Quellen:
 
 1. **Eigene Messungen.** Bei jedem Zuglauf mit Echtzeitdaten wird die
    beobachtete Verspätung festgehalten — höchstens ein Wert je Zug und Tag,
@@ -1709,6 +1821,7 @@ public/
         ├── Locations.php         Ortssuche aus beiden Quellen
         ├── Punctuality.php       Selbst gesammelte Pünktlichkeitsstatistik
         ├── Fleet.php             Gelernte Baureihen je Zugnummer
+        ├── Health.php            Wie es den fremden Diensten zuletzt ging
         ├── Shops.php             Buchungs-Deeplinks je Land
         └── Providers/
             ├── OebbHafas.php     Fahrplan, Zuggattungen, Ländercodes, Geometrie
@@ -1741,6 +1854,96 @@ Alles per GET auf `api/`:
 1–60).
 
 ---
+
+## Tests
+
+```bash
+node bin/test_routes.mjs    # Streckenerkennung
+node bin/test_units.mjs     # Gattungen, Beschriftung, Fahrzeuge, Ausfälle
+```
+
+Beide brauchen nichts ausser Node — kein Paket, kein Netz, keine Datenbank.
+Sie laufen in unter einer Sekunde.
+
+**Warum genau diese Funktionen:** Sie entscheiden, was in der Trefferliste
+steht, und sie hängen an Daten von fünf fremden Diensten, die ihre Formate
+ohne Ankündigung ändern. Jeder Fall in `test_units.mjs` stand einmal falsch
+in der App:
+
+| Fall | Fehler dahinter |
+|---|---|
+| `typeOf` bei DPN/DRB | Betreiberkürzel statt Gattung → „Unbekannte Gattung" |
+| `modelOf` beim ECE Zürich–München | Regelreihenfolge verdreht → falsches Fahrzeug |
+| `trainLabel` im Nahverkehr | Zugnummer statt Linie → „S 20318" |
+| `findCancellation` | Ausfall gar nicht bemerkt, keine Alternativen |
+| `trainPosition` | `sameTrain` benutzt, nie importiert |
+
+Der letzte ist der Grund, warum dort auch `LiveTracker` vorkommt, obwohl der
+keine reine Funktion ist: **ein fehlender Import fällt beim Laden des Moduls
+nicht auf**, sondern erst beim Aufruf — und diese Zeile lief nur, wenn man
+tatsächlich im Zug sass. `node --check` sieht so etwas nie. Nur ein Aufruf
+fängt es.
+
+Beide Tests sind gegen die echten Fehler gegengeprüft: dreht man die
+Regelreihenfolge zurück oder entfernt den Import wieder, schlagen sie fehl.
+Ein Test, der den Fehler nicht fängt, ist wertlos.
+
+## Wenn etwas nicht mehr geht
+
+`check.php` beantwortet zwei verschiedene Fragen, und die zweite ist die
+wichtigere.
+
+**Antwortet der Dienst jetzt?** Ein Aufruf je Quelle, live.
+
+**Wie lief es in den letzten 24 Stunden?** Das ist der eigentliche Punkt.
+Jeder Provider fällt bei jedem Fehler stillschweigend zurück — richtig so,
+eine kaputte Wagenreihung darf die Suche nicht mitreißen —, aber es hat
+einen Preis: bahn.expert hat seine Schnittstelle verschoben, und es ist
+**wochenlang niemandem aufgefallen**. Die Baureihe fehlte einfach.
+
+`Health.php` zählt deshalb jeden Aufruf nach draußen mit, nach Dienst und
+Stunde, und `check.php` zeigt es:
+
+```
+Verlauf: wagenreihung    11 Aufrufe, davon 9 fehlgeschlagen (82 %)
+                         - zuletzt: HTTP 500
+```
+
+Ab einem Viertel Fehlschlägen steht dort eine Warnung, ab der Hälfte ein
+Fehler. Aus „seit Wochen kaputt" wird „in zehn Sekunden sichtbar".
+
+Der Haken sitzt in `Http::request()` und ordnet den Dienst über den **Host**
+der URL zu. Das ist Absicht: an den Aufrufstellen zu haken hätte genau die
+Provider verpasst, um die es geht — Overpass baut sich seinen HTTP-Client
+selbst, und der nächste Provider tut es wieder.
+
+## Cache vorwärmen (optional, Cron)
+
+```bash
+php bin/warm_cache.php https://deine-domain.tld/
+```
+
+Zwei Antworten sind kalt sehr langsam und danach sehr lange gültig — ein
+schlechtes Verhältnis, wenn es immer dieselbe Person trifft:
+
+| | kalt | gültig |
+|---|---|---|
+| Baustellen | ~28 s | 1 Stunde |
+| Bahnhofsplan | 10–40 s | 7 Tage |
+
+Nachts vorgewärmt kostet beides nichts mehr, und es ist der freundlichere
+Umgang mit Overpass: eine ruhige Anfrage um vier statt einer im
+Berufsverkehr. Als Cron:
+
+```
+17 4 * * *  php /pfad/zu/bin/warm_cache.php https://deine-domain.tld/ >/dev/null 2>&1
+```
+
+Das Skript ruft die **eigene API über HTTP** auf, nicht die Bibliotheken
+direkt — die Zwischenspeicherung sitzt in den Handlern von `index.php`, und
+ein direkter Aufruf würde andere Cache-Schlüssel schreiben als die App später
+liest. Die Bahnhofsliste steht oben in der Datei; wer andere Knoten braucht,
+ändert sie.
 
 ## Anpassen
 
@@ -1777,8 +1980,16 @@ DB-Gattungsnamen nebeneinander; das Frontend zieht die Liste automatisch.
 **Cache-Zeiten:** `api/config.php` → `cache_ttl`. Standard: Orte 1 Tag,
 Verbindungen 5 Minuten.
 
-**Rate-Limit:** ebenfalls in `config.php`. Standard 60 Anfragen pro Minute und IP —
-schützt dich davor, dass dein Webspace bei den Betreibern als Scraper auffällt.
+**Rate-Limit:** ebenfalls in `config.php`. Gerechnet wird in **Punkten**, nicht
+in Anfragen: eine Verbindungssuche kostet 5, ein Zuglauf 2, die gecachte
+Abo-Liste gar nichts (`RATE_COST` in `api/index.php`). Standard 150 Punkte pro
+Minute und IP.
+
+Vorher zählte jede Anfrage gleich, und damit sperrte sich die App selbst aus:
+die Live-Verfolgung holt alle 30 Sekunden zwei Zugläufe, jede Kartenbewegung
+löst eine Positionsabfrage aus — das Kontingent war weg, bevor eine einzige
+Suche gelaufen war, und die nächste Suche bekam `429`. Nachgemessen: vierzig
+Aufrufe der Abo-Liste kosten jetzt nichts, einunddreissig Suchen greifen.
 
 ### DB-Enum-Werte verifizieren
 

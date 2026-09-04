@@ -245,7 +245,13 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
 
   // --- Badges ---
   const badges = el('div', 'badges');
-  const add = (text, cls) => badges.append(el('span', `badge ${cls}`, text));
+  // Gibt das Abzeichen zurück, damit der Aufrufer noch einen Titel
+  // dranhängen kann. Die meisten brauchen ihn nicht.
+  const add = (text, cls) => {
+    const n = el('span', `badge ${cls}`, text);
+    badges.append(n);
+    return n;
+  };
 
   // Selbst zusammengestellt, nicht so im Fahrplan: das gehört kenntlich
   // gemacht, sonst sucht man diese Verbindung im Ticketshop vergeblich.
@@ -321,6 +327,28 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
     add(`nur ${j.minTransferMin} min Umstieg`, 'badge--risky');
   } else if (j.transferRisk === 'tight') {
     add(`${j.minTransferMin} min Umstieg`, 'badge--tight');
+  }
+
+  // PÜNKTLICHKEIT AUF DIE KARTE. Die Statistik sammelt sich mit jeder
+  // Nutzung und stand bisher nur im aufgeklappten Detailbereich — also genau
+  // dort, wo man sie beim Vergleich zweier Verbindungen nicht sieht.
+  //
+  // Gezeigt wird der SCHWÄCHSTE Abschnitt, nicht der Durchschnitt: eine
+  // Verbindung ist so pünktlich wie ihr unpünktlichster Zug, und bei einem
+  // Umstieg entscheidet ohnehin er.
+  const hist = Object.values(j.history || {});
+  if (hist.length > 0) {
+    const schwächster = hist.reduce((a, b) => (a.rate ?? 1) <= (b.rate ?? 1) ? a : b);
+    const quote = Math.round((schwächster.rate ?? 0) * 100);
+    const eigen = hist.some((h) => h.source !== 'baseline');
+    const b = add(
+      `${quote} % pünktlich`,
+      quote >= 80 ? 'badge--ontime' : quote >= 60 ? 'badge--tight' : 'badge--risky'
+    );
+    b.title = eigen
+      ? `Aus eigenen Messungen: im Schnitt +${(schwächster.avg ?? 0).toFixed(1).replace('.', ',')} min.`
+      : 'Näherung aus der Jahresstatistik des Betreibers — noch keine eigenen Messungen.';
+    if (!eigen) b.classList.add('badge--rule');
   }
 
   // Auslastung: die höchste gemeldete Stufe über alle Abschnitte.
@@ -505,6 +533,14 @@ function renderTransferPlan(journey, leg, actions) {
   const prev = [...legs.slice(0, at)].reverse().find((l) => l.mode === 'train');
   if (!prev) return null;
 
+  // KEIN GLEISPLAN FÜR EINEN BUSBAHNHOF. Der Plan zeigt Bahnsteige aus
+  // OpenStreetMap — an einer Bushaltestelle gibt es die nicht, und was der
+  // Umkreis stattdessen einfängt, ist der nächstgelegene Bahnhof. Für den
+  // Fernbus am „München ZOB (Hackerbrücke)" kamen so die Gleise 5–36 des
+  // Hauptbahnhofs heraus, 600 m weiter: ein Plan, der eine ganz andere
+  // Station zeigt und nichts davon sagt.
+  if ([prev, leg].some((l) => typeOf(l).label === 'Bus')) return null;
+
   const from = prev.to?.platform || '';
   const to = leg.from?.platform || '';
   const lat = leg.from?.lat;
@@ -583,11 +619,6 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
   const a = find(fromTrack);
   const b = find(toTrack);
 
-  if (res?.samePlatform) {
-    return [el('p', 'xfer__note',
-      'Gleis gegenüber am selben Bahnsteig — nur die Seite wechseln.')];
-  }
-
   // Ganz ohne Bahnsteige gibt es nichts zu zeigen. Die drei Gründe dafür
   // verlangen Verschiedenes vom Leser: der Dienst war überlastet — gleich
   // nochmal aufklappen; der Bahnhof ist nicht kartiert — nichts zu machen.
@@ -610,7 +641,13 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
   // Bahnhof voraus — den gibt es fast nirgends, und die Meter- und
   // Minutenangaben waren dadurch genauer, als sie sein konnten. Wie weit die
   // beiden Bahnsteige auseinanderliegen, zeigt die Karte darunter.
-  if (a && b) {
+  if (res?.samePlatform) {
+    // Auch hier die Karte: „gegenüber" ist eine gute Nachricht, aber man
+    // will trotzdem sehen, wo im Bahnhof man steht — und an einem
+    // Bahnsteig mit vier Abschnitten ist „gegenüber" auch nicht überall
+    // dasselbe. Früher entfiel die Karte in genau diesem Fall.
+    line.textContent = 'Gleis gegenüber am selben Bahnsteig — nur die Seite wechseln.';
+  } else if (a && b) {
     line.textContent = 'Ankunftsgleis blau, Abfahrtsgleis grün — die Karte zeigt, '
       + 'wo beide liegen.';
   } else if (a || b) {

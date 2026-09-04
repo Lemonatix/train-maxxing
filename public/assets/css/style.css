@@ -2421,21 +2421,34 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   .xfer__map .map__viewport { height: 230px; }
 }
 
-/* --- Bahnsteige auf der Karte ----------------------------------------- */
+/* --- Gleise auf der Karte -------------------------------------------
+   Nur Punkte. Umrisse standen hier einmal als Linien; sie sagten, wo der
+   Bahnsteig liegt, nicht wo der Zug hält, und gingen mit den Gleisflächen
+   aus OSM zu einem Liniengewirr zusammen.
+   ------------------------------------------------------------------- */
 
-.map__platform {
-  fill: none;
+.map__track {
+  fill: var(--surface-card);
   stroke: var(--text-muted);
-  stroke-width: 7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.5;
+  stroke-width: 2;
+  opacity: 0.75;
 }
 
-.map__platform.is-from { stroke: var(--accent); opacity: 1; }
-.map__platform.is-to   { stroke: var(--green);  opacity: 1; }
+.map__track.is-from {
+  fill: var(--surface-card);
+  stroke: var(--accent);
+  stroke-width: 3.5;
+  opacity: 1;
+}
 
-.map__platform-tag {
+.map__track.is-to {
+  fill: var(--green);
+  stroke: var(--green);
+  stroke-width: 3.5;
+  opacity: 1;
+}
+
+.map__track-tag {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
@@ -2446,23 +2459,14 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   stroke-linejoin: round;
 }
 
-.map__platform-tag.is-from { fill: var(--accent); }
-.map__platform-tag.is-to   { fill: var(--green); }
+.map__track-tag.is-from { fill: var(--accent); }
+.map__track-tag.is-to   { fill: var(--green); }
 
 /* Was auf einer anderen Ebene liegt, bleibt sichtbar, tritt aber zurück —
    sonst verliert man beim Umschalten die Orientierung, weil das halbe Bild
    verschwindet. */
-.map__platform.is-other-level,
-.map__platform-tag.is-other-level { opacity: 0.16; }
-
-/* Ankunfts- und Abfahrtspunkt auf der Bahnsteigmitte. */
-.map__walk-end {
-  fill: var(--surface-card);
-  stroke-width: 3;
-}
-
-.map__walk-end.is-start { stroke: var(--accent); }
-.map__walk-end.is-end { stroke: var(--green); fill: var(--green); }
+.map__track.is-other-level,
+.map__track-tag.is-other-level { opacity: 0.16; }
 
 /* --- Ebenenumschalter ------------------------------------------------
    Unten links, gegenüber den Zoomknöpfen — wie in den Apps der Bahnen, wo

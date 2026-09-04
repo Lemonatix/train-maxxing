@@ -212,34 +212,57 @@ export class LiveTracker {
     this.loading = true;
     this.render();
 
-    try {
-      // Nur Abschnitte mit Kennung lassen sich nachladen. Die übrigen bleiben
-      // bei dem, was die Suche mitgeliefert hat - das ist bei DB-Fahrplänen
-      // immerhin die Ist-Zeit, siehe renderLeg().
-      const nachladbar = this.legs.filter((e) => e.jid);
-      const results = await Promise.allSettled(
-        nachladbar.map((entry) => api.trainDetails(entry.jid))
-      );
-      results.forEach((res, i) => {
-        if (res.status === 'fulfilled') nachladbar[i].data = res.value.train;
-      });
+    // Nur Abschnitte mit Kennung lassen sich nachladen. Die übrigen bleiben
+    // bei dem, was die Suche mitgeliefert hat - das ist bei DB-Fahrplänen
+    // immerhin die Ist-Zeit, siehe renderLeg().
+    const nachladbar = this.legs.filter((e) => e.jid);
+    let fehler = 0;
+    let ersterFehler = null;
 
-      // Alles fehlgeschlagen ist ein echter Fehler; einzelne Ausfälle nicht.
-      this.error = results.length > 0 && results.every((r) => r.status === 'rejected')
-        ? (results[0]?.reason?.message || 'Echtzeitdaten nicht verfügbar')
-        : null;
+    // JEDER ABSCHNITT ERSCHEINT, SOBALD ER DA IST.
+    //
+    // Vorher wurde auf ALLE Antworten gewartet und danach einmal gezeichnet.
+    // Die HAFAS-Abfrage je Zuglauf ist aber unterschiedlich schnell -
+    // nachgemessen 0,3 s für den einen Abschnitt und 6,8 s für den anderen.
+    // Man sah also sieben Sekunden lang "lädt …", obwohl die Hälfte längst
+    // dastand.
+    const offen = nachladbar.map((entry) => api.trainDetails(entry.jid).then(
+      (res) => {
+        entry.data = res.train;
+        if (!this.journey) return;
+        this.risk = this.assessRisk();
+        this.pushToMap();
+        this.render();
+      },
+      (err) => {
+        fehler++;
+        ersterFehler ??= err?.message;
+      }
+    ));
 
-      this.risk = this.assessRisk();
-      await this.loadOptions();
-      await this.loadMvgMessages();
-      this.updatedAt = new Date();
-    } catch (err) {
-      this.error = err.message;
-    } finally {
-      this.loading = false;
-      this.pushToMap();
-      this.render();
-    }
+    await Promise.allSettled(offen);
+    if (!this.journey) { this.loading = false; return; }
+
+    // Alles fehlgeschlagen ist ein echter Fehler; einzelne Ausfälle nicht.
+    this.error = nachladbar.length > 0 && fehler === nachladbar.length
+      ? (ersterFehler || 'Echtzeitdaten nicht verfügbar')
+      : null;
+
+    this.risk = this.assessRisk();
+    this.updatedAt = new Date();
+    this.loading = false;
+    this.pushToMap();
+    this.render();
+
+    // BEIWERK NACHREICHEN, ohne die Anzeige aufzuhalten.
+    //
+    // Die Alternativen sind eine vollständige Verbindungssuche, die
+    // MVG-Meldungen ein weiterer Aufruf. Beides hing bisher SERIELL hinter
+    // den Zugläufen und vor dem ersten Zeichnen - die Verspätung, wegen der
+    // man hinschaut, wartete also auf zwei Dinge, die sie gar nicht braucht.
+    // Jetzt laufen sie nebeneinander und zeichnen nach, wenn sie da sind.
+    Promise.allSettled([this.loadOptions(), this.loadMvgMessages()])
+      .then(() => { if (this.journey) this.render(); });
   }
 
   /**

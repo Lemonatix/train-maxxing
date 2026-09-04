@@ -688,23 +688,52 @@ final class OebbHafas
             ];
         }
 
-        // Meldungen (Bauarbeiten, Störungen) sind für die Anzeige nützlich.
+        // Meldungen (Bauarbeiten, Störungen) sind für die Anzeige nützlich —
+        // aber nur, wenn sie das auch wirklich sind.
         //
-        // AUSSTATTUNG IST KEINE MELDUNG: HAFAS mischt unter msgL auch die
-        // Zugattribute, und die kommen mit type 'A' - "Klimaanlage",
-        // "Fahrradmitnahme begrenzt möglich", "Fahrzeuggebundene
-        // Einstiegshilfe". Ungefiltert stand in der Live-Verfolgung jedes
-        // Regionalzuges genau das und sonst nichts, wo man Störungen
-        // erwartet. Was die HIM-Meldungen betrifft (himL), bleibt alles
-        // stehen - das sind die echten Meldungen.
+        // DREI SORTEN RAUSCHEN kamen hier ungefiltert durch:
+        //
+        //   type 'A'  — die AUSSTATTUNG des Zuges. "Klimaanlage",
+        //     "Rollstuhlstellplatz", "Fahrradmitnahme begrenzt möglich".
+        //     Unter jedem Regionalzug stand genau das und sonst nichts, wo
+        //     man Störungen erwartet.
+        //
+        //   code 'ZN' — der ZUGNAME. "Loreley", "Wilder Kaiser",
+        //     "ICE International". Als Meldung gelesen ergibt das keinen Sinn.
+        //
+        //   der volle HIM-TEXT — mehrere Absätze Behördendeutsch je Meldung,
+        //     und dieselbe Meldung hängt an jedem Abschnitt der Verbindung.
+        //     Davon bleibt jetzt der erste tragende Satz, gedeckelt auf
+        //     MAX_TEXT Zeichen; summarise() wirft dabei auch die Formelware
+        //     ("Wir bitten um Verständnis") weg.
+        //
+        // Was übrig bleibt, ist die Auskunft, wegen der man hinsieht.
         $messages = [];
         foreach (($jny['msgL'] ?? []) as $m) {
             $rem = ($common['remL'] ?? [])[$m['remX'] ?? -1] ?? null;
             $him = ($common['himL'] ?? [])[$m['himX'] ?? -1] ?? null;
-            if ($him === null && ($rem['type'] ?? '') === 'A') {
-                continue;
+
+            if ($him !== null) {
+                $kopf = Text::plain((string) ($him['head'] ?? ''));
+                $lang = Text::plain((string) ($him['text'] ?? ''));
+                // Die Kopfzeile ist meist schon der Kern. Ist sie leer oder
+                // selbst ellenlang, tritt der gekürzte Fliesstext an ihre Stelle.
+                $txt = $kopf !== '' && mb_strlen($kopf) <= self::MAX_TEXT
+                    ? $kopf
+                    : self::summarise($lang !== '' ? $lang : $kopf, '');
+            } else {
+                if ($rem === null) {
+                    continue;
+                }
+                if (($rem['type'] ?? '') === 'A') {
+                    continue;
+                }
+                if (strtoupper((string) ($rem['code'] ?? '')) === 'ZN') {
+                    continue;
+                }
+                $txt = self::summarise(Text::plain((string) ($rem['txtN'] ?? '')), '');
             }
-            $txt = Text::plain((string) ($him['head'] ?? $rem['txtN'] ?? ''));
+
             if ($txt !== '' && !in_array($txt, $messages, true)) {
                 $messages[] = $txt;
             }
@@ -725,7 +754,8 @@ final class OebbHafas
                 'hasRealtime' => $hasRealtime,
                 'cancelled'   => (bool) ($jny['isCncl'] ?? false),
                 'stops'       => $stops,
-                'messages'    => array_slice($messages, 0, 4),
+                // Drei reichen. Wer mehr braucht, findet sie beim Betreiber.
+                'messages'    => array_slice($messages, 0, 3),
             ],
         ];
     }

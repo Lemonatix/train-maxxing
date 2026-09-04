@@ -35,9 +35,15 @@ return [
 
     // Einfaches Rate-Limit pro IP, damit dein Webspace nicht als Scraper auffällt
     // und du nicht aus Versehen gegen deinen Hoster-Vertrag verstößt.
+    //
+    // Gerechnet wird in PUNKTEN, nicht in Anfragen: eine Verbindungssuche
+    // kostet 5, ein Zuglauf 2, die gecachte Abo-Liste gar nichts. Sonst
+    // sperrt sich die eigene App aus — die Live-Verfolgung allein holt alle
+    // 30 Sekunden zwei Zugläufe, und jede Kartenbewegung eine Zugposition.
+    // Die Tabelle steht in api/index.php unter RATE_COST.
     'rate_limit' => [
         'enabled'  => true,
-        'max'      => 60,   // Requests
+        'max'      => 150,  // Punkte
         'per_secs' => 60,   // pro Zeitfenster
     ],
 

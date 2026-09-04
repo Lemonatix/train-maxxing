@@ -170,13 +170,11 @@ final class Overpass
         // größte Teil der Antwort; ohne sie ist die Abfrage deutlich
         // kleiner, und der Gemeinschaftsdienst Overpass dankt es.
         //
-        // out geom statt out center: für den Plan brauchen wir den Umriss
-        // der Bahnsteige, nicht nur ihre Mittelpunkte.
-        // Und `out geom` statt `out geom tags`, weil Overpass im Tag-Modus
-        // bei Relationen NUR die Bounding-Box liefert, nicht die Mitglieder -
-        // die Bahnsteigflächen kämen dann ohne Umriss an. Der Aufschlag
-        // liegt bei etwa 15 % Antwortgröße (München Hbf: 357 statt
-        // 408 KB), und gecacht wird ohnehin sieben Tage.
+        // `out tags center` statt `out geom`: der Plan zeichnet je Gleis
+        // einen Punkt, Umrisse braucht davon niemand mehr. Das spart ein
+        // Drittel der Antwort (Ulm 84 → 57 KB, Frankfurt 89 → 55 KB) und
+        // räumt zugleich einen Sonderfall weg - siehe unten bei der
+        // Auswertung.
         //
         // EINFACHE ANFUEHRUNGSZEICHEN, und zwar zwingend: in einem
         // doppelt gequoteten String liest PHP `%1$d` als "%1" gefolgt von der
@@ -195,7 +193,7 @@ final class Overpass
             . 'relation(around:%1$d,%2$.6f,%3$.6f)["public_transport"="platform"];'
             . 'node(around:%1$d,%2$.6f,%3$.6f)["public_transport"="stop_position"];'
             . 'node(around:%1$d,%2$.6f,%3$.6f)["railway"="stop"];'
-            . ');out geom;',
+            . ');out tags center;',
             $r, $lat, $lon
         );
 
@@ -216,54 +214,20 @@ final class Overpass
 
             // Mittelpunkt und - bei Wegen - der Umriss. Der Umriss macht aus
             // der Punktwolke einen Bahnhofsplan.
-            $shape = [];
+            // NUR DER MITTELPUNKT. Der Plan zeichnet je Gleis einen Punkt,
+            // keine Flächen - Umrisse braucht davon niemand mehr. `out tags
+            // center` liefert ihn für Knoten, Wege UND Relationen gleicher-
+            // massen, und die Antwort ist dabei ein Drittel kleiner
+            // (nachgemessen Ulm 84 → 57 KB, Frankfurt 89 → 55 KB).
+            //
+            // Das räumt nebenbei einen Sonderfall weg: mit `out geom` tragen
+            // Relationen ihre Geometrie in den Mitgliedern, nicht am Objekt -
+            // wer das übersieht, verliert sie stumm. Genau das ist hier
+            // passiert und hat Friedrichshafen drei von vier Bahnsteigen
+            // gekostet. `center` gibt es an jedem Objekt.
             $plat = ['lat' => null, 'lon' => null];
             if (isset($e['lat'], $e['lon'])) {
                 $plat = ['lat' => (float) $e['lat'], 'lon' => (float) $e['lon']];
-            } elseif (isset($e['geometry'])) {
-                $sumLat = 0.0;
-                $sumLon = 0.0;
-                foreach ($e['geometry'] as $g) {
-                    $shape[] = [round((float) $g['lat'], 6), round((float) $g['lon'], 6)];
-                    $sumLat += (float) $g['lat'];
-                    $sumLon += (float) $g['lon'];
-                }
-                $n = max(1, count($e['geometry']));
-                $plat = ['lat' => $sumLat / $n, 'lon' => $sumLon / $n];
-            } elseif (isset($e['members'])) {
-                // RELATIONEN TRAGEN IHRE GEOMETRIE NICHT SELBST, sondern in
-                // den Mitgliedern - ein Multipolygon aus einem oder mehreren
-                // Wegen. Ohne diesen Zweig fielen sie stumm durch: weder
-                // lat/lon noch geometry noch center, also `continue`.
-                //
-                // Nachgemessen an Friedrichshafen Stadtbahnhof: OSM führt
-                // dort vier Bahnsteige, drei davon als Relation ("2;3",
-                // "4;5", "2b;3b"). Bei uns kam genau einer an - der eine, der
-                // als Weg erfasst ist. Genau so sah der Plan dann auch aus.
-                //
-                // Nur die äußeren Ringe: die inneren sind Löcher in der
-                // Fläche (Treppenschächte, Aufzüge) und hätten auf einem
-                // Umriss nichts zu suchen.
-                $sumLat = 0.0;
-                $sumLon = 0.0;
-                $n      = 0;
-                foreach ($e['members'] as $m) {
-                    if (($m['role'] ?? '') !== '' && ($m['role'] ?? '') !== 'outer') {
-                        continue;
-                    }
-                    foreach (($m['geometry'] ?? []) as $g) {
-                        if (!isset($g['lat'], $g['lon'])) {
-                            continue;
-                        }
-                        $shape[] = [round((float) $g['lat'], 6), round((float) $g['lon'], 6)];
-                        $sumLat += (float) $g['lat'];
-                        $sumLon += (float) $g['lon'];
-                        $n++;
-                    }
-                }
-                if ($n > 0) {
-                    $plat = ['lat' => $sumLat / $n, 'lon' => $sumLon / $n];
-                }
             } elseif (isset($e['center']['lat'], $e['center']['lon'])) {
                 $plat = ['lat' => (float) $e['center']['lat'], 'lon' => (float) $e['center']['lon']];
             }
@@ -386,18 +350,18 @@ final class Overpass
             }
             $seen[$dedupe] = true;
 
-            // Güte der Quelle, für die Auswahl weiter unten. Eine Fläche
-            // mit Umriss ergibt einen maßstäblichen Bahnsteig; ein Punkt
-            // auf dem Gleis nur eine Markierung ungefähr an der richtigen
-            // Stelle. Beides ist besser als nichts, aber nicht gleich gut.
-            $rank = $shape !== [] ? 0 : ($isStopNode ? 2 : 1);
+            // Güte der Quelle, für die Auswahl weiter unten. Eine
+            // Bahnsteigfläche (Weg oder Relation) ist die verlässlichere
+            // Angabe als ein einzelner Knoten, und ein Haltepunkt auf dem
+            // Gleis die schwächste - ihn benutzen wir ohnehin getrennt,
+            // nämlich als Punkt je Gleis (siehe $punkte).
+            $rank = ($e['type'] ?? '') !== 'node' ? 0 : ($isStopNode ? 2 : 1);
 
             $out[] = [
                 'tracks' => $tracks,
                 'name'   => trim((string) ($tags['name'] ?? '')),
                 'lat'    => $plat['lat'],
                 'lon'    => $plat['lon'],
-                'shape'  => $shape,
                 // Ebene als Zahl, wenn OSM eine nennt. Ein Wechsel zwischen
                 // Ebenen kostet deutlich mehr Zeit als die Luftlinie sagt.
                 'level'  => isset($tags['level']) && is_numeric($tags['level'])
@@ -510,9 +474,6 @@ final class Overpass
                     'name'   => '',
                     'lat'    => $a['lat'] + ($b['lat'] - $a['lat']) * $t,
                     'lon'    => $a['lon'] + ($b['lon'] - $a['lon']) * $t,
-                    // Kein Umriss: die Lage ist geschätzt, eine Fläche wäre
-                    // eine Genauigkeit, die es nicht gibt.
-                    'shape'  => [],
                     'level'  => $a['level'] !== null && $a['level'] === $b['level'] ? $a['level'] : null,
                     'estimated' => true,
                 ];
@@ -552,6 +513,20 @@ final class Overpass
             $istHalt = ($tags['public_transport'] ?? '') === 'stop_position'
                 || ($tags['railway'] ?? '') === 'stop';
             if (!$istHalt) {
+                continue;
+            }
+
+            // NUR BAHNHALTE ZÄHLEN. Ein Bussteig trägt eine Steignummer, die
+            // mit der Nummer des Bahnhofs nichts zu tun hat - und an einem
+            // grossen Busbahnhof kommt dieselbe Nummer leicht dreimal vor,
+            // einmal als Haltepunkt und zweimal als Steig.
+            //
+            // München-Pasing hat genau daran das Gleis 10 verloren: die "10"
+            // steht dort auf drei Bus-Haltepunkten, damit galt sie als
+            // Bahnhofsnummer und flog aus JEDEM Bahnsteig heraus - auch aus
+            // der Relation "9;10", die OSM sauber führt.
+            $istBahn = ($tags['railway'] ?? '') === 'stop' || ($tags['train'] ?? '') === 'yes';
+            if (!$istBahn) {
                 continue;
             }
             $ref = trim((string) ($tags['ref'] ?? ''));

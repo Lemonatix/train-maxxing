@@ -19,6 +19,15 @@ import { typeOf } from './data/trains.js';
 const NS = 'http://www.w3.org/2000/svg';
 
 /**
+ * Kleinster Ausschnitt des Bahnhofsplans, in Metern.
+ *
+ * Nur ein Notnagel für den Fall, dass Ankunfts- und Abfahrtsgleis fast
+ * denselben Punkt haben — sonst zöge die Karte bis an die Zoomgrenze heran.
+ * Ansonsten bestimmen die beiden Gleise den Ausschnitt selbst.
+ */
+const MIN_STATION_SPAN_M = 20;
+
+/**
  * Kachelquelle: OpenStreetMap, direkt.
  *
  * WARUM NICHT CARTO, wie vorher: deren Basemap-CDN verlangt inzwischen einen
@@ -639,23 +648,33 @@ export class RouteMap {
     // und die zwei, um die es geht, wären zwei Striche unter vielen. Sind sie
     // nicht bekannt, bleibt der Überblick über alle.
     if (this.mode === 'station') {
-      const st = this.station;
-      for (const p of [st?.from, st?.to]) {
-        if (p?.shape?.length) pts.push(...p.shape);
-        else if (p) pts.push([p.lat, p.lon]);
-      }
-      // Die Markierungen liegen auf den Gleisen, also etwas neben den
-      // Flächen — sie gehören mit ins Bild.
-      for (const g of [st?.fromTrack, st?.toTrack]) {
-        const q = (st?.trackPoints || {})[g];
-        if (Array.isArray(q) && q.length === 2) pts.push(q);
+      // Es gibt nur noch Punkte, also passen sie auch den Ausschnitt an:
+      // erst die beiden beteiligten Gleise, sonst alle.
+      const gleise = this.gleispunkte();
+      for (const gl of gleise) {
+        if (gl.rolle) pts.push(gl.pos);
       }
       if (pts.length < 2) {
-        for (const p of st?.platforms || []) {
-          if (p.shape?.length) pts.push(...p.shape);
-          else if (p.lat != null) pts.push([p.lat, p.lon]);
-        }
+        for (const gl of gleise) pts.push(gl.pos);
       }
+
+      // NAH HERAN. Der Ausschnitt richtet sich nach den beiden Gleisen, um
+      // die es geht — sonst nichts. Liegen sie nebeneinander, ist das ein
+      // sehr enger Ausschnitt, und genau der ist richtig: die Frage lautet
+      // „wo genau", nicht „wie sieht der Bahnhof aus".
+      //
+      // Die Untergrenze verhindert nur den Grenzfall, dass zwei Punkte
+      // praktisch aufeinanderliegen und die Karte bis auf den Zentimeter
+      // hineinzoomt. Zwanzig Meter reichen dafür.
+      if (pts.length >= 2) {
+        const mLat = pts.reduce((a, q) => a + q[0], 0) / pts.length;
+        const mLon = pts.reduce((a, q) => a + q[1], 0) / pts.length;
+        const dLat = MIN_STATION_SPAN_M / 2 / 111_320;
+        const dLon = MIN_STATION_SPAN_M / 2
+          / (111_320 * Math.max(0.2, Math.cos((mLat * Math.PI) / 180)));
+        pts.push([mLat - dLat, mLon - dLon], [mLat + dLat, mLon + dLon]);
+      }
+
       this.fitPoints(pts, 55);
       return;
     }
@@ -942,74 +961,102 @@ export class RouteMap {
     const zeigeEbene = this.level;
     const aufEbene = (lv) => zeigeEbene == null || lv == null || lv === zeigeEbene;
 
-    // --- Bahnsteige ---------------------------------------------------
-    for (const p of st.platforms || []) {
-      const pts = (p.shape?.length ? p.shape : [[p.lat, p.lon]]).map(toPx);
-      if (!pts.some(([x, y]) => x > -60 && y > -60 && x < w + 60 && y < h + 60)) continue;
+    for (const gl of this.gleispunkte()) {
+      const [x, y] = toPx(gl.pos);
+      if (x < -40 || y < -40 || x > w + 40 || y > h + 40) continue;
 
-      const rolle = p === st.from ? ' is-from' : p === st.to ? ' is-to' : '';
-      const blass = aufEbene(p.level) ? '' : ' is-other-level';
-      const shape = document.createElementNS(NS, pts.length > 1 ? 'path' : 'circle');
-      if (pts.length > 1) {
-        shape.setAttribute('d', pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' '));
-      } else {
-        shape.setAttribute('cx', pts[0][0].toFixed(1));
-        shape.setAttribute('cy', pts[0][1].toFixed(1));
-        shape.setAttribute('r', '4');
-      }
-      shape.setAttribute('class', 'map__platform' + rolle + blass);
+      const rolle = gl.rolle ? ' ' + gl.rolle : '';
+      const blass = aufEbene(gl.level) ? '' : ' is-other-level';
+
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('cx', x.toFixed(1));
+      c.setAttribute('cy', y.toFixed(1));
+      c.setAttribute('r', gl.rolle ? '7' : '4');
+      c.setAttribute('class', 'map__track' + rolle + blass);
       const t = document.createElementNS(NS, 'title');
-      t.textContent = `Gleis ${(p.tracks || []).join('/')}`
-        + (p.level != null ? ` · Ebene ${levelName(p.level)}` : '');
-      shape.append(t);
-      g.append(shape);
+      t.textContent = (gl.rolle === 'is-from' ? 'Ankunftsgleis — ' : gl.rolle === 'is-to' ? 'Abfahrtsgleis — ' : '')
+        + `Gleis ${gl.label}`
+        + (gl.level != null ? ` · Ebene ${levelName(gl.level)}` : '');
+      c.append(t);
+      g.append(c);
 
-      // Gleisnummer dort, wo der Bahnsteig ins Bild kommt.
-      const sicht = pts.find(([x, y]) => x > 12 && y > 12 && x < w - 12 && y < h - 12);
-      if (sicht && (rolle !== '' || aufEbene(p.level))) {
+      // Beschriftung nur, wo sie auch lesbar landet.
+      if (x > 14 && y > 20 && x < w - 14 && y < h - 6 && (gl.rolle || aufEbene(gl.level))) {
         const lbl = document.createElementNS(NS, 'text');
-        lbl.setAttribute('x', sicht[0].toFixed(1));
-        lbl.setAttribute('y', (sicht[1] - 9).toFixed(1));
+        lbl.setAttribute('x', x.toFixed(1));
+        lbl.setAttribute('y', (y - 11).toFixed(1));
         lbl.setAttribute('text-anchor', 'middle');
-        lbl.setAttribute('class', 'map__platform-tag' + rolle + blass);
-        lbl.textContent = (p.tracks || []).join('/');
+        lbl.setAttribute('class', 'map__track-tag' + rolle + blass);
+        lbl.textContent = gl.label;
         g.append(lbl);
       }
     }
 
-    // --- Ankunft und Abfahrt markieren ---------------------------------
-    //
-    // AUF DEM GLEIS, nicht auf dem Bahnsteig. Wo OSM einen Haltepunkt kennt,
-    // sitzt die Markierung dort: ein Bahnsteig zwischen Gleis 2 und 3 hat
-    // seinen Schwerpunkt genau zwischen beiden, und die Markierungen für
-    // „Gleis 2" und „Gleis 3" lägen übereinander. An Bahnhöfen mit
-    // Bahnsteigabschnitten — Ulm führt „4 Nord" und „4 Süd" — ist die Fläche
-    // zu „Gleis 4" ohnehin willkürlich die eine oder die andere Hälfte.
-    //
-    // Fehlt der Haltepunkt, bleibt der Schwerpunkt der Fläche.
+    svg.append(g);
+  }
+
+  /**
+   * Ein Punkt je Gleis — mehr zeigt der Bahnhofsplan nicht.
+   *
+   * NUR PUNKTE, KEINE FLÄCHEN. Hier wurden einmal die Bahnsteigumrisse als
+   * Linien gezeichnet. Das sah nach mehr Auskunft aus, als darin steckte: ein
+   * Umriss sagt, wo der Bahnsteig liegt, nicht wo der Zug hält — und bei
+   * einem Bahnsteig zwischen zwei Gleisen ist er für beide derselbe. Dazu
+   * kamen die Gleise selbst ins Bild, sobald OSM sie als Fläche führt, und
+   * am Ende war der Plan ein Liniengewirr, in dem die zwei Punkte untergingen,
+   * um die es geht.
+   *
+   * Die Lage kommt, wo OSM sie kennt, vom HALTEPUNKT auf dem Gleis; sonst
+   * vom Schwerpunkt der Bahnsteigfläche. Zwei Gleise ohne eigenen Haltepunkt
+   * fallen dabei auf denselben Punkt — dann steht dort eben "2/3", und das
+   * ist ehrlicher als zwei Punkte, die Genauigkeit vortäuschen.
+   *
+   * @returns {Array<{pos:[number,number], label:string, level:?number, rolle:string}>}
+   */
+  gleispunkte() {
+    const st = this.station;
+    if (!st) return [];
+
     const punkte = st.trackPoints || {};
-    for (const [p, gleis, cls, txt] of [
-      [st.from, st.fromTrack, 'is-start', 'Ankunftsgleis'],
-      [st.to, st.toTrack, 'is-end', 'Abfahrtsgleis'],
-    ]) {
-      const punkt = punkte[gleis];
-      const pos = Array.isArray(punkt) && punkt.length === 2
-        ? punkt
-        : (p && p.lat != null && p.lon != null ? [p.lat, p.lon] : null);
-      if (!pos) continue;
-      const [x, y] = toPx(pos);
-      const c = document.createElementNS(NS, 'circle');
-      c.setAttribute('cx', x.toFixed(1));
-      c.setAttribute('cy', y.toFixed(1));
-      c.setAttribute('r', '6');
-      c.setAttribute('class', 'map__walk-end ' + cls);
-      const t = document.createElementNS(NS, 'title');
-      t.textContent = `${txt} — Gleis ${gleis || (p?.tracks || []).join('/') || '?'}`;
-      c.append(t);
-      g.append(c);
+    const nachOrt = new Map();
+
+    const eintragen = (pos, gleis, level, rolle) => {
+      if (!Array.isArray(pos) || pos.length !== 2 || pos[0] == null || pos[1] == null) return;
+      const key = pos[0].toFixed(6) + ',' + pos[1].toFixed(6);
+      const vorhanden = nachOrt.get(key);
+      if (vorhanden) {
+        if (gleis && !vorhanden.gleise.includes(gleis)) vorhanden.gleise.push(gleis);
+        vorhanden.rolle = vorhanden.rolle || rolle;
+        return;
+      }
+      nachOrt.set(key, { pos, gleise: gleis ? [gleis] : [], level, rolle });
+    };
+
+    for (const p of st.platforms || []) {
+      const gleise = (p.tracks || []).length ? p.tracks : [''];
+      for (const gleis of gleise) {
+        const rolle = String(gleis) === String(st.fromTrack) ? 'is-from'
+          : String(gleis) === String(st.toTrack) ? 'is-to'
+          : '';
+        eintragen(punkte[gleis] || [p.lat, p.lon], String(gleis), p.level ?? null, rolle);
+      }
     }
 
-    svg.append(g);
+    // Haltepunkte, zu denen wir keine Bahnsteigfläche haben, gehören trotzdem
+    // ins Bild - an kleinen Bahnhöfen sind sie oft alles, was OSM kennt.
+    for (const [gleis, pos] of Object.entries(punkte)) {
+      const rolle = gleis === String(st.fromTrack) ? 'is-from'
+        : gleis === String(st.toTrack) ? 'is-to'
+        : '';
+      eintragen(pos, gleis, null, rolle);
+    }
+
+    return [...nachOrt.values()].map((e) => ({
+      pos: e.pos,
+      label: e.gleise.filter(Boolean).join('/') || '?',
+      level: e.level,
+      rolle: e.rolle,
+    }));
   }
 
   /**

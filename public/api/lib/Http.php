@@ -104,6 +104,12 @@ class Http
         // räumt der Garbage Collector auf.
         unset($ch);
 
+        // Jeden Aufruf nach draußen verbuchen - siehe Health.php. Der Haken
+        // sitzt hier und nicht an den Aufrufstellen, weil er sonst genau die
+        // Provider verpasst, die sich ihren Client selbst bauen.
+        Health::note($url, $raw !== false && $status >= 200 && $status < 400,
+            $err !== '' ? $err : ('HTTP ' . $status));
+
         if ($raw === false) {
             return $this->fail($err !== '' ? $err : 'Unbekannter Netzwerkfehler', $status);
         }
@@ -201,6 +207,9 @@ class Http
                 $code   = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
                 $err    = curl_error($ch);
                 curl_multi_remove_handle($multi, $ch);
+
+                Health::note((string) $teil[$k], $raw !== null && $raw !== false
+                    && $code >= 200 && $code < 300, $err !== '' ? $err : ('HTTP ' . $code));
 
                 if ($raw === null || $raw === false || $code < 200 || $code >= 300) {
                     $out[$k] = $this->fail($err !== '' ? $err : 'HTTP ' . $code, $code);
