@@ -712,7 +712,10 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
     // der Plan wird an JEDEM Umstieg angeboten, und die Gleisnummer steht
     // im Fahrplan längst nicht immer.
     if ($from === '' || $to === '') {
-        ok(['platforms' => $station['platforms']]);
+        ok([
+            'platforms'   => $station['platforms'],
+            'trackPoints' => $station['trackPoints'] ?? [],
+        ]);
     }
 
     $find = static function (array $platforms, string $track): ?array {
@@ -739,6 +742,10 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
     // läuft, sieht man auf der Karte selbst.
     ok([
         'platforms' => $station['platforms'],
+        // Der Punkt auf dem Gleis, wo OSM einen Haltepunkt kennt. Er ist die
+        // bessere Markierung als der Schwerpunkt der Bahnsteigfläche - siehe
+        // Overpass::stationData().
+        'trackPoints' => $station['trackPoints'] ?? [],
         // Damit die Anzeige "gleicher Bahnsteig" von "andere Seite der Halle"
         // unterscheiden kann.
         'samePlatform' => $a !== null && $a === $b,
@@ -753,7 +760,7 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
  * Mittelpunkte melden. Bahnsteige bewegen sich nicht, deshalb eine Woche -
  * das schont den Gemeinschaftsdienst Overpass.
  *
- * @return ?array{platforms:array}
+ * @return ?array{platforms:array,trackPoints:array}
  */
 function stationData(Http $http, array $config, Cache $cache, float $lat, float $lon, ?string &$error = null): ?array
 {
@@ -936,17 +943,27 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     // geliefert hat, merkt sich Fleet unter der Zugnummer und füllt damit
     // auch die Abschnitte, für die gerade nicht gefragt werden konnte: die
     // vierte Etappe, die Rückfahrt, die Suche für nächsten Dienstag.
-    if (($config['providers']['wagenreihung']['enabled'] ?? false) === true) {
-        $cs = new CoachSequence($http, $config['providers']['wagenreihung'], $cache);
+    $fleet = new Fleet((string) $config['cache_dir']);
+    $lernt = $fleet->isAvailable();
+
+    // Erst das Gelernte einsetzen - was hier schon steht, muss gar nicht
+    // erst abgefragt werden.
+    if ($lernt) {
         foreach ($journeys as $i => $j) {
-            $journeys[$i] = $cs->enrich($j, $date);
+            $journeys[$i] = $fleet->fill($j);
         }
     }
 
-    $fleet = new Fleet((string) $config['cache_dir']);
-    if ($fleet->isAvailable()) {
-        foreach ($journeys as $i => $j) {
-            $journeys[$i] = $fleet->enrich($j);
+    if (($config['providers']['wagenreihung']['enabled'] ?? false) === true) {
+        $cs = new CoachSequence($http, $config['providers']['wagenreihung'], $cache);
+        // Alle Verbindungen auf einmal: die Abfragen laufen gleichzeitig und
+        // doppelte Zuege werden nur einmal geholt - siehe enrichAll().
+        $journeys = $cs->enrichAll($journeys, $date);
+    }
+
+    if ($lernt) {
+        foreach ($journeys as $j) {
+            $fleet->learn($j);
         }
         $fleet->flush();
     }

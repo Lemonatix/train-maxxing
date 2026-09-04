@@ -33,6 +33,14 @@ final class Fleet
     /** Ältere Beobachtungen als das gelten nicht mehr. */
     private const MAX_AGE_DAYS = 90;
 
+    /**
+     * Bis zu diesem Alter reicht das Gelernte, ohne noch einmal nachzufragen.
+     * Danach wird wieder nachgeschlagen - Umläufe wechseln zum Fahrplan-
+     * wechsel, und zwei Wochen sind ein guter Kompromiss zwischen Frische
+     * und Rücksicht auf die Quelle.
+     */
+    public const TRUST_DAYS = 14;
+
     /** Mehr Zugnummern je Gattung behalten wir nicht. */
     private const MAX_ENTRIES = 4000;
 
@@ -101,27 +109,15 @@ final class Fleet
     }
 
     /**
-     * Ergänzt die Abschnitte einer Verbindung um bereits Gelerntes und
-     * merkt sich zugleich, was die Wagenreihung frisch geliefert hat.
+     * Füllt die Abschnitte mit dem, was wir schon wissen.
      *
-     * Reihenfolge ist Absicht: erst einsammeln, dann auffüllen. Ein Zug, der
-     * in dieser Verbindung zweimal vorkommt (Flügelung), profitiert so schon
-     * beim ersten Aufruf von sich selbst.
+     * LÄUFT VOR DER WAGENREIHUNG, nicht danach. Das ist der Punkt: was hier
+     * steht, muss nicht noch einmal abgefragt werden. Bei sechs Verbindungen
+     * mit je zwei Zügen spart das gut ein Dutzend Anfragen an einen privat
+     * betriebenen Dienst - und ebenso viele Sekunden Ladezeit.
      */
-    public function enrich(array $journey): array
+    public function fill(array $journey): array
     {
-        foreach (($journey['legs'] ?? []) as $leg) {
-            if (($leg['mode'] ?? '') !== 'train' || ($leg['series'] ?? '') === '') {
-                continue;
-            }
-            $this->record(
-                (string) ($leg['category'] ?? ''),
-                (string) ($leg['trainNumber'] ?? ''),
-                (string) $leg['series'],
-                (string) ($leg['seriesName'] ?? '')
-            );
-        }
-
         foreach (($journey['legs'] ?? []) as $i => $leg) {
             if (($leg['mode'] ?? '') !== 'train' || ($leg['series'] ?? '') !== '') {
                 continue;
@@ -140,6 +136,26 @@ final class Fleet
         }
 
         return $journey;
+    }
+
+    /** Merkt sich, was die Wagenreihung frisch geliefert hat. */
+    public function learn(array $journey): void
+    {
+        foreach (($journey['legs'] ?? []) as $leg) {
+            if (($leg['mode'] ?? '') !== 'train' || ($leg['series'] ?? '') === '') {
+                continue;
+            }
+            // Nur echte Beobachtungen, nicht das eigene Echo.
+            if (isset($leg['seriesLearned'])) {
+                continue;
+            }
+            $this->record(
+                (string) ($leg['category'] ?? ''),
+                (string) ($leg['trainNumber'] ?? ''),
+                (string) $leg['series'],
+                (string) ($leg['seriesName'] ?? '')
+            );
+        }
     }
 
     /** Schreibt aus, was sich geändert hat. */

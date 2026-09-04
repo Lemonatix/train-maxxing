@@ -133,7 +133,7 @@ final class Overpass
      * liegen. Wie man dazwischen läuft, sagt er bewusst nicht - siehe die
      * Anmerkung zur Abfrage weiter unten.
      *
-     * @return array{ok:bool,error:?string,data:array{platforms:array}}
+     * @return array{ok:bool,error:?string,data:array{platforms:array,trackPoints:array}}
      */
     public function stationData(float $lat, float $lon): array
     {
@@ -206,8 +206,9 @@ final class Overpass
 
         $elements = $antwort['elements'] ?? [];
 
-        $out  = [];
-        $seen = [];
+        $out    = [];
+        $seen   = [];
+        $punkte = [];   // Gleisnummer -> [lat, lon] aus den Haltepunkten
         $stationsnummern = self::stationCodes($elements);
 
         foreach ($elements as $e) {
@@ -229,6 +230,40 @@ final class Overpass
                 }
                 $n = max(1, count($e['geometry']));
                 $plat = ['lat' => $sumLat / $n, 'lon' => $sumLon / $n];
+            } elseif (isset($e['members'])) {
+                // RELATIONEN TRAGEN IHRE GEOMETRIE NICHT SELBST, sondern in
+                // den Mitgliedern - ein Multipolygon aus einem oder mehreren
+                // Wegen. Ohne diesen Zweig fielen sie stumm durch: weder
+                // lat/lon noch geometry noch center, also `continue`.
+                //
+                // Nachgemessen an Friedrichshafen Stadtbahnhof: OSM führt
+                // dort vier Bahnsteige, drei davon als Relation ("2;3",
+                // "4;5", "2b;3b"). Bei uns kam genau einer an - der eine, der
+                // als Weg erfasst ist. Genau so sah der Plan dann auch aus.
+                //
+                // Nur die äußeren Ringe: die inneren sind Löcher in der
+                // Fläche (Treppenschächte, Aufzüge) und hätten auf einem
+                // Umriss nichts zu suchen.
+                $sumLat = 0.0;
+                $sumLon = 0.0;
+                $n      = 0;
+                foreach ($e['members'] as $m) {
+                    if (($m['role'] ?? '') !== '' && ($m['role'] ?? '') !== 'outer') {
+                        continue;
+                    }
+                    foreach (($m['geometry'] ?? []) as $g) {
+                        if (!isset($g['lat'], $g['lon'])) {
+                            continue;
+                        }
+                        $shape[] = [round((float) $g['lat'], 6), round((float) $g['lon'], 6)];
+                        $sumLat += (float) $g['lat'];
+                        $sumLon += (float) $g['lon'];
+                        $n++;
+                    }
+                }
+                if ($n > 0) {
+                    $plat = ['lat' => $sumLat / $n, 'lon' => $sumLon / $n];
+                }
             } elseif (isset($e['center']['lat'], $e['center']['lon'])) {
                 $plat = ['lat' => (float) $e['center']['lat'], 'lon' => (float) $e['center']['lon']];
             }
@@ -264,7 +299,10 @@ final class Overpass
             }
             $tracks = $ref === ''
                 ? []
-                : array_values(array_filter(array_map('trim', preg_split('/[;,]/', $ref))));
+                : array_values(array_filter(array_map(
+                    [self::class, 'cleanRef'],
+                    preg_split('/[;,]/', $ref)
+                )));
 
             // Vierstellige "Gleisnummern" gibt es nicht, und was an mehreren
             // Haltepunkten desselben Bahnhofs gleich lautet, ist die Nummer
@@ -325,6 +363,22 @@ final class Overpass
                 }
             }
 
+            // DER PUNKT AUF DEM GLEIS. Ein Haltepunkt liegt auf dem Gleis
+            // selbst, eine Bahnsteigfläche daneben - und bei einem Bahnsteig
+            // zwischen zwei Gleisen liegt ihr Schwerpunkt genau zwischen
+            // beiden. Für die Frage "wo hält mein Zug" ist der Punkt deshalb
+            // die bessere Auskunft, und an Bahnhöfen mit Bahnsteigabschnitten
+            // ("4 Nord", "4 Süd") sogar die einzig brauchbare: die Fläche zu
+            // "Gleis 4" ist dort willkürlich die eine oder die andere Hälfte.
+            //
+            // Gesammelt wird getrennt von den Flächen, weil preferBestSource()
+            // die Haltepunkte gleich verwirft, sobald es eine Fläche gibt.
+            if ($isStopNode) {
+                foreach (array_merge($tracks, array_keys($alt)) as $t) {
+                    $punkte[(string) $t] ??= [$plat['lat'], $plat['lon']];
+                }
+            }
+
             // Manche Bahnsteige tragen beide Tags und kämen sonst doppelt.
             $dedupe = implode('/', $tracks) . '@' . round($plat['lat'], 4) . ',' . round($plat['lon'], 4);
             if (isset($seen[$dedupe])) {
@@ -360,8 +414,32 @@ final class Overpass
         return [
             'ok'    => true,
             'error' => null,
-            'data'  => ['platforms' => $platforms],
+            'data'  => ['platforms' => $platforms, 'trackPoints' => $punkte],
         ];
+    }
+
+    /**
+     * Eine Gleisangabe aus OSM auf die nackte Nummer bringen.
+     *
+     * Manche Bahnhöfe schreiben das Wort mit hinein - `ref="Gleis 24"` statt
+     * `ref="24"`. Der Fahrplan sagt aber schlicht "24", und die Suche ging
+     * deshalb leer aus, während im Plan "Gleis Gleis 24" stand. Aufgefallen
+     * ist es an einem Umstieg mit den Gleisen 21-24.
+     *
+     * Bewusst nur der Wortkopf, und nur wenn danach eine ZIFFER folgt: was
+     * danach kommt, bleibt unangetastet ("4 Nord", "1a" behalten ihre Form),
+     * und "Steig F" bleibt "Steig F". Mannheim führt seine Bussteige so, und
+     * ein nacktes "F" wäre von einem Gleis nicht mehr zu unterscheiden.
+     */
+    private static function cleanRef(string $ref): string
+    {
+        $ref = trim($ref);
+        $ohne = preg_replace(
+            '/^(gleis|gl\.?|bahnsteig|bstg\.?|steig|track|voie|binario)\s+(?=\d)/iu',
+            '',
+            $ref
+        );
+        return trim($ohne ?? $ref);
     }
 
     /**
@@ -411,22 +489,22 @@ final class Overpass
         $nummern = array_keys($nachNummer);
         $neu = [];
         for ($i = 0, $n = count($nummern) - 1; $i < $n; $i++) {
-            $luecke = $nummern[$i + 1] - $nummern[$i] - 1;
-            if ($luecke < 1 || $luecke > self::MAX_GAP) {
+            $lücke = $nummern[$i + 1] - $nummern[$i] - 1;
+            if ($lücke < 1 || $lücke > self::MAX_GAP) {
                 continue;
             }
 
             $a = $nachNummer[$nummern[$i]];
             $b = $nachNummer[$nummern[$i + 1]];
             $abstand = self::metres([$a['lat'], $a['lon']], [$b['lat'], $b['lon']]);
-            if ($abstand > ($luecke + 1) * self::TRACK_SPACING_M) {
+            if ($abstand > ($lücke + 1) * self::TRACK_SPACING_M) {
                 continue;   // zu weit auseinander - das ist ein anderer Bahnhofsteil
             }
 
             // Linear teilen: bei einer Lücke von zwei liegen die beiden
             // fehlenden Gleise auf einem und zwei Dritteln der Strecke.
-            for ($k = 1; $k <= $luecke; $k++) {
-                $t = $k / ($luecke + 1);
+            for ($k = 1; $k <= $lücke; $k++) {
+                $t = $k / ($lücke + 1);
                 $neu[] = [
                     'tracks' => [(string) ($nummern[$i] + $k)],
                     'name'   => '',
@@ -468,7 +546,7 @@ final class Overpass
      */
     private static function stationCodes(array $elements): array
     {
-        $zaehler = [];
+        $zähler = [];
         foreach ($elements as $e) {
             $tags = $e['tags'] ?? [];
             $istHalt = ($tags['public_transport'] ?? '') === 'stop_position'
@@ -483,12 +561,12 @@ final class Overpass
             foreach (preg_split('/[;,]/', $ref) as $teil) {
                 $teil = trim($teil);
                 if ($teil !== '') {
-                    $zaehler[$teil] = ($zaehler[$teil] ?? 0) + 1;
+                    $zähler[$teil] = ($zähler[$teil] ?? 0) + 1;
                 }
             }
         }
 
-        return array_filter($zaehler, static fn(int $n): bool => $n >= 3);
+        return array_filter($zähler, static fn(int $n): bool => $n >= 3);
     }
 
     /**

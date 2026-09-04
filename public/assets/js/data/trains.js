@@ -146,6 +146,17 @@ export const FLEET_RULES = [
     between: [/z(ü|ue)rich/i, /m(ü|ue)nchen/i],
     note: 'Zürich–München fährt seit der Elektrifizierung über Lindau mit ETR 610.',
   },
+  {
+    // GÄUBAHN. Der einzige Weg, das hier zu erfahren: die Wagenreihung
+    // liefert für diese Züge nichts (nachgeprüft am IC 187 und IC 2383 —
+    // die Antwort kommt, nur ohne Baureihe, weil kein DB-Fahrzeug in RIS
+    // steht). Vorher fuhr dort der Stadler KISS; ändert sich das wieder,
+    // ist es diese eine Zeile.
+    model: 'ic2',
+    categories: ['IC'],
+    between: [/stuttgart/i, /(z(ü|ue)rich|singen|schaffhausen)/i],
+    note: 'Auf der Gäubahn Stuttgart–Zürich verkehrt der IC 2.',
+  },
 ];
 
 /**

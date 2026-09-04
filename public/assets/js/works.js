@@ -104,11 +104,43 @@ export function initWorks(mount) {
     }
   };
 
-  refresh();
-  const timer = setInterval(refresh, REFRESH_MS);
+  // NICHT BEIM SEITENAUFBAU LADEN.
+  //
+  // Die Baustellenabfrage ist die langsamste der ganzen App - das
+  // Verzeichnis der DB InfraGO umfasst mehrere Megabyte, kalt gemessen 28
+  // Sekunden. Browser halten je Host nur etwa sechs Verbindungen offen, und
+  // die Seite feuert beim Aufbau schon Katalog, Kurse, Störungsticker,
+  // Live-Züge und die eigentliche Suche ab. Die Baustellen belegten davon
+  // einen Platz für eine halbe Minute - und die Trefferliste wartete
+  // dahinter, obwohl ihre eigene Antwort längst da war.
+  //
+  // Also erst, wenn der Kasten überhaupt ins Bild kommt. Er sitzt ganz unten;
+  // bis dahin ist die Suche lange fertig. Kennt der Browser keinen
+  // IntersectionObserver, greift ein Zeitgeber - Hauptsache nicht sofort.
+  let gestartet = false;
+  const starten = () => {
+    if (gestartet) return;
+    gestartet = true;
+    beobachter?.disconnect();
+    clearTimeout(später);
+    refresh();
+  };
+
+  const beobachter = 'IntersectionObserver' in window
+    ? new IntersectionObserver((sichtbare) => {
+        if (sichtbare.some((e) => e.isIntersecting)) starten();
+      }, { rootMargin: '400px' })
+    : null;
+  beobachter?.observe(mount);
+
+  const später = setTimeout(starten, 6000);
+
+  const timer = setInterval(() => { if (gestartet) refresh(); }, REFRESH_MS);
 
   return () => {
     controller?.abort();
+    beobachter?.disconnect();
+    clearTimeout(später);
     clearInterval(timer);
     mount.hidden = true;
   };

@@ -1744,12 +1744,59 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   background: var(--amber-soft);
 }
 
-.live__risk--missed { border-left-color: var(--rose); background: var(--rose-soft); }
+/* Ein ausgefallener Zug ist keine Verspätung, sondern das Ende der
+   Verbindung - deshalb dieselbe kräftige Farbe wie beim verpassten
+   Anschluss, und in der Trefferliste ganz vorn. */
+.badge--cancelled {
+  border-color: var(--rose);
+  background: var(--rose-soft);
+  color: var(--rose);
+  font-weight: 600;
+}
+
+.leg--cancelled { opacity: 0.75; }
+
+.leg__cancelled {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--rose);
+  margin-bottom: 0.2rem;
+}
+
+.live__risk--missed,
+.live__risk--cancelled { border-left-color: var(--rose); background: var(--rose-soft); }
 
 .live__risk-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem; }
 .live__risk-head strong { font-family: var(--font-mono); font-size: 0.8rem; }
 .live__risk--risky .live__risk-head strong { color: var(--amber); }
-.live__risk--missed .live__risk-head strong { color: var(--rose); }
+.live__risk--missed .live__risk-head strong,
+.live__risk--cancelled .live__risk-head strong { color: var(--rose); }
+
+/* Meldungen füllen höchstens vier Zeilen. Was nicht hineinpasst, endet mit
+   "…"; der ganze Text hängt am Titel und im aufgeklappten Kasten. */
+.live__leg-msg {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.live__msgs { margin: 0.2rem 0 0; }
+
+.live__msgs > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  padding: 0.1rem 0;
+}
+
+.live__msgs > summary::-webkit-details-marker { display: none; }
+.live__msgs > summary::before { content: '▸ '; }
+.live__msgs[open] > summary::before { content: '▾ '; }
+.live__msgs > summary:hover { color: var(--accent); }
 .live__risk-text { font-size: 0.8rem; color: var(--text-dim); }
 
 .live__risk-note {

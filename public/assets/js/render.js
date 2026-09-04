@@ -290,6 +290,18 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
     add(walks.length === 1 ? 'mit Fußweg' : `${walks.length} Fußwege`, 'badge--walk');
   }
 
+  // AUSFALL ZUERST. Ein ausgefallener Zug stand in der Liste bisher gar
+  // nicht drin — die Verbindung sah aus wie jede andere, und man erfuhr es
+  // erst am Bahnsteig. Er gehört an die erste Stelle der Zeile, noch vor
+  // Verspätung und knappem Umstieg: die sind dann ohnehin gegenstandslos.
+  const ausfaelle = (j.legs || []).filter((l) => l.mode === 'train' && l.cancelled);
+  if (ausfaelle.length > 0) {
+    add(
+      ausfaelle.length === 1 ? `${trainLabel(ausfaelle[0])} fällt aus` : `${ausfaelle.length} Züge fallen aus`,
+      'badge--cancelled'
+    );
+  }
+
   // Verspätung, sofern die DB Echtzeitdaten geliefert hat.
   if (typeof j.delay === 'number' && j.delay > 0) {
     add(`+${j.delay} min`, j.delay >= 5 ? 'badge--risky' : 'badge--tight');
@@ -649,7 +661,17 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
     if (!mapEl.isConnected) return;
     const map = new RouteMap(mapEl, { mode: 'station' });
     map.build();
-    map.setStation({ platforms, from: a, to: b });
+    map.setStation({
+      platforms,
+      from: a,
+      to: b,
+      // Die Gleisnummern gehen mit: die Markierung soll auf dem GLEIS sitzen,
+      // nicht in der Mitte des Bahnsteigs. Bei einem Bahnsteig zwischen zwei
+      // Gleisen läge sie sonst für beide an derselben Stelle.
+      fromTrack: String(fromTrack || ''),
+      toTrack: String(toTrack || ''),
+      trackPoints: res?.trackPoints || {},
+    });
   });
 
   out.push(el('p', 'xfer__source',
@@ -703,6 +725,10 @@ function renderLegs(journey, entry, state, actions) {
 
     const type = typeOf(leg);
     const row = el('div', 'leg');
+    if (leg.cancelled) {
+      row.classList.add('leg--cancelled');
+      row.append(el('div', 'leg__cancelled', 'Dieser Zug fällt aus.'));
+    }
 
     // Umsteigezeit vor diesem Zug, wenn sie knapp ist.
     const knapp = leg.transferRisk && leg.transferRisk !== 'ok';

@@ -302,6 +302,34 @@ Bahnsteige, um die es geht, zwei Striche unter achtundzwanzig. Sind die
 Nummern unbekannt, ist der Überblick über alle das Richtige — dann gibt es
 nichts Engeres zu zeigen.
 
+**Die Markierung sitzt auf dem GLEIS, nicht auf dem Bahnsteig.** Ein
+Bahnsteig zwischen Gleis 2 und 3 hat seinen Schwerpunkt genau zwischen beiden
+— die Punkte für „Gleis 2" und „Gleis 3" lägen übereinander. Und wo ein
+Bahnhof in Abschnitten erfasst ist (Ulm führt „4 Nord" und „4 Süd"), ist die
+Fläche zu „Gleis 4" willkürlich die eine oder die andere Hälfte; genau das sah
+im Plan seltsam aus. Wo OSM einen **Haltepunkt** kennt — Ulm hat 23, Frankfurt
+29 —, sitzt die Markierung dort. Sonst weiterhin auf der Bahnsteigmitte.
+
+Drei Fehler beim Einlesen, die die Abdeckung gedrückt haben:
+
+1. **Relationen fielen stumm durch.** Overpass liefert die Geometrie einer
+   Relation nicht am Objekt selbst, sondern in den `members`. Der Code prüfte
+   `lat/lon`, dann `geometry`, dann `center` — eine Relation hat nichts davon
+   und landete bei `continue`. Friedrichshafen Stadtbahnhof führt vier
+   Bahnsteige, **drei davon als Relation**; bei uns kam genau der eine an, der
+   als Weg erfasst ist. Jetzt werden die äußeren Ringe der Mitglieder
+   ausgelesen: **1 → 4 Bahnsteige.**
+2. **`ref="Gleis 24"` statt `ref="24"`.** Manche Bahnhöfe schreiben das Wort
+   mit hinein. Der Fahrplan sagt „24", die Suche ging leer aus, und im Plan
+   stand „Gleis Gleis 24". Der Wortkopf wird jetzt abgeschnitten — aber nur,
+   wenn danach eine Ziffer folgt, damit Mannheims Bussteig „Steig F" nicht zu
+   einem „F" wird, das man für ein Gleis halten könnte.
+3. **Nur Bussteige sind keine Bahnsteige.** Radolfzell liefert 33 OSM-Objekte,
+   und **alle 33 sind Bushaltestellen** — kein einziger Bahnsteig ist dort
+   erfasst. Der Plan bleibt daher leer, und das ist richtig so; die Anzeige
+   sagt es auch. Nichts, was sich im Code lösen ließe: das gehört in
+   OpenStreetMap eingetragen.
+
 Zwei Dinge, die beim Erfassen der Gleisnummern zu beachten waren:
 
 - **Bahnsteigabschnitte auf die nackte Nummer abbilden.** Ulm Hbf führt in OSM
@@ -438,6 +466,16 @@ dort war er schlicht unerreichbar. Aufgeklappt steht er als Satz da, mit dem
 vollständigen Zeitraum und den betroffenen Streckennummern darunter, und der
 Knopf „Auf der Karte zeigen" sitzt dort statt in der Kopfzeile — in einem
 `<summary>` wäre er ein Knopf im Knopf und würde beim Aufklappen mitgetroffen.
+
+**Geladen wird erst, wenn der Kasten ins Bild kommt.** Die Baustellenabfrage
+ist die langsamste der ganzen App — das Verzeichnis der DB InfraGO umfasst
+mehrere Megabyte, kalt gemessen 28 Sekunden. Browser halten je Host nur etwa
+sechs Verbindungen offen, und die Seite feuert beim Aufbau schon Katalog,
+Kurse, Störungsticker, Live-Züge und die eigentliche Suche ab. Die Baustellen
+belegten davon einen Platz für eine halbe Minute — und die **Trefferliste
+wartete dahinter**, obwohl ihre eigene Antwort längst da war. Ein
+`IntersectionObserver` löst das: der Kasten sitzt ganz unten, bis dahin ist die
+Suche lange fertig. Ohne Observer greift ein Zeitgeber nach sechs Sekunden.
 
 **Eine eigene Karte, nicht die Routenkarte.** Baustellen und Suchergebnisse
 beantworten verschiedene Fragen und stehen einander im Weg: über einer
@@ -801,6 +839,41 @@ der fünften Verbindung liegt zwischen beiden eine Bildschirmhöhe, und ein Klic
 schien nichts zu tun. Jetzt springt die Seite hin — im nächsten Frame, denn das
 Neuzeichnen der Trefferliste ändert vorher die Seitenhöhe.
 
+#### Ein ausgefallener Zug ist kein knapper Umstieg
+
+Die Anschlusswache rechnete ausschließlich, ob die Lücke zwischen Ankunft und
+Abfahrt noch reicht. Bei einem Zug, der **gar nicht fährt**, ist diese Lücke
+aber tadellos — und die Verfolgung meldete seelenruhig „alles gut". Genau das
+ist im Betrieb passiert: der Zug fiel aus, die Information kam nicht an, und
+Alternativen wurden nie geladen.
+
+Jetzt wird zuerst nach Ausfällen gesucht, und erst danach nach knappen
+Umstiegen. Drei Stellen sagen es, und keine ist allein verlässlich:
+
+- `leg.cancelled` aus der Suche — die DB setzt es,
+- `data.cancelled` aus dem nachgeladenen Zuglauf,
+- der **Einstiegshalt** im Zuglauf: ein Zug kann fahren und trotzdem den
+  eigenen Bahnhof auslassen. Das ist der Fall, den man am ehesten übersieht.
+
+Der Alarm heißt dann „Zug fällt aus", und die Alternativen ab dem
+Einstiegsbahnhof werden geladen wie bei einem verpassten Anschluss — mit
+demselben „übernehmen"-Knopf.
+
+**Auch die Trefferliste zeigt es jetzt.** Ein ausgefallener Zug stand dort
+vorher gar nicht drin: die Verbindung sah aus wie jede andere. Das Abzeichen
+steht ganz vorn in der Zeile, noch vor Verspätung und knappem Umstieg — die
+sind dann ohnehin gegenstandslos.
+
+#### Ausstattung ist keine Meldung, und dieselbe Meldung nicht dreimal
+
+Unter jedem Abschnitt hingen alle Meldungen des Zuglaufs, ungefiltert und in
+voller Länge. Eine Baustellenmeldung hängt aber oft an **jedem** Abschnitt
+einer Verbindung und ist mehrere Sätze lang — unter jedem Zug stand dieselbe
+Textwand. Jetzt gilt: was in dieser Verfolgung schon einmal gezeigt wurde,
+kommt kein zweites Mal; die erste Meldung steht da, der Rest wartet
+zugeklappt; und lange Texte werden auf vier Zeilen beschnitten, mit dem
+vollen Wortlaut am Titel.
+
 Die Verfolgung **überlebt Neuladen und neue Suchen**: die Verbindung liegt unter
 `train-maxxing:tracked` im localStorage und wird beim Start wieder aufgenommen,
 solange die Fahrt noch läuft. Taucht sie in der aktuellen Trefferliste nicht auf
@@ -953,12 +1026,17 @@ München–Zürich, den man erst ab Memmingen benutzt, ist derselbe Zug. Ohne
 die SBB ausschließlich für ihre Giruno-Züge führt. Eine Regel gehört nur dorthin,
 wenn dort tatsächlich nur ein Fahrzeugtyp verkehrt; geraten wird nicht.
 
-**Wo eine Regel gerade *nicht* hingehört:** der IC Stuttgart–Zürich über die
-Gäubahn. Dort fuhr bis vor kurzem der Stadler KISS, inzwischen etwas anderes —
-ein fester Eintrag wäre binnen eines Fahrplanwechsels falsch und würde eine
-Sicherheit vortäuschen, die es nicht gibt. Für diesen Zug ist der richtige Weg
-die Wagenreihung: es sind deutsche Fernverkehrszüge, also genau der Fall, den
-sie abdeckt — und was sie liefert, merkt sich `Fleet` von selbst.
+**Der Fall, der die Regeln nötig macht:** der IC Stuttgart–Zürich über die
+Gäubahn. Die Wagenreihung liefert dort **nichts** — nachgeprüft am IC 187 und
+am IC 2383: die Antwort kommt, nur ohne Baureihe, weil kein DB-Fahrzeug in
+RIS steht. Genau deshalb gibt es `FLEET_RULES`. Eingetragen ist der IC 2;
+vorher fuhr dort der Stadler KISS, und wenn es wieder wechselt, ist es diese
+eine Zeile.
+
+Die Regel greift auch auf Teilstücken (`between: [/stuttgart/i,
+/(zürich|singen|schaffhausen)/i]`), denn viele dieser Züge enden schon in
+Singen — und sie greift *nicht* auf dem IC Stuttgart–Nürnberg, was der Test
+mitprüft.
 
 **2. Gelernte Baureihen (`api/lib/Fleet.php`).** Jede Baureihe, die die
 Wagenreihung je geliefert hat, wird unter ihrer Zugnummer gemerkt. Beim nächsten
@@ -984,22 +1062,50 @@ Verlässlichkeiten:
 Nur `series` wird ohne Vorbehalt angezeigt; die übrigen drei sind als Schluss
 gekennzeichnet und nennen im Tooltip den Grund.
 
-### Baureihe: gelöst über bahn.expert — und wieder verloren
+### Baureihe: gelöst über bahn.expert — verloren und wiedergefunden
 
-> **Stand 4. September 2026: dieser Weg ist zu.** Der RPC-Endpunkt antwortet
-> mit `HTTP 500 {"error":"Only HTML reqüsts are supported here"}`, mit einem
-> Browser-User-Agent mit `404`. bahn.expert hat seine Schnittstelle
-> umgestellt; die alten Pfade (`/api/reihung/v4/wagen/…`) sind ebenfalls weg.
-> Der Provider fällt still zurück, wie vorgesehen — deshalb war der Ausfall
-> lange unsichtbar. **`check.php` prüft ihn jetzt ausdrücklich mit**, damit
-> genau das nicht wieder passiert.
->
-> Solange er zu ist, kommt das Fahrzeug nur noch aus `FLEET_RULES` und aus
-> dem, was `Fleet` früher gelernt hat. Wer die Angabe braucht, wechselt auf
-> **RIS::Transports** im DB API Marketplace — dieselben Daten unter Vertrag
-> und mit Schlüssel.
+Der Dienst war eine Zeitlang stumm, und zwar auf die unangenehmste Art: Der
+alte Pfad `/rpc/…` antwortet mit `HTTP 500 {"error":"Only HTML requests are
+supported here"}`, mit Browser-User-Agent mit `404`. Der Provider fällt bei
+jedem Fehler stillschweigend zurück — genau deshalb blieb unbemerkt, dass
+**überhaupt keine Baureihe mehr angezeigt wurde**.
 
-Wie es funktionierte, solange es funktionierte:
+Gefunden wurde der neue Pfad, indem eine Zugdetailseite von bahn.expert im
+Browser geöffnet und ihr Netzwerkverkehr gelesen wurde: dieselbe
+superjson-Nutzlast, nur unter **`/api/trpc/`** statt `/rpc/`. Am Ende eine
+Zeile in `config.php`.
+
+Zwei Lehren, beide eingebaut:
+
+- **`check.php` prüft die Quelle jetzt ausdrücklich mit.** Ein Provider, der
+  leise degradiert, braucht eine laute Prüfung — sonst merkt es niemand.
+- **Der Pfad wandert wieder.** bahn.expert ist ein privates Projekt. Wer die
+  Angabe verlässlich braucht, wechselt auf **RIS::Transports** im DB API
+  Marketplace — dieselben Daten unter Vertrag und mit Schlüssel.
+
+#### Die Abfragen laufen gleichzeitig
+
+Die Wagenreihung braucht **eine Anfrage je Zug**. Sechs Trefferkarten mit je
+zwei Zügen sind zwölf Round-Trips, und nacheinander abgearbeitet kostete das
+gemessen:
+
+| Suche Frankfurt–Hamburg, kalt | Dauer |
+|---|---|
+| ohne Wagenreihung | 8,2 s |
+| mit, nacheinander, 3 Züge je *Verbindung* | 27,6 s |
+| **mit, gleichzeitig, 12 Züge je *Suche*** | **5,3 s** |
+
+Also: erst alle offenen Abfragen einsammeln, nach Zug entdoppeln (in sechs
+Verbindungen fahren oft dieselben Züge), was im Cache liegt gleich bedienen,
+den Rest per `curl_multi` parallel holen (`Http::getJsonAll`). Aus zwölf
+Round-Trips wird einer — und die Abdeckung steigt dabei, weil der Deckel
+jetzt je Suche gilt statt je Verbindung.
+
+Dazu die Reihenfolge: **`Fleet` füllt vor der Wagenreihung**, nicht danach.
+Was schon gelernt und keine zwei Wochen alt ist, wird gar nicht erst
+abgefragt.
+
+Wie die Abfrage selbst funktioniert:
 
 Die Baureihe kommt jetzt aus der Wagenreihung — `ICE 4 (BR412)`, inklusive
 Wagenzahl je Klasse. Bezogen über **bahn.expert**, das dieselben Daten
@@ -1018,13 +1124,14 @@ Es gilt weiterhin: nur deutscher Fernverkehr, nur am Reisetag.
 
 **bahn.expert ist ein privat betriebenes Projekt, kein offizieller Dienst.**
 Deshalb ist das Tool zurückhaltend: Ergebnisse werden 30 Minuten gecacht,
-`max_lookups` begrenzt die Abfragen je Verbindung auf drei, und jeder Fehler
-führt stillschweigend dazu, dass die Baureihe eben fehlt.
+`max_lookups` deckelt die Abfragen je *Suche* auf zwölf, was einmal geholt
+wurde merkt sich `Fleet.php` dauerhaft, und jeder Fehler führt
+stillschweigend dazu, dass die Baureihe eben fehlt.
 
 Wer das Tool dauerhaft betreibt, sollte auf den **DB API Marketplace**
 wechseln: Das Modul `RIS::Transports` liefert dieselben Daten offiziell, unter
-Vertrag und mit API-Key. Dann tauscht du in `CoachSequence.php` nur die
-`fetch()`-Methode aus.
+Vertrag und mit API-Key. Dann tauscht du in `CoachSequence.php` nur `url()`
+und `parse()` aus.
 
 ### Der direkte DB-Weg: weiterhin verschlossen
 
@@ -1560,7 +1667,7 @@ Die Polylinie ist also **gut doppelt so genau**; ein Korrekturfaktor von 1,025
 zentriert sie. Die Haltekette bleibt die Rückfallebene, wo keine Polylinie da
 ist (DB-Fahrpläne liefern keine).
 
-Zweistufig ist es, weil beide Quellen etwas beisteürn: die **Halte** tragen
+Zweistufig ist es, weil beide Quellen etwas beisteuern: die **Halte** tragen
 Ländercode und Uhrzeit — ohne sie keine Aufteilung auf Länder und keine
 Zeitfenster fürs GA Night —, die **Polylinie** die Länge. Also werden die
 Luftlinien zwischen den Halten so skaliert, dass ihre Summe der Polylinie
@@ -1708,8 +1815,9 @@ Für den privaten Gebrauch ist das üblich und verbreitet — aber:
 - **Keine Echtpreise auf reinen CH/AT-Relationen** wie Zürich–Wien, weil die DB
   sie nicht vertreibt.
 - **Baureihen** nur über die Wagenreihung (deutscher Fernverkehr, Reisetag),
-  über gelernte Beobachtungen oder über Strecken- und Gattungsregeln. Die
-  Wagenreihung ist zum Stand 4. September 2026 nicht erreichbar.
+  über gelernte Beobachtungen oder über Strecken- und Gattungsregeln. Für
+  SBB- und ÖBB-Fahrzeuge liefert die Wagenreihung nichts — dort helfen nur
+  die Regeln in `FLEET_RULES`.
 - **Preise in Österreich sind ungeprüft.** Keine der beiden Quellen liefert dort
   einen Betrag; die Kurve ist von der deutschen abgeleitet.
 - **Nachtzüge** sind im Preisvergleich benachteiligt, weil die gesparte

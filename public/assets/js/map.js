@@ -644,6 +644,12 @@ export class RouteMap {
         if (p?.shape?.length) pts.push(...p.shape);
         else if (p) pts.push([p.lat, p.lon]);
       }
+      // Die Markierungen liegen auf den Gleisen, also etwas neben den
+      // Flächen — sie gehören mit ins Bild.
+      for (const g of [st?.fromTrack, st?.toTrack]) {
+        const q = (st?.trackPoints || {})[g];
+        if (Array.isArray(q) && q.length === 2) pts.push(q);
+      }
       if (pts.length < 2) {
         for (const p of st?.platforms || []) {
           if (p.shape?.length) pts.push(...p.shape);
@@ -818,9 +824,10 @@ export class RouteMap {
   /**
    * Bahnsteige setzen.
    *
-   * @param {object} st {platforms, from, to}
+   * @param {object} st {platforms, from, to, fromTrack, toTrack, trackPoints}
    *   `from`/`to` sind die beiden beteiligten Bahnsteige aus `platforms`,
-   *   soweit die Gleisnummern bekannt sind — sonst null.
+   *   soweit die Gleisnummern bekannt sind — sonst null. `trackPoints` sind
+   *   die Haltepunkte auf den Gleisen, Gleisnummer → [lat, lon].
    */
   setStation(st) {
     this.station = st || null;
@@ -971,24 +978,33 @@ export class RouteMap {
     }
 
     // --- Ankunft und Abfahrt markieren ---------------------------------
-    // Ein Punkt auf der Mitte des jeweiligen Bahnsteigs. Zusammen mit der
-    // Einfärbung beantwortet er die eigentliche Frage: liegen die beiden
-    // nebeneinander oder an entgegengesetzten Enden?
-    for (const [p, cls, txt] of [
-      [st.from, 'is-start', 'Ankunftsgleis'],
-      [st.to, 'is-end', 'Abfahrtsgleis'],
+    //
+    // AUF DEM GLEIS, nicht auf dem Bahnsteig. Wo OSM einen Haltepunkt kennt,
+    // sitzt die Markierung dort: ein Bahnsteig zwischen Gleis 2 und 3 hat
+    // seinen Schwerpunkt genau zwischen beiden, und die Markierungen für
+    // „Gleis 2" und „Gleis 3" lägen übereinander. An Bahnhöfen mit
+    // Bahnsteigabschnitten — Ulm führt „4 Nord" und „4 Süd" — ist die Fläche
+    // zu „Gleis 4" ohnehin willkürlich die eine oder die andere Hälfte.
+    //
+    // Fehlt der Haltepunkt, bleibt der Schwerpunkt der Fläche.
+    const punkte = st.trackPoints || {};
+    for (const [p, gleis, cls, txt] of [
+      [st.from, st.fromTrack, 'is-start', 'Ankunftsgleis'],
+      [st.to, st.toTrack, 'is-end', 'Abfahrtsgleis'],
     ]) {
-      if (!p || p.lat == null || p.lon == null) continue;
-      // Bei Flächen ist das der Schwerpunkt des Umrisses, also die
-      // Bahnsteigmitte; Haltepunkte haben ohnehin nur diese eine Koordinate.
-      const [x, y] = toPx([p.lat, p.lon]);
+      const punkt = punkte[gleis];
+      const pos = Array.isArray(punkt) && punkt.length === 2
+        ? punkt
+        : (p && p.lat != null && p.lon != null ? [p.lat, p.lon] : null);
+      if (!pos) continue;
+      const [x, y] = toPx(pos);
       const c = document.createElementNS(NS, 'circle');
       c.setAttribute('cx', x.toFixed(1));
       c.setAttribute('cy', y.toFixed(1));
       c.setAttribute('r', '6');
       c.setAttribute('class', 'map__walk-end ' + cls);
       const t = document.createElementNS(NS, 'title');
-      t.textContent = `${txt} — Gleis ${(p.tracks || []).join('/')}`;
+      t.textContent = `${txt} — Gleis ${gleis || (p?.tracks || []).join('/') || '?'}`;
       c.append(t);
       g.append(c);
     }

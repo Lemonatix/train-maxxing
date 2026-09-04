@@ -130,6 +130,98 @@ class Http
     }
 
     /**
+     * Mehrere GET-Anfragen GLEICHZEITIG.
+     *
+     * WOZU: Die Wagenreihung braucht eine Anfrage je Zug. Nacheinander sind
+     * zwölf Züge zwölf Round-Trips - nachgemessen neunzehn Sekunden, und die
+     * Trefferliste wartete so lange auf eine Angabe, die nur ein Zusatz ist.
+     * Parallel kostet dasselbe knapp zwei.
+     *
+     * Die Rückgabe behält die Schlüssel der Eingabe, damit die Zuordnung
+     * nicht über die Reihenfolge laufen muss - bei curl_multi kommen die
+     * Antworten in beliebiger Reihenfolge zurück.
+     *
+     * @param array<string|int,string> $urls    Schlüssel => URL
+     * @param array<string,string>     $headers für alle Anfragen dieselben
+     * @return array<string|int,array{ok:bool,status:int,body:string,error:?string,json:?array}>
+     */
+    public function getJsonAll(array $urls, array $headers = [], int $parallel = 8): array
+    {
+        if ($urls === []) {
+            return [];
+        }
+        if (!function_exists('curl_multi_init')) {
+            // Ohne curl_multi eben nacheinander - langsam, aber richtig.
+            $out = [];
+            foreach ($urls as $k => $url) {
+                $out[$k] = $this->getJson($url, $headers);
+            }
+            return $out;
+        }
+
+        $hdr = ['Accept: application/json'];
+        foreach ($headers as $k => $v) {
+            $hdr[] = $k . ': ' . $v;
+        }
+
+        $out    = [];
+        $stapel = array_chunk($urls, max(1, $parallel), true);
+
+        foreach ($stapel as $teil) {
+            $multi   = curl_multi_init();
+            $handles = [];
+
+            foreach ($teil as $k => $url) {
+                $ch = curl_init();
+                curl_setopt_array($ch, [
+                    CURLOPT_URL            => $url,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT        => $this->timeout,
+                    CURLOPT_CONNECTTIMEOUT => 10,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_MAXREDIRS      => 3,
+                    CURLOPT_ENCODING       => '',
+                    CURLOPT_HTTPHEADER     => $hdr,
+                    CURLOPT_SSL_VERIFYPEER => true,
+                    CURLOPT_SSL_VERIFYHOST => 2,
+                ]);
+                curl_multi_add_handle($multi, $ch);
+                $handles[$k] = $ch;
+            }
+
+            do {
+                $status = curl_multi_exec($multi, $laufen);
+                if ($laufen) {
+                    curl_multi_select($multi, 1.0);
+                }
+            } while ($laufen && $status === CURLM_OK);
+
+            foreach ($handles as $k => $ch) {
+                $raw    = curl_multi_getcontent($ch);
+                $code   = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+                $err    = curl_error($ch);
+                curl_multi_remove_handle($multi, $ch);
+
+                if ($raw === null || $raw === false || $code < 200 || $code >= 300) {
+                    $out[$k] = $this->fail($err !== '' ? $err : 'HTTP ' . $code, $code);
+                    continue;
+                }
+                $decoded = json_decode((string) $raw, true);
+                $out[$k] = [
+                    'ok'     => true,
+                    'status' => $code,
+                    'body'   => (string) $raw,
+                    'error'  => null,
+                    'json'   => is_array($decoded) ? $decoded : null,
+                ];
+            }
+            curl_multi_close($multi);
+        }
+
+        return $out;
+    }
+
+    /**
      * @param array<string,mixed>  $payload
      * @param array<string,string> $headers
      */

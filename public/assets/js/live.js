@@ -90,6 +90,8 @@ export class LiveTracker {
     this.watchId = null;
     this.timer = null;
     this.risk = null;        // {legIndex, station, gap, status, key}
+    /** Schon gezeigte Meldungen des laufenden Zeichnens - siehe renderLeg(). */
+    this.gezeigteMeldungen = new Set();
     this.options = [];       // Alternativen ab dem Umsteigebahnhof
     this.optionsFor = null;  // zu welchem risk.key die Alternativen gehören
     this.optionsLoading = false;
@@ -227,7 +229,7 @@ export class LiveTracker {
         ? (results[0]?.reason?.message || 'Echtzeitdaten nicht verfügbar')
         : null;
 
-      this.risk = this.assessTransfers();
+      this.risk = this.assessRisk();
       await this.loadOptions();
       await this.loadMvgMessages();
       this.updatedAt = new Date();
@@ -333,6 +335,70 @@ export class LiveTracker {
     return Number.isFinite(t)
       ? { at: t, live: Boolean(real), platform: place?.platform }
       : null;
+  }
+
+  /**
+   * Was ist gerade das größte Problem?
+   *
+   * EIN AUSFALL SCHLÄGT JEDEN KNAPPEN UMSTIEG. Vorher wurde ausschließlich
+   * gerechnet, ob die Lücke zwischen Ankunft und Abfahrt noch reicht — bei
+   * einem Zug, der gar nicht fährt, ist diese Lücke aber völlig in Ordnung,
+   * und die Verfolgung meldete seelenruhig „alles gut". Genau das ist im
+   * Betrieb passiert: der Zug fiel aus, die Information kam nicht an, und
+   * Alternativen wurden nie geladen.
+   */
+  assessRisk() {
+    return this.findCancellation() ?? this.assessTransfers();
+  }
+
+  /**
+   * Fällt einer der noch bevorstehenden Züge aus?
+   *
+   * Drei Stellen sagen es, und keine ist verlässlich genug allein: der
+   * Abschnitt aus der Suche (`leg.cancelled`, die DB setzt ihn), der
+   * nachgeladene Zuglauf (`data.cancelled`), und der Einstiegshalt im
+   * Zuglauf — ein Zug kann fahren und trotzdem den eigenen Bahnhof
+   * auslassen. Das Letzte ist der Fall, den man am ehesten übersieht.
+   */
+  findCancellation() {
+    const now = Date.now();
+
+    for (let i = 0; i < this.legs.length; i++) {
+      const entry = this.legs[i];
+
+      // Was hinter einem liegt, ist kein Problem mehr.
+      const an = Date.parse(entry.leg.arrivalReal || entry.leg.arrival || '');
+      if (Number.isFinite(an) && an < now) continue;
+
+      if (!LiveTracker.isCancelled(entry)) continue;
+
+      // Ab wo geht es weiter? Vom Einstiegsbahnhof dieses Zuges — dort
+      // steht man, wenn er nicht kommt.
+      const vorher = i > 0 ? LiveTracker.legTime(this.legs[i - 1], 'arrival') : null;
+      const planAb = Date.parse(entry.leg.departure || '');
+      const ab = vorher?.at ?? (Number.isFinite(planAb) ? planAb : now);
+
+      return {
+        legIndex: i,
+        station: entry.leg.from,
+        gap: 0,
+        status: 'cancelled',
+        arrivalAt: Math.max(ab, now - 60_000),
+        train: trainLabel(entry.leg),
+        key: ['cncl', entry.leg.from?.id, entry.leg.trainNumber].join('|'),
+      };
+    }
+    return null;
+  }
+
+  /** Fällt dieser Abschnitt aus — als Zug oder nur an unserem Halt? */
+  static isCancelled(entry) {
+    if (entry.leg.cancelled || entry.data?.cancelled) return true;
+
+    const stops = entry.data?.stops || [];
+    const ein = stops.find((s) => String(s.id || '') === String(entry.leg.from?.id || ' '))
+      || stops.find((s) => s.name === entry.leg.from?.name);
+    return Boolean(ein?.cancelled);
   }
 
   /**
@@ -735,6 +801,9 @@ export class LiveTracker {
     if (!this.journey) return;
     const p = this.panel;
     p.replaceChildren();
+    // Je Durchlauf neu: dieselbe Meldung soll nur einmal in der ganzen
+    // Verfolgung stehen, aber beim nächsten Zeichnen wieder erscheinen.
+    this.gezeigteMeldungen = new Set();
 
     p.append(this.renderHead());
 
@@ -832,12 +901,14 @@ export class LiveTracker {
     const box = el('section', `live__risk live__risk--${r.status}`);
 
     const head = el('div', 'live__risk-head');
-    head.append(el('strong', null,
-      r.status === 'missed' ? 'Anschluss weg' : 'Anschluss wird knapp'));
-    head.append(el('span', 'live__risk-text',
-      r.status === 'missed'
-        ? `${r.train} in ${r.station?.name} ist ${Math.abs(r.gap)} min vor deiner Ankunft weg.`
-        : `Nur ${r.gap} min für den Umstieg auf ${r.train} in ${r.station?.name}.`));
+    head.append(el('strong', null, {
+      cancelled: 'Zug fällt aus',
+      missed: 'Anschluss weg',
+    }[r.status] || 'Anschluss wird knapp'));
+    head.append(el('span', 'live__risk-text', {
+      cancelled: `${r.train} ab ${r.station?.name} fällt aus.`,
+      missed: `${r.train} in ${r.station?.name} ist ${Math.abs(r.gap)} min vor deiner Ankunft weg.`,
+    }[r.status] || `Nur ${r.gap} min für den Umstieg auf ${r.train} in ${r.station?.name}.`));
     box.append(head);
 
     if (this.optionsLoading) {
@@ -851,7 +922,7 @@ export class LiveTracker {
     }
 
     box.append(el('p', 'live__risk-note',
-      r.status === 'missed' ? 'Stattdessen:' : 'Falls es nicht klappt:'));
+      r.status === 'ok' ? 'Falls es nicht klappt:' : 'Stattdessen:'));
 
     const list = el('div', 'live__options');
     for (const opt of this.options) list.append(this.renderOption(opt));
@@ -950,7 +1021,30 @@ export class LiveTracker {
     head.append(badge);
     box.append(head);
 
-    for (const m of data?.messages || []) box.append(el('p', 'live__leg-msg', m));
+    // MELDUNGEN GEBÜNDELT. Eine Baustellenmeldung hängt oft an jedem
+    // Abschnitt einer Verbindung und ist mehrere Sätze lang; ungefiltert
+    // stand unter jedem Zug dieselbe Textwand. Die erste steht da, der Rest
+    // wartet zugeklappt — und was in dieser Verfolgung schon einmal gezeigt
+    // wurde, kommt kein zweites Mal.
+    const neu = (data?.messages || []).filter((m) => !this.gezeigteMeldungen.has(m));
+    for (const m of neu) this.gezeigteMeldungen.add(m);
+
+    if (neu.length > 0) {
+      const erste = el('p', 'live__leg-msg', neu[0]);
+      erste.title = neu[0];
+      box.append(erste);
+    }
+    if (neu.length > 1) {
+      const mehr = el('details', 'live__msgs');
+      mehr.append(el('summary', null,
+        neu.length === 2 ? 'eine weitere Meldung' : `${neu.length - 1} weitere Meldungen`));
+      for (const m of neu.slice(1)) {
+        const z = el('p', 'live__leg-msg', m);
+        z.title = m;
+        mehr.append(z);
+      }
+      box.append(mehr);
+    }
 
     // Ohne nachgeladenen Zuglauf die Halte aus der Suche - die tragen zwar
     // seltener Ist-Zeiten, sagen aber immerhin, wo es langgeht.

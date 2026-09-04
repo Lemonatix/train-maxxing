@@ -40,70 +40,135 @@ final class CoachSequence
     }
 
     /**
-     * Ergänzt die Abschnitte einer Verbindung um 'series' und 'seriesName'.
+     * Ergänzt die Abschnitte MEHRERER Verbindungen um 'series' und
+     * 'seriesName' — in einem Rutsch und mit gleichzeitigen Anfragen.
      *
-     * @param string $travelDate YYYY-MM-DD
+     * WARUM NICHT JE VERBINDUNG: Die Wagenreihung braucht eine Anfrage je
+     * Zug. Sechs Trefferkarten mit je zwei Zügen sind zwölf Round-Trips, und
+     * nacheinander abgearbeitet dauerte die Suche dadurch 27 statt 8
+     * Sekunden — nachgemessen Frankfurt–Hamburg. Für eine Angabe, die nur
+     * ein Zusatz zur Trefferliste ist, ist das kein vertretbarer Preis.
+     *
+     * Also: erst alle offenen Abfragen einsammeln, nach Zug entdoppeln (in
+     * sechs Verbindungen fahren oft dieselben Züge), was im Cache liegt
+     * gleich bedienen, den Rest parallel holen. Aus zwölf Round-Trips wird
+     * einer.
+     *
+     * @param array[] $journeys
+     * @param string  $travelDate YYYY-MM-DD
+     * @return array[] dieselben Verbindungen, ergänzt
      */
-    public function enrich(array $journey, string $travelDate): array
+    public function enrichAll(array $journeys, string $travelDate): array
     {
         if (!$this->isToday($travelDate)) {
-            return $journey; // Wagenreihung gibt es nur am Reisetag
+            return $journeys; // Wagenreihung gibt es nur am Reisetag
         }
 
-        $budget = (int) ($this->cfg['max_lookups'] ?? 3);
+        // --- 1. Einsammeln, was überhaupt zu holen wäre -------------------
+        $offen  = [];   // Cache-Schlüssel => ['eva','num','cat','dep']
+        $stellen = [];  // Cache-Schlüssel => [[journeyIdx, legIdx], …]
 
-        foreach (($journey['legs'] ?? []) as $i => $leg) {
-            if ($budget <= 0) {
-                break;
+        foreach ($journeys as $ji => $journey) {
+            foreach (($journey['legs'] ?? []) as $li => $leg) {
+                if (($leg['mode'] ?? '') !== 'train') {
+                    continue;
+                }
+
+                // Steht die Baureihe schon da und ist die Beobachtung frisch,
+                // sparen wir uns die Anfrage. Wagenreihungen wechseln zum
+                // Fahrplanwechsel, nicht von Tag zu Tag - siehe Fleet.
+                $gelernt = $leg['seriesLearned'] ?? null;
+                if ($gelernt !== null && $gelernt <= Fleet::TRUST_DAYS) {
+                    continue;
+                }
+
+                $cat = strtoupper(trim((string) ($leg['category'] ?? '')));
+                $num = trim((string) ($leg['trainNumber'] ?? ''));
+                $eva = (string) ($leg['from']['id'] ?? '');
+                $dep = (string) ($leg['departure'] ?? '');
+
+                // Nur deutscher Fernverkehr - alles andere hat keine Wagenreihung.
+                if ($num === '' || $dep === '' || !str_starts_with($eva, '80')) {
+                    continue;
+                }
+                if (!in_array($cat, ['ICE', 'IC', 'EC'], true)) {
+                    continue;
+                }
+
+                $key = self::key($eva, $num, $cat, $dep);
+                $offen[$key]     = ['eva' => $eva, 'num' => $num, 'cat' => $cat, 'dep' => $dep];
+                $stellen[$key][] = [$ji, $li];
             }
-            if (($leg['mode'] ?? '') !== 'train') {
+        }
+
+        // --- 2. Was im Cache liegt, kostet nichts -------------------------
+        $treffer = [];
+        foreach ($offen as $key => $z) {
+            $cached = $this->cache->get($key, 1800);
+            if ($cached !== null) {
+                $treffer[$key] = $cached === '' ? null : $cached;
+                unset($offen[$key]);
+            }
+        }
+
+        // --- 3. Der Rest, gleichzeitig und gedeckelt ----------------------
+        //
+        // Der Deckel gilt für die GANZE Suche, nicht je Verbindung: sonst
+        // wächst die Last mit der Zahl der Treffer, und bahn.expert ist ein
+        // privates Projekt. Was diesmal nicht drankommt, holt der nächste
+        // Aufruf - und was einmal geholt wurde, merkt sich Fleet.
+        $deckel = max(1, (int) ($this->cfg['max_lookups'] ?? 12));
+        $offen  = array_slice($offen, 0, $deckel, true);
+
+        $urls = [];
+        foreach ($offen as $key => $z) {
+            $url = $this->url($z['eva'], $z['num'], $z['cat'], $z['dep']);
+            if ($url !== null) {
+                $urls[$key] = $url;
+            }
+        }
+
+        $antworten = $this->http->getJsonAll($urls, [
+            'User-Agent' => 'train-maxxing/1.0 (privates Fahrplanwerkzeug)',
+        ]);
+
+        foreach ($antworten as $key => $res) {
+            $info = $this->parse($res);
+            // Auch Misserfolge merken, sonst fragen wir bei jedem Aufruf erneut.
+            $this->cache->set($key, $info ?? '');
+            $treffer[$key] = $info;
+        }
+
+        // --- 4. Zurückschreiben -------------------------------------------
+        foreach ($treffer as $key => $info) {
+            if ($info === null) {
                 continue;
             }
-
-            $cat = strtoupper(trim((string) ($leg['category'] ?? '')));
-            $num = trim((string) ($leg['trainNumber'] ?? ''));
-            $eva = (string) ($leg['from']['id'] ?? '');
-            $dep = (string) ($leg['departure'] ?? '');
-
-            // Nur deutscher Fernverkehr - alles andere hat keine Wagenreihung.
-            if ($num === '' || $dep === '' || !str_starts_with($eva, '80')) {
-                continue;
-            }
-            if (!in_array($cat, ['ICE', 'IC', 'EC'], true)) {
-                continue;
-            }
-
-            $budget--;
-            $info = $this->lookup($eva, $num, $cat, $dep);
-            if ($info !== null) {
-                $journey['legs'][$i]['series']     = $info['series'];
-                $journey['legs'][$i]['seriesName'] = $info['seriesName'];
+            foreach ($stellen[$key] ?? [] as [$ji, $li]) {
+                $journeys[$ji]['legs'][$li]['series']     = $info['series'];
+                $journeys[$ji]['legs'][$li]['seriesName'] = $info['seriesName'];
                 if ($info['coaches'] !== null) {
-                    $journey['legs'][$i]['coaches'] = $info['coaches'];
+                    $journeys[$ji]['legs'][$li]['coaches'] = $info['coaches'];
                 }
             }
         }
 
-        return $journey;
+        return $journeys;
     }
 
-    /** @return array{series:string,seriesName:string,coaches:?array}|null */
-    private function lookup(string $eva, string $number, string $category, string $departureIso): ?array
+    private static function key(string $eva, string $num, string $cat, string $dep): string
     {
-        $key    = 'cs:' . $eva . ':' . $category . ':' . $number . ':' . substr($departureIso, 0, 16);
-        $cached = $this->cache->get($key, 1800);
-        if ($cached !== null) {
-            return $cached === '' ? null : $cached;
-        }
-
-        $result = $this->fetch($eva, $number, $category, $departureIso);
-        // Auch Misserfolge merken, sonst fragen wir bei jedem Aufruf erneut.
-        $this->cache->set($key, $result ?? '');
-
-        return $result;
+        return 'cs:' . $eva . ':' . $cat . ':' . $num . ':' . substr($dep, 0, 16);
     }
 
-    private function fetch(string $eva, string $number, string $category, string $departureIso): ?array
+    /**
+     * Die Abfrage-URL für einen Zug — oder null, wenn sich keine bauen lässt.
+     *
+     * tRPC/superjson: der Parameter `input` ist ein JSON-STRING, der ein
+     * Array enthält — nicht das Array selbst. Ohne die zweite Kodierung
+     * antwortet der Dienst mit `"[object Object]" is not valid JSON`.
+     */
+    private function url(string $eva, string $number, string $category, string $departureIso): ?string
     {
         try {
             $dep = new DateTimeImmutable($departureIso);
@@ -111,12 +176,12 @@ final class CoachSequence
             return null;
         }
 
-        // bahn.expert erwartet UTC-Zeitstempel im JavaScript-Format.
+        // Der Dienst erwartet UTC-Zeitstempel im JavaScript-Format.
         $planned = $dep->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.000\Z');
         // Der Abfahrtstag des Zuglaufs; Mitternacht des Reisetags genügt.
         $initial = $dep->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\T00:00:00.000\Z');
 
-        // tRPC/superjson: erst eine Feldkarte, dann die Werte in Indexreihenfolge.
+        // Erst eine Feldkarte, dann die Werte in Indexreihenfolge.
         $payload = [
             [
                 'evaNumber'        => 1,
@@ -134,21 +199,22 @@ final class CoachSequence
             '80',
         ];
 
-        // Doppelt kodieren: der Dienst erwartet einen JSON-STRING, der das
-        // Array enthält - nicht das Array selbst. Ohne die zweite Kodierung
-        // antwortet er mit "[object Object] is not valid JSON".
         $inner = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         $outer = json_encode($inner === false ? '[]' : $inner, JSON_UNESCAPED_SLASHES);
 
-        $url = rtrim((string) $this->cfg['endpoint'], '/')
+        return rtrim((string) $this->cfg['endpoint'], '/')
             . '/coachSequence.departureSequence?input='
             . rawurlencode((string) $outer);
+    }
 
-        $res = $this->http->getJson($url, [
-            'Accept'     => 'application/json',
-            'User-Agent' => 'train-maxxing/1.0 (privates Fahrplanwerkzeug)',
-        ]);
-
+    /**
+     * Eine Antwort auswerten.
+     *
+     * @param array{ok:bool,status:int,body:string,error:?string,json:?array} $res
+     * @return array{series:string,seriesName:string,coaches:?array}|null
+     */
+    private function parse(array $res): ?array
+    {
         if (!$res['ok'] || $res['json'] === null) {
             return null;
         }

@@ -157,13 +157,25 @@ return [
         // deutschen Fernverkehr am Reisetag.
         //
         // bahn.expert ist ein privat betriebenes Projekt. Sei fair: Ergebnisse
-        // werden 30 Minuten gecacht, und 'max_lookups' begrenzt die Abfragen
-        // je Verbindung. Wer das Tool dauerhaft betreibt, sollte auf die
-        // offizielle RIS-API des DB API Marketplace wechseln.
+        // werden 30 Minuten gecacht, 'max_lookups' deckelt die Abfragen je
+        // Suche, und was einmal geholt wurde, merkt sich Fleet.php dauerhaft.
+        // Wer das Tool dauerhaft betreibt, sollte auf die offizielle RIS-API
+        // des DB API Marketplace wechseln.
         'wagenreihung' => [
             'enabled'     => true,
-            'endpoint'    => 'https://bahn.expert/rpc',
-            'max_lookups' => 3,
+            // ACHTUNG, DER PFAD WANDERT. Bis September 2026 lag der Dienst
+            // unter /rpc, seither unter /api/trpc. Der alte Pfad antwortet
+            // mit HTTP 500 "Only HTML requests are supported here" - also
+            // nicht mit einem Fehler, den man als solchen erkennt. Wenn die
+            // Baureihe irgendwann wieder fehlt: check.php sagt es, und hier
+            // ist die Stelle.
+            'endpoint'    => 'https://bahn.expert/api/trpc',
+            // Wie viele Züge je SUCHE höchstens nachgeschlagen werden - nicht
+            // je Verbindung. Sonst wüchse die Last mit der Zahl der Treffer.
+            // Die Abfragen laufen gleichzeitig, zwölf kosten daher etwa so
+            // viel Zeit wie eine. Was diesmal nicht drankommt, holt der
+            // nächste Aufruf; was einmal geholt wurde, merkt sich Fleet.php.
+            'max_lookups' => 12,
         ],
     ],
 ];
