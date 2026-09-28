@@ -118,6 +118,16 @@ function renderTicker(mount, count, list, all) {
       li.append(badges);
     }
 
+    // Angekündigt, noch nicht in Kraft: mit Datum davor, sonst liest sich
+    // "Zugausfälle zwischen Pasing und Ostbahnhof" wie eine Störung jetzt.
+    const kommt = upcomingFrom(m);
+    if (kommt) {
+      const ab = document.createElement('span');
+      ab.className = 'mvg-ticker__when';
+      ab.textContent = `ab ${kommt}`;
+      li.append(ab);
+    }
+
     const title = document.createElement('span');
     title.className = 'mvg-ticker__title';
     title.textContent = m.title || m.description || '(ohne Titel)';
@@ -125,6 +135,40 @@ function renderTicker(mount, count, list, all) {
 
     list.append(li);
   }
+}
+
+/**
+ * Beginn des nächsten Zeitraums, wenn die Meldung gerade noch nicht gilt -
+ * als "12.10. 21:20". Sonst null.
+ */
+export function upcomingFrom(m, now = Date.now()) {
+  const zeiten = (m?.incidents || []).map((z) => ({
+    von: z.from ? Date.parse(z.from) : -Infinity,
+    bis: z.to ? Date.parse(z.to) : Infinity,
+  }));
+  if (zeiten.length === 0 || zeiten.some((z) => z.von <= now && now <= z.bis)) return null;
+  const naechster = zeiten.filter((z) => z.von > now).sort((a, b) => a.von - b.von)[0];
+  if (!naechster) return null;
+  // Münchner Zeit, egal wo das Gerät steht.
+  const teil = Object.fromEntries(new Intl.DateTimeFormat('de-DE', {
+    timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(naechster.von)).map((p) => [p.type, p.value]));
+  return `${teil.day}.${teil.month}. ${teil.hour}:${teil.minute}`;
+}
+
+/**
+ * Gilt die Meldung irgendwann zwischen t0 und t1 (Millisekunden)?
+ * Ohne Zeiträume zählt das Veröffentlichungsfenster.
+ */
+export function affectsWindow(m, t0, t1) {
+  const zeiten = (m?.incidents || []).length
+    ? m.incidents
+    : [{ from: m?.validFrom, to: m?.validTo }];
+  return zeiten.some((z) => {
+    const von = z.from ? Date.parse(z.from) : -Infinity;
+    const bis = z.to ? Date.parse(z.to) : Infinity;
+    return von <= t1 && bis >= t0;
+  });
 }
 
 function isActiveNow(m) {

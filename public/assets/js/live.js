@@ -30,6 +30,7 @@ import { api } from './api.js';
 import { geometryOf, trainLabel, sameTrain, snapToLine, geoErrorText } from './map.js';
 import { spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
 import { typeOf } from './data/trains.js';
+import { affectsWindow } from './mvgTicker.js';
 
 const REFRESH_MS = 30_000;
 
@@ -90,6 +91,18 @@ function readNotifyPref() {
 function writeNotifyPref(on) {
   try { localStorage.setItem(NOTIFY_KEY, on ? '1' : '0'); } catch { /* privat */ }
 }
+
+/** Base64url -> Uint8Array, für den VAPID-Schlüssel beim Anmelden. */
+function b64uBytes(s) {
+  const b = atob(String(s).replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
+}
+
+/** iPhone/iPad - und läuft die Seite als App vom Home-Bildschirm? */
+const IS_IOS = typeof navigator !== 'undefined'
+  && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+const IS_STANDALONE = typeof window !== 'undefined'
+  && (window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true);
 
 /**
  * Eine Meldung, zugeklappt auf ihre Überschrift.
@@ -180,6 +193,12 @@ export class LiveTracker {
     /** Benachrichtigungen bei Ausfall, Verspätung, Gleiswechsel. */
     this.notify = readNotifyPref() && LiveTracker.canNotify()
       && Notification.permission === 'granted';
+    /**
+     * Web Push: der Server verfolgt die Fahrt mit und meldet auch bei
+     * gesperrtem Bildschirm. `on` = angemeldet, `running` = sein Minutentakt
+     * läuft (sonst meldet weiter die Seite selbst). Siehe lib/PushWatch.php.
+     */
+    this.push = { on: false, running: false };
     /** Was schon gemeldet wurde: Schlüssel -> Stufe. Siehe checkAlerts(). */
     this.alerted = new Map();
     /** Der erste Stand einer Verfolgung wird nur notiert, nicht gemeldet. */
@@ -268,6 +287,61 @@ ${url.href}`);
   }
 
   /**
+   * Kann er es auch bei gesperrtem Bildschirm (Web Push)? Auf dem iPhone nur
+   * als App vom Home-Bildschirm - in Safari selbst fehlt der PushManager.
+   */
+  static canPush() {
+    return LiveTracker.canNotify() && 'serviceWorker' in navigator && 'PushManager' in window;
+  }
+
+  /**
+   * Beim Server für Push anmelden und ihm die Fahrt geben.
+   *
+   * @param {boolean} confirm eine Bestätigung schicken lassen (nur beim
+   *   Einschalten - dann sieht man gleich, dass es ankommt)
+   * @returns {Promise<boolean>} ob es geklappt hat
+   */
+  async enablePush(confirm = false) {
+    if (!LiveTracker.canPush() || !this.journey) return false;
+    try {
+      const { key, running } = await api.pushKey();
+      const reg = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, nein) => setTimeout(() => nein(new Error('kein Service Worker')), 6000)),
+      ]);
+      let sub = await reg.pushManager.getSubscription();
+      // Mit einem anderen Serverschlüssel angemeldet (neu erzeugt): neu anmelden.
+      const alt = sub?.options?.applicationServerKey;
+      if (sub && alt && btoa(String.fromCharCode(...new Uint8Array(alt))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') !== key) {
+        await sub.unsubscribe();
+        sub = null;
+      }
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uBytes(key) });
+      }
+      const res = await api.pushSubscribe({ subscription: sub.toJSON(), journey: this.journey, confirm });
+      this.push = { on: true, running: Boolean(res.running ?? running) };
+      return true;
+    } catch (err) {
+      console.warn('[push]', err);
+      this.push = { on: false, running: false };
+      return false;
+    }
+  }
+
+  /** Beim Server abmelden - die Anmeldung im Browser bleibt für das nächste Mal. */
+  async disablePush() {
+    const war = this.push?.on;
+    this.push = { on: false, running: false };
+    if (!war || !LiveTracker.canPush()) return;
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = await reg?.pushManager.getSubscription();
+      if (sub) await api.pushUnsubscribe(sub.endpoint);
+    } catch { /* der Server räumt nach der Ankunft ohnehin auf */ }
+  }
+
+  /**
    * Läuft gerade eine Verfolgung für diese Verbindung?
    *
    * Verglichen wird die ID, nicht das Objekt: nach einer neuen Suche sind die
@@ -329,13 +403,16 @@ ${url.href}`);
           if (db.train?.hasRealtime) return db;
         } catch { /* dann eben der Fahrplan von HAFAS */ }
       }
-      // Schweizer Abschnitt ohne Ist-Zeit: die Prognose der SBB über
-      // opendata.ch, eingesetzt in den Zuglauf von HAFAS.
+      // Schweizer Abschnitt ohne Ist-Zeit: die Prognose der SBB - über OJP,
+      // wenn der Server einen Schlüssel hat, sonst über opendata.ch -,
+      // eingesetzt in den Zuglauf von HAFAS. Die Zugnummer findet den Zug
+      // auf der Tafel sicherer als Gattung und Minute.
       const ch = (id) => /^85\d{5}$/.test(String(id || ''));
       if (!res.train?.hasRealtime && ch(leg.from?.id) && ch(leg.to?.id)) {
         try {
           const sbb = await api.trainRun({
             chFrom: leg.from.id, chTo: leg.to.id, cat: leg.category || '',
+            num: /^\d{1,6}$/.test(String(leg.trainNumber || '')) ? leg.trainNumber : '',
             dir: leg.direction || '', dep: leg.departure, arr: leg.arrival,
           });
           if (sbb.train?.hasRealtime) {
@@ -364,6 +441,8 @@ ${url.href}`);
    *
    * Die Prognose gilt für Ein- und Ausstieg; die Halte dazwischen werden
    * um die Verspätung verschoben, der Rest des Laufs bleibt, wie er ist.
+   * Kommt sie von OJP, kennt sie jeden Halt dazwischen einzeln (`sbb.stops`,
+   * über die UIC-Nummer zugeordnet) - dann gelten deren Zeiten.
    */
   static withPrognosis(run, leg, sbb) {
     const stops = run?.stops || [];
@@ -372,15 +451,24 @@ ${url.href}`);
     const b = idx(leg.to);
     const delay = Number.isFinite(sbb.delay) ? sbb.delay : null;
     const shift = (iso) => (iso && delay !== null ? new Date(Date.parse(iso) + delay * 60000).toISOString() : null);
+    const genau = new Map((sbb.stops || []).filter((s) => s.id).map((s) => [String(s.id), s]));
     const neu = stops.map((s, i) => {
+      const g = genau.get(String(s.id));
       if (i === a) return { ...s, departureReal: sbb.departureReal ?? shift(s.departure), platform: sbb.platformFrom ?? s.platform };
       if (i === b) return { ...s, arrivalReal: sbb.arrivalReal ?? shift(s.arrival), platform: sbb.platformTo ?? s.platform };
       if (a >= 0 && b > a && i > a && i < b) {
-        return { ...s, departureReal: shift(s.departure), arrivalReal: shift(s.arrival) };
+        return g
+          ? { ...s, departureReal: g.departureReal ?? shift(s.departure), arrivalReal: g.arrivalReal ?? shift(s.arrival),
+            platform: g.platform ?? s.platform, cancelled: g.cancelled || s.cancelled }
+          : { ...s, departureReal: shift(s.departure), arrivalReal: shift(s.arrival) };
       }
       return s;
     });
-    return { ...run, stops: neu, hasRealtime: true, delay: delay ?? run?.delay, realtimeSource: 'opendata.ch' };
+    return {
+      ...run, stops: neu, hasRealtime: true, delay: delay ?? run?.delay,
+      cancelled: Boolean(run?.cancelled || sbb.cancelled),
+      realtimeSource: sbb.source === 'ojp' ? 'OJP (SBB)' : 'opendata.ch',
+    };
   }
 
   /**
@@ -436,6 +524,10 @@ ${url.href}`);
     this.onChange?.();
     this.onJourneyChange?.(journey);
 
+    // Sind Benachrichtigungen an, bekommt der Server die (neue) Fahrt - auch
+    // nach einem Neuladen oder wenn eine Alternative übernommen wurde.
+    if (this.notify) this.enablePush(false).then(() => this.render());
+
     // HINSCHAUEN LASSEN. Das Feld sitzt unter der Karte, der Knopf steht auf
     // einer Verbindungskarte weiter unten — bei der fünften Verbindung liegt
     // zwischen beiden eine Bildschirmhöhe. Ohne diesen Sprung sah es aus, als
@@ -452,6 +544,7 @@ ${url.href}`);
   stop() {
     this.stopTimer();
     this.stopGps();
+    this.disablePush();
     this.journey = null;
     this.legs = [];
     this.map?.setTrackedRoute(null);
@@ -568,27 +661,34 @@ ${url.href}`);
         leg.operator === 'MVG' || (leg.stops || []).some((s) => /münchen|munchen/i.test(s.name || '')));
     if (!inMunich) { this.messages = []; return; }
 
+    // NUR ABSCHNITTE IN MÜNCHEN. "S6" gibt es auch am Bodensee (Radolfzell–
+    // Singen); eine Fahrt München → Zürich bekam deshalb die Sperrungen der
+    // Münchner S6. Und je Abschnitt merken, wann man drin sitzt: eine
+    // Sperrung in der Nacht zum 13.10. betrifft die Fahrt heute nicht.
     const MVG_TYPES = ['S', 'U', 'Tram', 'Bus'];
-    const lines = new Set();
+    const imMvv = (s) => s?.lat != null && s?.lon != null
+      ? s.lat >= 47.85 && s.lat <= 48.45 && s.lon >= 11.10 && s.lon <= 12.10
+      : /münchen|munchen/i.test(s?.name || '');
+    const fenster = new Map();   // Linie -> [von, bis] in ms
     for (const leg of this.journey.legs || []) {
       if (leg.mode !== 'train') continue;
       if (!MVG_TYPES.includes(typeOf(leg).label)) continue;
+      const halte = [leg.from, leg.to, ...(leg.stops || [])];
+      if (leg.operator !== 'MVG' && !halte.some(imMvv)) continue;
+      const von = Date.parse(leg.departureReal || leg.departure || '') - 30 * 60000;
+      const bis = Date.parse(leg.arrivalReal || leg.arrival || '') + 30 * 60000;
       for (const v of [leg.line, leg.name, leg.category]) {
-        if (v) lines.add(String(v).trim().toUpperCase());
+        if (v) fenster.set(String(v).trim().toUpperCase(), [von, bis]);
       }
     }
-    if (lines.size === 0) { this.messages = []; return; }
+    if (fenster.size === 0) { this.messages = []; return; }
 
     try {
       const res = await api.disruptions();
-      const now = Date.now();
-      this.messages = (res.disruptions || []).filter((m) => {
-        const from = Date.parse(m.validFrom || '');
-        const to = Date.parse(m.validTo || '');
-        if (Number.isFinite(from) && now < from) return false;
-        if (Number.isFinite(to) && now > to) return false;
-        return (m.lines || []).some((l) => lines.has(String(l.label || '').toUpperCase()));
-      }).slice(0, 4);
+      this.messages = (res.disruptions || []).filter((m) => (m.lines || []).some((l) => {
+        const f = fenster.get(String(l.label || '').toUpperCase());
+        return f && affectsWindow(m, Number.isFinite(f[0]) ? f[0] : Date.now(), Number.isFinite(f[1]) ? f[1] : Date.now());
+      })).slice(0, 4);
     } catch {
       this.messages = []; // Beiwerk - Fehler bleiben still.
     }
@@ -602,6 +702,7 @@ ${url.href}`);
     if (this.notify) {
       this.notify = false;
       writeNotifyPref(false);
+      this.disablePush();
       this.render();
       return;
     }
@@ -625,6 +726,9 @@ ${url.href}`);
     // Was jetzt schon ist, hat man eben gesehen - gemeldet wird ab hier.
     this.collectAlerts().forEach((a) => this.alerted.set(a.key, a.level));
     this.alertBaseline = false;
+    this.render();
+    // Und beim Server anmelden, damit es auch mit gesperrtem Bildschirm geht.
+    await this.enablePush(true);
     this.render();
   }
 
@@ -711,6 +815,9 @@ ${url.href}`);
       return;
     }
     if (!this.notify) return;
+    // Meldet der Server (Push, Minutentakt läuft), meldet die Seite nicht
+    // noch einmal - sonst käme alles doppelt.
+    if (this.push?.on && this.push?.running) return;
 
     for (const a of alerts) {
       const vorher = this.alerted.get(a.key);
@@ -1509,8 +1616,8 @@ ${url.href}`);
       if (this.notify) bell.classList.add('is-on');
       bell.setAttribute('aria-pressed', String(this.notify));
       bell.title = this.notify
-        ? 'Meldet Ausfall, Verspätung ab 5 min und Gleiswechsel — antippen zum Abschalten.'
-        : 'Bei Ausfall, Verspätung ab 5 min oder Gleiswechsel eine Benachrichtigung schicken.';
+        ? 'Meldet Umstiege vorher, Ausfall, Verspätung ab 5 min und Gleiswechsel — antippen zum Abschalten.'
+        : 'Umstiege ankündigen und bei Ausfall, Verspätung ab 5 min oder Gleiswechsel melden — auch bei gesperrtem Bildschirm.';
       bell.addEventListener('click', () => this.toggleNotify());
       ctl.append(bell);
     }
@@ -1538,6 +1645,24 @@ ${url.href}`);
     ctl.append(close);
 
     head.append(ctl);
+
+    // Was "Hinweise an" gerade bedeutet - das hängt am Gerät und am Server.
+    if (this.notify) {
+      let text;
+      if (this.push?.on && this.push?.running) {
+        text = 'Auch bei gesperrtem Bildschirm: Umstieg 5 Min vorher (Nahverkehr 2), Ankunft, '
+          + 'Verspätung, Gleiswechsel, Ausfall.';
+      } else if (this.push?.on) {
+        text = 'Hinweise vorerst nur, solange diese Seite offen ist — der Server-Takt für den '
+          + 'gesperrten Bildschirm läuft gerade nicht.';
+      } else if (IS_IOS && !IS_STANDALONE) {
+        text = 'Bei gesperrtem Bildschirm geht es auf dem iPhone nur als App: in Safari Teilen → '
+          + '„Zum Home-Bildschirm", dann dort „Benachrichtigen".';
+      } else {
+        text = 'Hinweise, solange diese Seite offen ist.';
+      }
+      head.append(el('p', 'live__notify-note', text));
+    }
     return head;
   }
 

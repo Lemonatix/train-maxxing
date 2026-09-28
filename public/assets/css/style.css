@@ -1934,6 +1934,13 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .live__gps.is-on { border-color: var(--green); background: var(--green-soft); color: var(--green); }
 
+.live__notify-note {
+  flex-basis: 100%;
+  margin: 0.25rem 0 0;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
 .live__stamp { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
 
 .live__close {
@@ -2809,6 +2816,37 @@ details.live__msg .live__msg-text {
 
 .xfer__legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
 .xfer__legend-sym { color: var(--purple); font-weight: 700; }
+.xfer__legend-item.is-broken .xfer__legend-sym { color: var(--rose); }
+
+/* Außer Betrieb laut DB (FaSta): rot, durchgestrichen, nicht hervorgehoben -
+   ein Aufzug, der steht, ist kein Weg. */
+.map__conn.is-broken { opacity: 1; }
+.map__conn.is-broken .map__conn-line { stroke: var(--rose); stroke-dasharray: 3 3; }
+.map__conn.is-broken .map__conn-box { stroke: var(--rose); stroke-width: 2; }
+.map__conn.is-broken .map__conn-glyph,
+.map__conn.is-broken .map__conn-arrow,
+.map__conn.is-broken .map__conn-tag { fill: var(--rose); opacity: 0.5; }
+.map__conn-x {
+  fill: var(--rose);
+  font-size: 14px;
+  font-weight: 800;
+  paint-order: stroke;
+  stroke: var(--map-label-halo);
+  stroke-width: 2.5px;
+  pointer-events: none;
+}
+
+.xfer__outages {
+  margin: 0.4rem 0;
+  padding: 0.45rem 0.6rem;
+  border-left: 2px solid var(--rose);
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--rose) 9%, transparent);
+  font-size: 0.82rem;
+}
+.xfer__outages-title { margin: 0 0 0.2rem; font-weight: 600; color: var(--rose); }
+.xfer__outages-list { margin: 0; padding-left: 1.1rem; }
+.xfer__outages-list li { margin: 0.1rem 0; }
 .xfer__legend-note { flex-basis: 100%; }
 
 /* --- Wagenreihung im Umstiegsplan ------------------------------------ */
@@ -3335,6 +3373,15 @@ details.live__msg .live__msg-text {
   border-top: 1px dashed var(--border);
 }
 .mvg-ticker__item:first-child { border-top: 0; }
+/* Angekündigt, noch nicht in Kraft ("ab 12.10. 21:20"). */
+.mvg-ticker__when {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .mvg-ticker__type {
   font-size: 0.7rem;
   text-transform: uppercase;

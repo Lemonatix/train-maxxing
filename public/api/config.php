@@ -4,9 +4,14 @@
  *
  * Diese Datei ist die einzige, die du normalerweise anfassen musst, wenn sich
  * etwas am Hosting oder an den Upstream-APIs ändert.
+ *
+ * SCHLÜSSEL GEHÖREN NICHT HIERHER. Diese Datei liegt im öffentlichen
+ * GitHub-Repository. API-Schlüssel stehen in config.local.php daneben: die
+ * ist per .gitignore ausgenommen und per .htaccess gesperrt, und ihr Inhalt
+ * wird unten über diese Einstellungen gelegt. Vorlage: config.local.example.php.
  */
 
-return [
+$config = [
     // Wer darf das Frontend-API aufrufen? Leeres Array = gleiche Domain (empfohlen).
     // Beispiel: ['https://deine-domain.tld'] wenn das Frontend woanders liegt.
     'cors_origins' => [],
@@ -205,3 +210,14 @@ return [
         ],
     ],
 ];
+
+// Schlüssel und andere lokale Abweichungen - siehe oben.
+$lokal = __DIR__ . '/config.local.php';
+if (is_file($lokal)) {
+    $zusatz = require $lokal;
+    if (is_array($zusatz)) {
+        $config = array_replace_recursive($config, $zusatz);
+    }
+}
+
+return $config;

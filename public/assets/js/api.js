@@ -84,6 +84,15 @@ export const api = {
   locations: (q, opts) => call('locations', { q }, opts),
 
   /**
+   * Benachrichtigungen bei gesperrtem Bildschirm (Web Push). `pushKey` liefert
+   * den öffentlichen Schlüssel des Servers und ob sein Minutentakt läuft;
+   * 404, wenn der Server kein Push eingerichtet hat.
+   */
+  pushKey: (opts) => call('pushkey', {}, opts),
+  pushSubscribe: (body) => post('pushsubscribe', body),
+  pushUnsubscribe: (endpoint) => post('pushunsubscribe', { endpoint }),
+
+  /**
    * Fußweg zwischen zwei Punkten, auf der Straße: `{ geometry, distance,
    * durationMin }`. Für die gestrichelte Linie von der Haustür zur
    * Haltestelle, wenn der Fahrplan keine mitliefert.
@@ -190,10 +199,13 @@ export const api = {
    * sie am selben Bahnsteig liegen. Beide dürfen leer bleiben - dann kommt
    * schlicht der ganze Bahnhof zurück.
    */
-  platforms: (lat, lon, from, to, opts) =>
+  platforms: (lat, lon, from, to, eva, opts) =>
     call('platforms', {
       lat: lat.toFixed(5), lon: lon.toFixed(5),
       from: from || '', to: to || '',
+      // Mit EVA-Nummer kommt an deutschen Bahnhöfen der Zustand der Aufzüge
+      // und Rolltreppen von der DB dazu (FaSta).
+      eva: /^\d{7}$/.test(String(eva || '')) ? String(eva) : '',
     }, opts),
 
   bestPrices: (params, opts) =>

@@ -845,6 +845,20 @@ final class Mvg
                 ];
             }
 
+            // WANN ES WIRKLICH GILT. validFrom/validTo ist bei der MVG das
+            // Veröffentlichungsfenster: die Sperrung "Nacht 12./13.10." steht
+            // ab dem 28.09. drin. Die eigentlichen Zeiträume stehen in
+            // incidentDurations - ohne sie hing die Meldung zwei Wochen
+            // vorher an jeder Fahrt mit der Linie.
+            $zeiten = [];
+            foreach ((array) ($m['incidentDurations'] ?? []) as $z) {
+                $von = self::toIsoTime($z['from'] ?? null);
+                $bis = self::toIsoTime($z['to'] ?? null);
+                if ($von !== null || $bis !== null) {
+                    $zeiten[] = ['from' => $von, 'to' => $bis];
+                }
+            }
+
             $out[] = [
                 'id'          => (string) ($m['id'] ?? ($m['title'] ?? '')),
                 'type'        => (string) ($m['type'] ?? ''),
@@ -855,6 +869,7 @@ final class Mvg
                 'description' => Text::plain((string) ($m['description'] ?? '')),
                 'validFrom'   => self::toIsoTime($m['validFrom'] ?? null),
                 'validTo'     => self::toIsoTime($m['validTo'] ?? null),
+                'incidents'   => $zeiten,
                 'lines'       => $lines,
                 'provider'    => (string) ($m['provider'] ?? ''),
             ];
@@ -915,6 +930,17 @@ final class Mvg
     /** Ist eine Meldung im Zeitfenster? Ohne Angabe: als aktiv werten. */
     private static function isActive(array $m, int $now): bool
     {
+        // Mit Zeiträumen zählen die: eine angekündigte Sperrung ist noch nicht aktiv.
+        if (($m['incidents'] ?? []) !== []) {
+            foreach ($m['incidents'] as $z) {
+                $a = $z['from'] !== null ? strtotime((string) $z['from']) : PHP_INT_MIN;
+                $b = $z['to'] !== null ? strtotime((string) $z['to']) : PHP_INT_MAX;
+                if ($a <= $now && $now <= $b) {
+                    return true;
+                }
+            }
+            return false;
+        }
         $from = $m['validFrom'] !== null ? strtotime((string) $m['validFrom']) : null;
         $to   = $m['validTo']   !== null ? strtotime((string) $m['validTo'])   : null;
         if ($from !== null && $from !== false && $from > $now) {

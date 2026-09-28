@@ -98,7 +98,9 @@ export const TRAIN_MODELS = [
     note: 'Neigetechnik.', comfort: 7 },
   { id: 'fvdosto', label: 'FV-Dosto (RABe 502)', series: ['502'], categories: ['IC', 'IR'],
     note: 'SBB-Doppelstock, Wankkompensation.', comfort: 6 },
-  { id: 'ic2000',  label: 'IC 2000',       series: [],            categories: ['IC', 'IR'],
+  // '2000' ist keine Baureihe, sondern die Kennung, die der Train Formation
+  // Service der SBB für die IC-2000-Doppelstockwagen liefert (Bauart "(2E)").
+  { id: 'ic2000',  label: 'IC 2000',       series: ['2000'],      categories: ['IC', 'IR'],
     note: 'SBB-Doppelstockwagen.', comfort: 7 },
   { id: 'railjet', label: 'railjet',       series: ['1116'],      categories: ['RJ', 'RJX'],
     sole: true, note: 'ÖBB-Flaggschiff, sehr gleichmäßiger Lauf.', comfort: 8 },

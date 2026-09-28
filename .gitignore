@@ -5,3 +5,6 @@ public/api/cache/*
 
 .DS_Store
 *.log
+
+# API-Schlüssel - nie ins öffentliche Repository (siehe public/api/config.php)
+public/api/config.local.php

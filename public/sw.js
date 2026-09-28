@@ -22,7 +22,7 @@
 
 // Bei jeder Änderung an dieser Datei hochzählen - dann räumt activate()
 // die alten Caches weg.
-const VERSION = 'omnirail-v3';
+const VERSION = 'omnirail-v4';
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 
@@ -133,6 +133,24 @@ async function trim(cache) {
   const keys = await cache.keys();
   for (let i = 0; i < keys.length - MAX_DATA; i++) await cache.delete(keys[i]);
 }
+
+// Web Push vom Server (lib/PushWatch.php): Umstieg, Verspätung, Gleiswechsel
+// - auch wenn die Seite zu ist und der Bildschirm gesperrt. Die Nachricht
+// ist JSON: {title, body, tag}. Gleicher tag ersetzt die vorige Meldung
+// derselben Sorte, statt sie zu stapeln.
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch { d = { body: event.data?.text() }; }
+  event.waitUntil(self.registration.showNotification(d.title || 'OmniRail', {
+    body: d.body || '',
+    tag: d.tag || 'omnirail',
+    renotify: true,
+    icon: '/assets/pictures/MMR_v2.png?v=2',
+    badge: '/assets/pictures/MMR_v2.png?v=2',
+    vibrate: [180, 90, 180],
+    data: { url: d.url || './' },
+  }));
+});
 
 // Tipp auf eine Benachrichtigung der Live-Verfolgung: zur App zurück.
 self.addEventListener('notificationclick', (event) => {

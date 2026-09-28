@@ -45,6 +45,13 @@ final class Health
         // sichtbar sein, bevor jemand fragt, warum die Echtzeit fehlt.
         'transport.opendata.ch' => 'opendata.ch',
         'routing.openstreetmap.de' => 'fusswege',
+        // Mit Schlüssel (config.local.php): DB API Marketplace und OJP.
+        'apis.deutschebahn.com' => 'db-api',
+        'api.opentransportdata.swiss' => 'ojp',
+        // Web Push: ob die Benachrichtigungen bei den Push-Diensten ankommen.
+        'fcm.googleapis.com' => 'push',
+        'web.push.apple.com' => 'push',
+        'updates.push.services.mozilla.com' => 'push',
     ];
 
     private static ?string $dir = null;

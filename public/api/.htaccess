@@ -1,6 +1,6 @@
-# config.php nicht direkt ausliefern (greift nur, falls PHP mal nicht laeuft
+# config.php und config.local.php (Schlüssel!) nicht direkt ausliefern (greift nur, falls PHP mal nicht laeuft
 # und der Server die Datei als Text ausgibt).
-<Files "config.php">
+<FilesMatch "^config(\.local)?(\.example)?\.php$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>
@@ -8,4 +8,4 @@
         Order allow,deny
         Deny from all
     </IfModule>
-</Files>
+</FilesMatch>

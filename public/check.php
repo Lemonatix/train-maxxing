@@ -18,6 +18,12 @@ require __DIR__ . '/api/lib/Http.php';
 require __DIR__ . '/api/lib/Health.php';
 require __DIR__ . '/api/lib/Cache.php';
 require __DIR__ . '/api/lib/Walks.php';
+require __DIR__ . '/api/lib/Text.php';
+require __DIR__ . '/api/lib/Providers/DbApi.php';
+require __DIR__ . '/api/lib/Providers/SwissOjp.php';
+require __DIR__ . '/api/lib/Providers/SwissFormation.php';
+require __DIR__ . '/api/lib/WebPush.php';
+require __DIR__ . '/api/lib/PushWatch.php';
 require __DIR__ . '/api/lib/Providers/OebbHafas.php';
 require __DIR__ . '/api/lib/Providers/DbVendo.php';
 require __DIR__ . '/api/lib/Providers/Mvg.php';
@@ -91,6 +97,29 @@ $checks[] = [
         : '',
 ];
 
+// Benachrichtigungen bei gesperrtem Bildschirm: Schlüssel da? Läuft der
+// Cronjob? Ohne ihn verschickt der Server nichts - und das merkt sonst
+// niemand, weil die App dann still auf ihre eigenen Hinweise zurückfällt.
+$pushCfg = $config['push'] ?? [];
+if (($pushCfg['public'] ?? '') !== '') {
+    $pushOk = (new WebPush(new Http(5), $pushCfg))->isConfigured();
+    $watch = new PushWatch((string) $config['cache_dir']);
+    $takt = $watch->lastTick();
+    $intervall = max(60, (int) ($pushCfg['interval'] ?? 60));
+    $laeuft = $takt !== null && time() - $takt < 3 * $intervall;
+    $checks[] = [
+        'name'   => 'Benachrichtigungen bei gesperrtem Bildschirm (Web Push)',
+        'state'  => !$pushOk ? 'fail' : ($laeuft ? 'ok' : 'warn'),
+        'detail' => !$pushOk
+            ? 'Schlüssel unvollständig oder OpenSSL ohne EC-Unterstützung'
+            : ($laeuft ? 'Cronjob läuft (zuletzt vor ' . (time() - $takt) . ' s)' : ($takt === null ? 'Cronjob lief noch nie' : 'Cronjob lief zuletzt vor ' . round((time() - $takt) / 60) . ' min'))
+              . ', ' . $watch->count() . ' Fahrt(en) angemeldet',
+        'hint'   => $laeuft || !$pushOk ? '' : 'In der Hoster-Verwaltung einen Cronjob anlegen, jede Minute: '
+            . 'php …/public/api/push_worker.php - oder per URL …/api/index.php?action=pushtick&key=<tick_key>. '
+            . 'Ohne ihn melden sich Hinweise nur, solange die Seite offen ist.',
+    ];
+}
+
 $cache   = new Cache((string) $config['cache_dir']);
 $cacheOk = $cache->isAvailable();
 $checks[] = [
@@ -152,6 +181,54 @@ if ($curlOk) {
             'hint'   => $r['ok']
                 ? 'Münchner U-Bahn-Halte werden in der Ortssuche gefunden, der Störungsticker ist aktiv.'
                 : 'Ohne MVG bleibt die Ortssuche für den Münchner Nahverkehr auf DB/ÖBB angewiesen und der Störungsticker fehlt. Nicht kritisch.',
+        ];
+    }
+
+    // Die Dienste mit Schlüssel (api/config.local.php). Ohne Schlüssel kein
+    // Eintrag - sie sind eine Ergänzung, keine Voraussetzung. Der Schlüssel
+    // selbst erscheint hier nie, nur ob er angenommen wird.
+    $dbApi = new DbApi($http, $config['providers']['dbapi'] ?? []);
+    if ($dbApi->isConfigured()) {
+        $t0 = microtime(true);
+        $nr = $dbApi->stationNumber('8000261');
+        $ms = (int) round((microtime(true) - $t0) * 1000);
+        $checks[] = [
+            'name'   => 'DB API Marketplace - Aufzüge, Tafel-Echtzeit (Schlüssel)',
+            'state'  => $nr !== null ? 'ok' : 'warn',
+            'detail' => $nr !== null ? 'Schlüssel angenommen, ' . $ms . ' ms' : 'keine Antwort - Schlüssel falsch oder API nicht abonniert?',
+            'hint'   => $nr !== null ? '' : 'Im Portal prüfen, ob StaDa, FaSta und Timetables abonniert sind.',
+        ];
+    }
+    $ojp = new SwissOjp($http, $config['providers']['swiss'] ?? []);
+    if ($ojp->isConfigured()) {
+        $t0 = microtime(true);
+        $r  = $ojp->stopEvents('8503000', time(), false, 1);
+        $ms = (int) round((microtime(true) - $t0) * 1000);
+        $checks[] = [
+            'name'   => 'opentransportdata.swiss OJP 2.0 - Schweizer Echtzeit (Schlüssel)',
+            'state'  => $r['ok'] ? 'ok' : 'warn',
+            'detail' => $r['ok'] ? 'Schlüssel angenommen, ' . $ms . ' ms' : ($r['error'] ?? 'Fehler'),
+            'hint'   => $r['ok'] ? '' : 'Im Portal prüfen, ob "OJP 2.0" abonniert ist. Ohne fällt die App auf transport.opendata.ch zurück.',
+        ];
+    }
+    $sf = new SwissFormation($http, $config['providers']['swiss'] ?? []);
+    if ($sf->isConfigured()) {
+        // Irgendeinen Zug von heute fragen: "kenne ich nicht" (HTTP 400)
+        // heißt ebenfalls, dass der Schlüssel angenommen wurde.
+        $t0  = microtime(true);
+        $url = 'https://api.opentransportdata.swiss/formation/v1/formations_full?evu=SBBP&operationDate='
+            . (new DateTimeImmutable('now', new DateTimeZone('Europe/Zurich')))->format('Y-m-d') . '&trainNumber=1';
+        $r   = $http->getJson($url, ['Authorization' => 'Bearer ' . $config['providers']['swiss']['formation_token']]);
+        $ms  = (int) round((microtime(true) - $t0) * 1000);
+        $an  = $r['ok'] || $r['status'] === 400;
+        if ($r['status'] === 400) {
+            Health::retract($url);
+        }
+        $checks[] = [
+            'name'   => 'opentransportdata.swiss Formation - SBB-Wagenreihung (Schlüssel)',
+            'state'  => $an ? 'ok' : 'warn',
+            'detail' => $an ? 'Schlüssel angenommen, ' . $ms . ' ms' : 'HTTP ' . $r['status'],
+            'hint'   => $an ? '' : 'Im Portal prüfen, ob der "Train Formation Service" abonniert ist.',
         ];
     }
 

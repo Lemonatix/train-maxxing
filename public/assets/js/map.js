@@ -1195,8 +1195,14 @@ export class RouteMap {
     for (const c of sichtbar) {
       const andere = c.levels.filter((lv) => lv !== L && lv >= lo && lv <= hi);
       const nuetzlich = richtung !== 0 && andere.some((lv) => Math.sign(lv - L) === richtung);
-      const cls = `map__conn map__conn--${c.type}${nuetzlich ? ' is-useful' : ''}`;
+      // Zustand von der DB (FaSta), wo bekannt: ein Aufzug, der nicht
+      // fährt, ist kein Weg - er steht durchgestrichen da, nicht hervorgehoben.
+      const kaputt = c.state === 'inactive';
+      const cls = `map__conn map__conn--${c.type}${nuetzlich && !kaputt ? ' is-useful' : ''}${kaputt ? ' is-broken' : ''}`;
       const titel = `${NAMEN[c.type] || 'Verbinder'} · Ebene ${c.levels.map(levelName).join(' ↔ ')}`
+        + (c.description ? ` · ${c.description}` : '')
+        + (kaputt ? ` · AUSSER BETRIEB${c.stateText && c.stateText !== 'außer Betrieb' ? ` (${c.stateText})` : ''} laut DB` : '')
+        + (c.state === 'active' ? ' · in Betrieb laut DB' : '')
         + (c.wheelchair === false ? ' · nicht rollstuhlgerecht' : '');
 
       const [x, y] = toPx(c.pos);
@@ -1238,6 +1244,12 @@ export class RouteMap {
         };
         if (c.type === 'escalator' && c.dir === 'forward') pfeil(a, b);
         if (c.type === 'escalator' && c.dir === 'backward') pfeil(b, a);
+      }
+
+      if (kaputt) {
+        gruppe.append(svgEl('text', {
+          x: x.toFixed(1), y: (y + 4.5).toFixed(1), 'text-anchor': 'middle', class: 'map__conn-x',
+        }, '✕'));
       }
 
       // Wohin führt er? Bei einem Aufzug über fünf Ebenen die äußersten.

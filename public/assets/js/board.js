@@ -279,7 +279,12 @@ export function initBoard(root) {
       status.textContent = s.error;
     } else {
       status.className = 'status';
-      const quelle = (s.sources || []).includes('mvg') ? ' · mit U-Bahn, Tram und Bus der MVG' : '';
+      const src = s.sources || [];
+      const quelle = (src.includes('mvg') ? ' · mit U-Bahn, Tram und Bus der MVG' : '')
+        // Wo HAFAS nur den Fahrplan kennt, kommen Ist-Zeit und Gleiswechsel
+        // von der Bahn selbst - das soll man sehen.
+        + (src.includes('db') ? ' · Echtzeit der DB' : '')
+        + (src.includes('ojp') ? ' · Echtzeit der SBB' : '');
       status.textContent = `${s.arrivals ? 'Ankünfte' : 'Abfahrten'} ${s.station.name}`
         + `${s.time ? ` ab ${s.time}` : ''}${quelle}${s.loading ? ' · aktualisiert …' : ''}`
         + (s.fromCache ? ' · offline, gespeicherter Stand' : '');

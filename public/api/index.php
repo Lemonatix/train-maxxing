@@ -22,6 +22,10 @@
  *   ?action=works                           Bauarbeiten im Netz, mit Abschnitt und Zeitraum
  *   ?action=disruptions                     MVG-Störungsticker München
  *   ?action=walkroute&from=lat,lon&to=lat,lon  Fußweg auf der Straße (Linie, Länge, Gehzeit)
+ *   ?action=pushkey                         Öffentlicher VAPID-Schlüssel für Web Push
+ *   POST ?action=pushsubscribe              Verfolgte Fahrt für Benachrichtigungen ablegen
+ *   POST ?action=pushunsubscribe            … und wieder abmelden
+ *   ?action=pushtick&key=..                 Minutentakt für die Benachrichtigungen (Cronjob)
  *
  * Strategie bei journeys:
  *   1. Fahrplan von der ÖBB holen (zuverlässig, mit Zuggattung + Ländercodes)
@@ -124,6 +128,8 @@ require __DIR__ . '/lib/Fleet.php';
 require __DIR__ . '/lib/Health.php';
 require __DIR__ . '/lib/Walks.php';
 require __DIR__ . '/lib/MvgRail.php';
+require __DIR__ . '/lib/WebPush.php';
+require __DIR__ . '/lib/PushWatch.php';
 require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
 require __DIR__ . '/lib/Providers/CoachSequence.php';
@@ -131,6 +137,9 @@ require __DIR__ . '/lib/Providers/Mvg.php';
 require __DIR__ . '/lib/Providers/Overpass.php';
 require __DIR__ . '/lib/Providers/StreckenInfo.php';
 require __DIR__ . '/lib/Providers/SwissOpenData.php';
+require __DIR__ . '/lib/Providers/SwissOjp.php';
+require __DIR__ . '/lib/Providers/SwissFormation.php';
+require __DIR__ . '/lib/Providers/DbApi.php';
 require __DIR__ . '/lib/RailGeometry.php';
 require __DIR__ . '/lib/CityTrips.php';
 
@@ -207,6 +216,11 @@ const RATE_COST = [
     'bestprices'     => 5,
     'journeys'       => 5,
     'walkroute'      => 1,
+    'pushkey'        => 0,
+    'pushsubscribe'  => 5,
+    'pushunsubscribe' => 1,
+    // Geschützt über den Schlüssel; der Cronjob darf nie ausgesperrt werden.
+    'pushtick'       => 0,
 ];
 
 /** Voreinstellung für alles, was nicht in der Tabelle steht. */
@@ -297,8 +311,20 @@ try {
         case 'walkroute':
             handleWalkRoute($http, $config, $cache);
             break;
+        case 'pushkey':
+            handlePushKey($http, $config);
+            break;
+        case 'pushsubscribe':
+            handlePushSubscribe($http, $config);
+            break;
+        case 'pushunsubscribe':
+            handlePushUnsubscribe($config);
+            break;
+        case 'pushtick':
+            handlePushTick($http, $config, $cache);
+            break;
         default:
-            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, localroute, offers, departures, sequence, share, shared, fxrate, platforms, works, disruptions, walkroute', 400);
+            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, localroute, offers, departures, sequence, share, shared, fxrate, platforms, works, disruptions, walkroute, pushkey, pushsubscribe, pushunsubscribe, pushtick', 400);
     }
 } catch (Throwable $e) {
     // Details bleiben im Log, der Client bekommt nur eine generische Meldung.
@@ -515,9 +541,10 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
             'dir'  => mb_substr(trim((string) ($_GET['dir'] ?? '')), 0, 80),
             'dep'  => trim((string) ($_GET['dep'] ?? '')),
             'arr'  => trim((string) ($_GET['arr'] ?? '')),
+            'num'  => trim((string) ($_GET['num'] ?? '')),
         ];
         if (!preg_match('/^85\d{5}$/', $leg['from']) || !preg_match('/^85\d{5}$/', $leg['to'])
-            || !preg_match('/^[A-Za-z]{0,5}$/', $leg['cat'])
+            || !preg_match('/^[A-Za-z]{0,5}$/', $leg['cat']) || !preg_match('/^\d{0,6}$/', $leg['num'])
             || strtotime($leg['dep']) === false || strtotime($leg['arr']) === false) {
             fail('Parameter für die Schweizer Echtzeit ungültig.', 400);
         }
@@ -529,7 +556,19 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
         if ($cached !== null) {
             ok(['train' => $cached, 'cached' => true]);
         }
-        $res = (new SwissOpenData($http, $config['providers']['swiss']))->trip($leg);
+        // Mit Schlüssel zuerst OJP (offiziell, über die Zugnummer, mit allen
+        // Halten), sonst oder wenn OJP nichts findet opendata.ch.
+        $res = ['ok' => false, 'error' => null, 'data' => []];
+        $ojp = new SwissOjp($http, $config['providers']['swiss']);
+        if ($ojp->isConfigured()) {
+            $res = $ojp->trip($leg);
+        }
+        if (!$res['ok'] || empty($res['data']['hasRealtime'])) {
+            $alt = (new SwissOpenData($http, $config['providers']['swiss']))->trip($leg);
+            if ($alt['ok'] || !$res['ok']) {
+                $res = $alt;
+            }
+        }
         if (!$res['ok']) {
             fail('Schweizer Echtzeit nicht verfügbar: ' . $res['error'], 502);
         }
@@ -1071,6 +1110,17 @@ function handleDepartures(Http $http, array $config, Cache $cache): void
     }));
     usort($entries, static fn($a, $b) => strcmp((string) $a['planned'], (string) $b['planned']));
 
+    // ECHTZEIT DER BAHNEN SELBST. HAFAS kennt an vielen Bahnhöfen nur den
+    // Fahrplan (gemessen: Köln Hbf 0 von 30 Abfahrten mit Ist-Zeit, Bern 0
+    // von 14). Mit Schlüssel ergänzen die DB (Timetables) an deutschen und
+    // OJP an Schweizer Bahnhöfen Ist-Zeit, Gleiswechsel und Ausfall.
+    if (!$isMvg && $entries !== []) {
+        [$entries, $quelle] = enrichBoardRealtime($http, $config, $cache, $station, $entries, $von, $bis, $arrivals);
+        if ($quelle !== null) {
+            $sources[] = $quelle;
+        }
+    }
+
     $payload = [
         'station'    => $info,
         'arrivals'   => $arrivals,
@@ -1080,6 +1130,52 @@ function handleDepartures(Http $http, array $config, Cache $cache): void
     ];
     $cache->set($key, $payload);
     ok($payload + ['cached' => false]);
+}
+
+/**
+ * Eine Tafel um die Echtzeit von DB (Timetables) bzw. SBB (OJP) ergänzen.
+ * Ohne Schlüssel, bei anderen Ländern oder wenn die Quelle schweigt, bleibt
+ * die Tafel, wie sie ist.
+ *
+ * @return array{0:array,1:?string} Einträge und die beteiligte Quelle
+ */
+function enrichBoardRealtime(Http $http, array $config, Cache $cache, string $station, array $entries, int $von, int $bis, bool $arrivals): array
+{
+    try {
+        if (preg_match('/^80\d{5}$/', $station)) {
+            $db = new DbApi($http, $config['providers']['dbapi'] ?? [], $cache);
+            if (!$db->isConfigured()) {
+                return [$entries, null];
+            }
+            $res = $db->board($station, $von, $bis);
+            $r = DbApi::enrichBoard($entries, $res['ok'] ? $res['data'] : [], $arrivals);
+            return [$r['entries'], $r['matched'] > 0 ? 'db' : null];
+        }
+        if (preg_match('/^85\d{5}$/', $station)) {
+            $ojp = new SwissOjp($http, $config['providers']['swiss'] ?? []);
+            if (!$ojp->isConfigured()) {
+                return [$entries, null];
+            }
+            $key = sprintf('ojpboard:%s:%s:%d', $station, $arrivals ? 'a' : 'd', intdiv($von, 300));
+            $daten = $cache->get($key, 60);
+            if ($daten === null) {
+                // So viele Abfahrten, wie die Tafel zeigt - Zürich HB hat in
+                // einer Stunde über hundert.
+                $res = $ojp->stopEvents($station, $von - 60, $arrivals, min(150, max(30, count($entries) + 10)));
+                $daten = $res['ok'] ? array_map(static function ($e) {
+                    unset($e['onward'], $e['stop']);
+                    return $e;
+                }, $res['data']) : [];
+                $cache->set($key, $daten);
+            }
+            $r = SwissOjp::enrichBoard($entries, $daten);
+            return [$r['entries'], $r['matched'] > 0 ? 'ojp' : null];
+        }
+    } catch (Throwable $e) {
+        // Beiwerk: ein Fehler hier darf die Tafel nicht kosten.
+        error_log('[train-maxxing] Tafel-Echtzeit: ' . $e->getMessage());
+    }
+    return [$entries, null];
 }
 
 /**
@@ -1140,6 +1236,17 @@ function handleSequence(Http $http, array $config, Cache $cache): void
         || !preg_match('/^\d{1,6}$/', $num) || strtotime($time) === false) {
         fail('Parameter "eva", "cat", "num" und "time" sind erforderlich.', 400);
     }
+    // Schweiz: Train Formation Service (mit Schlüssel). Nur für heute - so
+    // weit reicht der Dienst.
+    if (str_starts_with($eva, '85')) {
+        $sf = new SwissFormation($http, $config['providers']['swiss'] ?? []);
+        $tag = (new DateTimeImmutable($time))->setTimezone(new DateTimeZone('Europe/Zurich'))->format('Y-m-d');
+        if (!$sf->isConfigured() || $tag !== (new DateTimeImmutable('now', new DateTimeZone('Europe/Zurich')))->format('Y-m-d')) {
+            ok(['sequence' => null]);
+        }
+        ok(['sequence' => swissFormation($sf, $cache, $num, $tag, $eva)]);
+    }
+
     $wr = $config['providers']['wagenreihung'] ?? [];
     if (($wr['enabled'] ?? false) !== true || !str_starts_with($eva, '80')
         || !in_array($cat, ['ICE', 'IC', 'EC', 'ECE'], true)) {
@@ -1147,6 +1254,88 @@ function handleSequence(Http $http, array $config, Cache $cache): void
     }
     $cs = new CoachSequence($http, $wr, $cache);
     ok(['sequence' => $cs->sequence($eva, $num, $cat, $time)]);
+}
+
+/**
+ * Die Reihung eines Schweizer Zuges an einem Halt, gecacht.
+ *
+ * Gemerkt wird die ganze Formation (eine halbe Stunde), nicht die Reihung
+ * am Halt: beim Umstieg fragt die App denselben Zug an zwei Bahnhöfen.
+ */
+function swissFormation(SwissFormation $sf, Cache $cache, string $num, string $tag, string $uic): ?array
+{
+    $key = 'sf:' . $tag . ':' . $num;
+    $full = $cache->get($key, 1800);
+    if ($full === null) {
+        $full = $sf->full($num, $tag) ?? [];
+        $cache->set($key, $full);
+    }
+    return $full === [] ? null : SwissFormation::atStop($full, $uic);
+}
+
+/**
+ * Baureihen der Schweizer Züge aus dem Train Formation Service.
+ *
+ * Wie CoachSequence::enrichAll() für die DB: nur am Reisetag, höchstens
+ * acht Züge je Suche, gleichzeitig. Was gefunden wird, merkt sich danach
+ * Fleet unter der Zugnummer - dann weiß auch die Suche für nächste Woche,
+ * dass der IC 861 ein Giruno ist.
+ */
+function enrichSwissSeries(Http $http, array $config, Cache $cache, array $journeys, string $date): array
+{
+    $sf = new SwissFormation($http, $config['providers']['swiss'] ?? []);
+    $heute = (new DateTimeImmutable('now', new DateTimeZone('Europe/Zurich')))->format('Y-m-d');
+    if (!$sf->isConfigured() || $date !== $heute) {
+        return $journeys;
+    }
+    $offen = [];
+    $stellen = [];
+    foreach ($journeys as $ji => $j) {
+        foreach ($j['legs'] ?? [] as $li => $leg) {
+            if (($leg['mode'] ?? '') !== 'train' || ($leg['series'] ?? null) !== null) {
+                continue;
+            }
+            $num = trim((string) ($leg['trainNumber'] ?? ''));
+            $cat = strtoupper(trim((string) ($leg['category'] ?? '')));
+            $schweiz = str_starts_with((string) ($leg['from']['id'] ?? ''), '85')
+                || str_starts_with((string) ($leg['to']['id'] ?? ''), '85');
+            if (!$schweiz || !preg_match('/^\d{1,6}$/', $num)
+                || !in_array($cat, ['IC', 'IR', 'EC', 'ECE', 'ICN', 'IRE', 'RE'], true)) {
+                continue;
+            }
+            $stellen[$num][] = [$ji, $li];
+            $offen[$num] = $num;
+        }
+    }
+    if ($offen === []) {
+        return $journeys;
+    }
+    $formation = [];
+    $fragen = [];
+    foreach ($offen as $num) {
+        $hit = $cache->get('sf:' . $date . ':' . $num, 1800);
+        if ($hit !== null) {
+            $formation[$num] = $hit;
+        } elseif (count($fragen) < 8) {
+            $fragen['n' . $num] = $num;
+        }
+    }
+    foreach ($fragen === [] ? [] : $sf->fullMany($fragen, $date) as $k => $full) {
+        $num = $fragen[$k];
+        $formation[$num] = $full ?? [];
+        $cache->set('sf:' . $date . ':' . $num, $formation[$num]);
+    }
+    foreach ($formation as $num => $full) {
+        $serie = $full === [] ? null : SwissFormation::seriesOf($full);
+        if ($serie === null) {
+            continue;
+        }
+        foreach ($stellen[$num] ?? [] as [$ji, $li]) {
+            $journeys[$ji]['legs'][$li]['series'] = $serie['series'];
+            $journeys[$ji]['legs'][$li]['seriesName'] = $serie['seriesName'];
+        }
+    }
+    return $journeys;
 }
 
 /**
@@ -1482,6 +1671,10 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
     $from = trim((string) ($_GET['from'] ?? ''));
     $to   = trim((string) ($_GET['to'] ?? ''));
 
+    // Aufzüge und Rolltreppen: der Zustand von der DB (FaSta), gelegt auf
+    // die Verbinder aus OSM. Nur an deutschen Bahnhöfen und mit Schlüssel.
+    $station += facilityStatus($http, $config, $cache, trim((string) ($_GET['eva'] ?? '')), $station['connectors'] ?? []);
+
     // Ohne Gleisangaben nur die Bahnsteige - dann will jemand bloß wissen,
     // was der Bahnhof überhaupt hat. Das ist inzwischen der Normalfall:
     // der Plan wird an JEDEM Umstieg angeboten, und die Gleisnummer steht
@@ -1490,7 +1683,9 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
         ok([
             'platforms'   => $station['platforms'],
             'trackPoints' => $station['trackPoints'] ?? [],
-            'connectors'  => $station['connectors'] ?? [],
+            'connectors'  => $station['connectorsLive'] ?? $station['connectors'] ?? [],
+            'outages'     => $station['outages'] ?? [],
+            'facilitySource' => $station['facilitySource'] ?? null,
         ]);
     }
 
@@ -1523,11 +1718,54 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
         // Overpass::stationData().
         'trackPoints' => $station['trackPoints'] ?? [],
         // Treppen, Rolltreppen und Aufzüge - wo es von Ebene zu Ebene geht.
-        'connectors'  => $station['connectors'] ?? [],
+        'connectors'  => $station['connectorsLive'] ?? $station['connectors'] ?? [],
+        // Defekte Aufzüge und Rolltreppen laut DB, auch die, die OSM nicht kennt.
+        'outages'     => $station['outages'] ?? [],
+        'facilitySource' => $station['facilitySource'] ?? null,
         // Damit die Anzeige "gleicher Bahnsteig" von "andere Seite der Halle"
         // unterscheiden kann.
         'samePlatform' => $a !== null && $a === $b,
     ]);
+}
+
+/**
+ * Zustand der Aufzüge und Rolltreppen eines deutschen Bahnhofs (DB FaSta).
+ *
+ * Die Bahnhofsnummer ändert sich nie (30 Tage Cache), der Zustand ständig
+ * (fünf Minuten). Ohne Schlüssel oder EVA-Nummer: leer.
+ *
+ * @return array{connectorsLive?:array,outages?:array,facilitySource?:string}
+ */
+function facilityStatus(Http $http, array $config, Cache $cache, string $eva, array $connectors): array
+{
+    if (!preg_match('/^80\d{5}$/', $eva)) {
+        return [];
+    }
+    $db = new DbApi($http, $config['providers']['dbapi'] ?? [], $cache);
+    if (!$db->isConfigured()) {
+        return [];
+    }
+    try {
+        $nummer = $db->stationNumber($eva);
+        if ($nummer === null) {
+            return [];
+        }
+        $fkey = 'fasta:' . $nummer;
+        $anlagen = $cache->get($fkey, 300);
+        if ($anlagen === null) {
+            $res = $db->facilities($nummer);
+            if (!$res['ok']) {
+                return [];
+            }
+            $anlagen = $res['data'];
+            $cache->set($fkey, $anlagen);
+        }
+        $r = DbApi::applyFacilities($connectors, $anlagen);
+        return ['connectorsLive' => $r['connectors'], 'outages' => $r['outages'], 'facilitySource' => 'db'];
+    } catch (Throwable $e) {
+        error_log('[train-maxxing] FaSta: ' . $e->getMessage());
+        return [];
+    }
 }
 
 /**
@@ -1858,6 +2096,8 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         // doppelte Züge werden nur einmal geholt - siehe enrichAll().
         $journeys = $cs->enrichAll($journeys, $date);
     }
+    // Dasselbe für Schweizer Züge, mit dem Train Formation Service.
+    $journeys = enrichSwissSeries($http, $config, $cache, $journeys, $date);
 
     if ($lernt) {
         foreach ($journeys as $j) {
@@ -1975,6 +2215,257 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         $cache->set($cacheKey, $payload);
     }
     ok($payload + ['cached' => false]);
+}
+
+// ======================================================================
+// Benachrichtigungen bei gesperrtem Bildschirm (Web Push)
+// ======================================================================
+//
+// Siehe lib/WebPush.php (Versand) und lib/PushWatch.php (was wann gemeldet
+// wird). Die Schlüssel stehen in config.local.php unter 'push'; erzeugt
+// werden sie mit `php bin/make_push_keys.php`.
+
+/** Der öffentliche VAPID-Schlüssel - der Browser braucht ihn zum Anmelden. */
+function handlePushKey(Http $http, array $config): void
+{
+    $push = new WebPush($http, $config['push'] ?? []);
+    if (!$push->isConfigured()) {
+        fail('Benachrichtigungen per Push sind auf diesem Server nicht eingerichtet.', 404);
+    }
+    $watch = new PushWatch((string) $config['cache_dir']);
+    $zuletzt = $watch->lastTick();
+    ok([
+        'key' => $push->publicKey(),
+        // Läuft der Cronjob? Ohne ihn verschickt der Server nichts, und die
+        // App meldet dann besser weiter selbst, solange sie offen ist.
+        'running' => $zuletzt !== null && time() - $zuletzt < 3 * max(60, (int) ($config['push']['interval'] ?? 60)),
+    ]);
+}
+
+/** Den Inhalt einer POST-Anfrage als JSON, gedeckelt. */
+function pushBody(): array
+{
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+        fail('Nur per POST.', 405);
+    }
+    $raw = (string) file_get_contents('php://input', false, null, 0, SHARE_MAX_BYTES + 1);
+    if ($raw === '' || strlen($raw) > SHARE_MAX_BYTES) {
+        fail('Anfrage leer oder zu groß.', 413);
+    }
+    $body = json_decode($raw, true);
+    if (!is_array($body)) {
+        fail('Anfrage ist kein gültiges JSON.', 400);
+    }
+    return $body;
+}
+
+/**
+ * Eine verfolgte Fahrt für Benachrichtigungen ablegen.
+ *
+ * Body: {subscription: PushSubscription.toJSON(), journey, confirm?: bool}.
+ * Mit `confirm` geht sofort eine Bestätigung raus - so sieht man gleich,
+ * ob der Weg bis zum Sperrbildschirm funktioniert.
+ */
+function handlePushSubscribe(Http $http, array $config): void
+{
+    $push = new WebPush($http, $config['push'] ?? []);
+    if (!$push->isConfigured()) {
+        fail('Benachrichtigungen per Push sind auf diesem Server nicht eingerichtet.', 404);
+    }
+    $watch = new PushWatch((string) $config['cache_dir']);
+    if (!$watch->isAvailable()) {
+        fail('Benachrichtigungen sind auf diesem Server nicht möglich (Cache nicht beschreibbar).', 503);
+    }
+    $body = pushBody();
+    $sub = $body['subscription'] ?? null;
+    $endpoint = (string) ($sub['endpoint'] ?? '');
+    if (!is_array($sub) || !WebPush::allowedEndpoint($endpoint)
+        || strlen(WebPush::ub64((string) ($sub['keys']['p256dh'] ?? ''))) !== 65
+        || strlen(WebPush::ub64((string) ($sub['keys']['auth'] ?? ''))) < 16) {
+        fail('Ungültige Push-Anmeldung.', 400);
+    }
+    $journey = $body['journey'] ?? null;
+    if (!is_array($journey) || !is_array($journey['legs'] ?? null) || count($journey['legs']) > 30) {
+        fail('Keine gültige Verbindung.', 400);
+    }
+    if ($watch->count() >= PushWatch::MAX_SUBSCRIPTIONS) {
+        fail('Gerade zu viele Benachrichtigungen angemeldet. Bitte später erneut versuchen.', 503);
+    }
+    $slim = pushSlim($journey);
+    $watch->save($sub, $slim);
+
+    $bestaetigt = null;
+    if (!empty($body['confirm'])) {
+        $legs = PushWatch::normalize($slim);
+        $strecke = $legs === [] ? '' : $legs[0]['fromName'] . ' → ' . $legs[count($legs) - 1]['toName'];
+        $r = $push->send($sub, [
+            'title' => 'Benachrichtigungen sind an',
+            'body'  => ($strecke !== '' ? $strecke . ': ' : '')
+                . 'Umstiege kündige ich vorher an, dazu Verspätungen, Gleiswechsel und Ausfälle - auch bei gesperrtem Bildschirm.',
+            'tag'   => 'omnirail-start-bestaetigung',
+            'url'   => './',
+        ], 300);
+        $bestaetigt = $r['ok'];
+        if ($r['gone']) {
+            $watch->remove($endpoint);
+        }
+    }
+    $zuletzt = $watch->lastTick();
+    ok([
+        'confirmed' => $bestaetigt,
+        'running'   => $zuletzt !== null && time() - $zuletzt < 3 * max(60, (int) ($config['push']['interval'] ?? 60)),
+    ]);
+}
+
+function handlePushUnsubscribe(array $config): void
+{
+    $body = pushBody();
+    $endpoint = (string) ($body['endpoint'] ?? '');
+    if ($endpoint === '') {
+        fail('Parameter "endpoint" fehlt.', 400);
+    }
+    ok(['removed' => (new PushWatch((string) $config['cache_dir']))->remove($endpoint)]);
+}
+
+/**
+ * Der Minutentakt. Vom Cronjob des Hosters (php api/push_worker.php) oder
+ * per URL mit Schlüssel (für Hoster, die nur URLs aufrufen können).
+ */
+function handlePushTick(Http $http, array $config, Cache $cache): void
+{
+    $key = (string) ($config['push']['tick_key'] ?? '');
+    $vonCron = defined('OMNIRAIL_PUSH_CLI');
+    if (!$vonCron && ($key === '' || !hash_equals($key, (string) ($_GET['key'] ?? '')))) {
+        fail('Nicht erlaubt.', 403);
+    }
+    $push = new WebPush($http, $config['push'] ?? []);
+    if (!$push->isConfigured()) {
+        fail('Benachrichtigungen per Push sind auf diesem Server nicht eingerichtet.', 404);
+    }
+    $watch = new PushWatch((string) $config['cache_dir']);
+    $stat = $watch->tick(
+        static fn(array $leg): array => pushRealtime($http, $config, $cache, $leg),
+        static fn(array $sub, array $msg): array => $push->send($sub, $msg, 900),
+        time(),
+        max(60, (int) ($config['push']['interval'] ?? 60))
+    );
+    ok(['tick' => $stat]);
+}
+
+/**
+ * Das Nötigste einer Verbindung für die Überwachung: keine Halte, kein
+ * Streckenverlauf - die Datei liegt bis zur Ankunft auf dem Server.
+ */
+function pushSlim(array $j): array
+{
+    $ort = static fn($o): array => is_array($o) ? array_intersect_key($o, array_flip(['id', 'name', 'platform'])) : [];
+    $legKeys = ['mode', 'jid', 'dbJourneyId', 'category', 'line', 'trainNumber', 'name', 'direction',
+        'departure', 'arrival', 'departureReal', 'arrivalReal', 'cancelled', 'changesPlace', 'durationMin'];
+    $out = array_intersect_key($j, array_flip(['id', 'departure', 'arrival']));
+    $out['legs'] = [];
+    foreach ($j['legs'] as $leg) {
+        if (!is_array($leg)) {
+            continue;
+        }
+        $l = array_intersect_key($leg, array_flip($legKeys));
+        $l['from'] = $ort($leg['from'] ?? null);
+        $l['to'] = $ort($leg['to'] ?? null);
+        // Nur Zeichenketten und Zahlen - was aus dem Browser kommt, ist fremd.
+        array_walk_recursive($l, static function (&$v): void {
+            if (is_string($v)) {
+                $v = mb_substr($v, 0, 600);
+            }
+        });
+        $out['legs'][] = $l;
+    }
+    return $out;
+}
+
+/**
+ * Die Ist-Lage eines Abschnitts für die Überwachung - aus derselben Quelle
+ * wie die Live-Verfolgung in der App: HAFAS über die jid, sonst die DB, in
+ * München die MVG, in der Schweiz OJP bzw. opendata.ch. 45 Sekunden gemerkt,
+ * damit zwei Geräte im selben Zug nur eine Abfrage kosten.
+ *
+ * @return array<string,mixed> Felder für PushWatch::events(); leer = nichts bekannt
+ */
+function pushRealtime(Http $http, array $config, Cache $cache, array $leg): array
+{
+    $hole = static function (string $key, callable $f) use ($cache): ?array {
+        $hit = $cache->get($key, 45);
+        if ($hit !== null) {
+            return $hit === [] ? null : $hit;
+        }
+        $d = $f();
+        $cache->set($key, $d ?? []);
+        return $d;
+    };
+    try {
+        $run = null;
+        $jid = (string) ($leg['jid'] ?? '');
+        if ($jid !== '') {
+            $run = $hole('pw:h:' . md5($jid), static function () use ($http, $config, $jid): ?array {
+                $r = (new OebbHafas($http, $config['providers']['oebb']))->journeyDetails($jid);
+                return $r['ok'] ? $r['data'] : null;
+            });
+        }
+        $dbId = (string) ($leg['dbJourneyId'] ?? '');
+        if (($run === null || empty($run['hasRealtime'])) && $dbId !== ''
+            && ($config['providers']['db']['enabled'] ?? false) === true) {
+            $alt = $hole('pw:d:' . md5($dbId), static function () use ($http, $config, $dbId): ?array {
+                $r = (new DbVendo($http, $config['providers']['db']))->trip($dbId);
+                return $r['ok'] ? $r['data'] : null;
+            });
+            if ($alt !== null && ($run === null || !empty($alt['hasRealtime']))) {
+                $run = $alt;
+            }
+        }
+        $von = (string) ($leg['from']['id'] ?? '');
+        $nach = (string) ($leg['to']['id'] ?? '');
+        if ($run === null && str_starts_with($von, 'mvg:') && str_starts_with($nach, 'mvg:')
+            && ($config['providers']['mvg']['enabled'] ?? false) === true) {
+            $m = [
+                'from' => substr($von, 4), 'to' => substr($nach, 4), 'line' => (string) ($leg['line'] ?? ''),
+                'dep' => (string) ($leg['departure'] ?? ''), 'arr' => (string) ($leg['arrival'] ?? ''),
+                'fromName' => (string) ($leg['from']['name'] ?? ''), 'toName' => (string) ($leg['to']['name'] ?? ''),
+            ];
+            $run = $hole('pw:m:' . md5((string) json_encode($m)), static function () use ($http, $config, $m): ?array {
+                $r = (new Mvg($http, $config['providers']['mvg']))->trip($m);
+                return $r['ok'] ? $r['data'] : null;
+            });
+        }
+        $out = $run !== null ? PushWatch::fromRun($leg, $run) : [];
+
+        // Schweiz: die Prognose der SBB, wo HAFAS nur den Fahrplan kennt.
+        if (($run === null || empty($run['hasRealtime'])) && preg_match('/^85\d{5}$/', $von) && preg_match('/^85\d{5}$/', $nach)) {
+            $ch = [
+                'from' => $von, 'to' => $nach,
+                'cat'  => (string) preg_replace('/[^A-Za-z]/', '', (string) ($leg['category'] ?? '')),
+                'num'  => preg_match('/^\d{1,6}$/', (string) ($leg['trainNumber'] ?? '')) ? (string) $leg['trainNumber'] : '',
+                'dir'  => (string) ($leg['direction'] ?? ''),
+                'dep'  => (string) ($leg['departure'] ?? ''), 'arr' => (string) ($leg['arrival'] ?? ''),
+            ];
+            $d = $hole('pw:c:' . md5((string) json_encode($ch)), static function () use ($http, $config, $ch): ?array {
+                $ojp = new SwissOjp($http, $config['providers']['swiss'] ?? []);
+                $r = $ojp->isConfigured() ? $ojp->trip($ch) : (new SwissOpenData($http, $config['providers']['swiss'] ?? []))->trip($ch);
+                return $r['ok'] ? $r['data'] : null;
+            });
+            if ($d !== null && !empty($d['hasRealtime'])) {
+                $zeit = static fn($iso) => ($t = strtotime((string) $iso)) === false ? null : $t;
+                $out = array_merge($out, array_filter([
+                    'depReal'   => $zeit($d['departureReal'] ?? null),
+                    'arrReal'   => $zeit($d['arrivalReal'] ?? null),
+                    'plat'      => $d['platformFrom'] ?? null,
+                    'arrPlat'   => $d['platformTo'] ?? null,
+                    'cancelled' => !empty($d['cancelled']) ? true : null,
+                ], static fn($v) => $v !== null));
+            }
+        }
+        return $out;
+    } catch (Throwable $e) {
+        error_log('[train-maxxing] Push-Echtzeit: ' . $e->getMessage());
+        return [];
+    }
 }
 
 /**

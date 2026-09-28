@@ -212,6 +212,30 @@ als gar kein Cache-Busting.
 Voraussetzung ist Apache mit `mod_headers`. Fehlt beides, hilft weiterhin nur
 einmal hart neu laden (`Strg`+`Shift`+`R`) — die nginx-Fassung steht unten.
 
+### Schlüssel für DB und SBB (optional)
+
+Ohne Schlüssel läuft alles. Zwei Dienste mit Anmeldung machen einzelne Teile
+genauer:
+
+| Dienst | Anmeldung | Abonnieren | Bringt |
+|---|---|---|---|
+| **DB API Marketplace** | developers.deutschebahn.com | StaDa, FaSta, Timetables (je „Free") | Ist-Zeiten, Gleiswechsel, Ausfälle an der Tafel deutscher Bahnhöfe; Zustand von Aufzügen und Rolltreppen im Umstiegsplan |
+| **opentransportdata.swiss** | api-manager.opentransportdata.swiss | OJP 2.0 | Schweizer Echtzeit ohne Drosselung, Zug über die Nummer statt über die Minute, an der Tafel und in der Live-Verfolgung |
+| **opentransportdata.swiss** (zweiter Token) | dito | Train Formation Service | SBB-Wagenreihung im Umstiegsplan; echte Baureihe Schweizer Züge (Giruno, FV-Dosto, Astoro, ICN, IC 2000) statt Schätzung |
+
+**Die Schlüssel gehören nicht in `config.php`** — die liegt im öffentlichen
+Repository. Sie stehen in `public/api/config.local.php`: per `.gitignore`
+ausgenommen, per `.htaccess` gesperrt, von `config.php` automatisch darüber
+gelegt.
+
+```bash
+cp public/api/config.local.example.php public/api/config.local.php
+```
+
+Dann ausfüllen und **per FTP mit hochladen** (Git kennt die Datei nicht).
+`check.php` zeigt je Dienst, ob der Schlüssel angenommen wird — den Schlüssel
+selbst nie.
+
 ### Voraussetzungen
 
 - PHP 8.0 oder neuer
@@ -330,6 +354,18 @@ Einen Laufweg zeichnet der Plan weiterhin nicht. Die Gänge zwischen den
 Treppen sind in OSM zu lückenhaft; siehe oben.
 
 #### Wagenreihung am Umstieg
+
+**In der Schweiz (mit Formation-Token):** der Train Formation Service von
+opentransportdata.swiss liefert je Zug des Tages jeden Wagen mit Nummer,
+Klasse, Länge, Bauart und dem Sektor an jedem Halt. `SwissFormation::atStop()`
+bringt das in dasselbe Format wie die DB-Reihung; der Umstiegsplan zeigt es
+unverändert, auch für IR und RE. Die Lage am Bahnsteig in Metern fehlt —
+die Wagen stehen von Sektor A aus aneinandergereiht, die Sektoren spannen
+sich über die Wagen darin. Aus der Bauart kommt auch die Baureihe: „B7(501)"
+ist ein Giruno, „(502)" FV-Dosto, „(503)" Astoro, „(500)" ICN, „(2E)" IC 2000.
+Bei jeder Suche für heute werden bis zu acht Schweizer Züge so bestimmt;
+Fleet merkt sich das Ergebnis unter der Zugnummer, auch für spätere Tage.
+Kontingent: 20 000 Abfragen am Tag.
 
 Unter dem Plan stehen beide Züge **maßstäblich am Bahnsteig**: oben die
 Sektoren, darunter die Wagen mit Nummer, die 1. Klasse bernsteinfarben, das
@@ -1973,11 +2009,31 @@ nicht „wie komme ich nach X", sondern „was fährt hier als Nächstes".
   die an diesem Bahnhof auch vorkommen.
 - Frischt sich jede Minute auf, solange die Tafel sichtbar ist und „jetzt"
   zeigt.
+- **Mit Schlüssel ergänzen die Bahnen selbst.** HAFAS hat an vielen
+  Bahnhöfen nur den Fahrplan — gemessen nachts: Köln Hbf 0 von 30 Abfahrten
+  mit Ist-Zeit, Berlin Hbf 0 von 30, Bern 0 von 14. An deutschen Bahnhöfen
+  kommen Ist-Zeit, Gleiswechsel, Ausfall und Verspätungsgrund dann aus der
+  **DB-Timetables-API** (die Quelle der Anzeiger am Bahnsteig), an Schweizer
+  aus **OJP**. Danach: München 37 von 39, Frankfurt 36 von 41, Köln 13 von
+  18, Bern 7 von 8. Zugeordnet wird über Zugnummer und Planminute, bei der
+  S-Bahn über die Linie. Ein Bahnhof hat bei der DB oft mehrere EVA-Nummern
+  (München Hbf: oben, zwei Flügelbahnhöfe, S-Bahn tief) — die Liste kommt aus
+  StaDa, ohne sie fehlte fast die ganze S-Bahn. Der Plan wird eine halbe
+  Stunde gemerkt, die Änderungen eine Minute; das hält den Verbrauch unter
+  den 60 Aufrufen je Minute des kostenlosen Zugangs. Über der Tafel steht
+  dann „Echtzeit der DB" bzw. „der SBB".
 
 Die Ansicht steht in der Adresse (`#abfahrten`) und übersteht so ein
 Neuladen.
 
 ### Tarife, Ausstattung und Aufzüge von der DB
+
+**Aufzüge und Rolltreppen im Umstiegsplan (mit DB-Schlüssel):** FaSta meldet
+je Anlage Lage, Beschreibung („zu Gleis 5/6") und Zustand. Die App legt das
+auf die Treppen und Aufzüge aus OpenStreetMap (gleiche Art, höchstens 35 m
+entfernt): was nicht geht, ist rot durchgestrichen und wird nicht mehr als
+Weg hervorgehoben. Über dem Plan stehen alle defekten Anlagen des Bahnhofs —
+auch die, die OSM nicht kennt. Fünf Minuten Cache.
 
 Die DB liefert mehr, als die Trefferliste bisher zeigte. Nachgemessen, was in
 den Antworten steckt:
@@ -2036,12 +2092,59 @@ Stunde Fahrt veraltet.
 Gezeigt wird die Benachrichtigung über den Service Worker (Chrome auf
 Android kennt nur diesen Weg), ein Tipp darauf bringt zur App zurück.
 
-**Grenzen, ehrlich:** Das ist kein Push-Dienst mit eigenem Server. Die Seite
-muss offen sein — im Hintergrund-Tab frischt sie weiter auf, so gut der
-Browser lässt (Chrome drosselt Zeitgeber dort auf einmal pro Minute), aber
-ein Telefon mit dunklem Bildschirm friert die Seite irgendwann ganz ein. Auf
-dem iPhone gibt es Benachrichtigungen nur, wenn die App über „Zum
-Home-Bildschirm" installiert ist (iOS 16.4+). Und nur über HTTPS.
+#### Auch bei gesperrtem Bildschirm (Web Push)
+
+Ein Telefon mit dunklem Bildschirm friert die Seite ein, das iPhone sofort.
+Deshalb gibt die App die verfolgte Fahrt beim Einschalten an den **Server**
+ab (`lib/PushWatch.php`). Ein Cronjob ruft ihn jede Minute auf; er holt die
+Echtzeit aus denselben Quellen wie die App (HAFAS, DB, MVG, OJP) und schickt
+per Web Push (`lib/WebPush.php`, VAPID + aes128gcm, ohne Bibliothek):
+
+| Wann | Meldung |
+|---|---|
+| 10 Min vor der ersten Abfahrt (Nahverkehr 5) | „Abfahrt in 10 Min — ICE 522 → Dortmund · 10:00 · Gl. 17" |
+| **5 Min vor dem Umstieg** (Nahverkehr **2**) | „Umstieg in 5 Min: Nürnberg Hbf — Ankunft 11:03 · Gl. 7 → RE10 nach Bamberg um 11:15 · Gl. 9 (12 Min zum Umsteigen)" |
+| 5 bzw. 2 Min vor dem Ziel | „Ankunft in 2 Min: Bamberg — 11:55 · Gl. 3" |
+| sobald es auftaucht | Verspätung ab 5 Min (Fünferstufen), Gleiswechsel, Ausfall, Anschluss knapp oder weg |
+
+Der Vorlauf richtet sich nach dem Zug, **aus dem** man aussteigt: im ICE
+dauert es, bis Koffer und Jacke zusammen sind; aus der S-Bahn steigt man
+einfach aus. Die Erinnerungen rechnen mit der Ist-Zeit — kommt der Zug zehn
+Minuten später an, kommt auch die Erinnerung zehn Minuten später. Beim
+Einschalten schickt der Server eine Bestätigung; so sieht man sofort, dass
+der Weg bis zum Sperrbildschirm funktioniert. Solange sein Minutentakt läuft,
+meldet die Seite selbst nicht noch einmal. Läuft er nicht, meldet sie wie
+bisher, solange sie offen ist, und sagt das im Panel.
+
+**Einrichten, einmalig:**
+
+1. Schlüssel erzeugen und den ausgegebenen Block in
+   `public/api/config.local.php` einfügen (oberste Ebene, neben `providers`),
+   `subject` auf die eigene Adresse setzen, Datei hochladen:
+   ```bash
+   php bin/make_push_keys.php
+   ```
+2. **Cronjob** in der Verwaltung des Hosters, jede Minute:
+   ```
+   * * * * *  php /pfad/zum/webspace/OmniRail/public/api/push_worker.php
+   ```
+   Kann der Cron nur URLs aufrufen:
+   `https://…/OmniRail/public/api/index.php?action=pushtick&key=<tick_key>`.
+   Geht beim Hoster nur ein Fünf-Minuten-Takt, `'interval' => 300` setzen —
+   dann kommen Erinnerungen entsprechend früher statt zu spät.
+3. `check.php` zeigt, ob der Cronjob läuft und wie viele Fahrten angemeldet
+   sind.
+
+Angemeldet wird nur, was die Überwachung braucht (Züge, Zeiten, Gleise —
+kein Standort), in `api/cache/push/`, und nach der Ankunft gelöscht. Der
+Server schickt nur an die Push-Dienste von Google, Apple, Mozilla und
+Microsoft, nie an eine beliebige Adresse.
+
+**Grenzen:** Auf dem iPhone geht Push nur, wenn die App über „Zum
+Home-Bildschirm" installiert ist (iOS 16.4+) — in Safari selbst fehlt die
+Schnittstelle; das Panel sagt es dann. Und nur über HTTPS. Geprüft wurde der
+ganze Weg mit Firefox und Mozillas Push-Dienst: anmelden, verschlüsselt
+senden, im Service Worker entschlüsseln.
 
 ### Favoriten
 
@@ -2412,6 +2515,8 @@ public/
 └── api/
     ├── index.php                 Router, führt Fahrplan und Preise zusammen
     ├── config.php                Einzige Datei, die du anfassen musst
+    ├── config.local.php          Schlüssel - nicht im Repository (Vorlage: config.local.example.php)
+    ├── push_worker.php           Minutentakt für Push (Cronjob, nur Kommandozeile)
     ├── data/mvg_rail.json        U-Bahn/Tram-Fahrplan (bin/build_mvg_rail.php)
     └── lib/
         ├── Http.php              cURL-Wrapper inkl. Browser-TLS-Profil
@@ -2425,12 +2530,17 @@ public/
         ├── Shops.php             Buchungs-Deeplinks je Land
         ├── CityTrips.php         Stadtfahrten und Zubringer in München
         ├── Walks.php             Adressen als Start/Ziel, Fußwege, Fußweg-Router
+        ├── WebPush.php           Web Push von Hand: VAPID-Signatur, aes128gcm
+        ├── PushWatch.php         Server-Verfolgung: was wann gemeldet wird
         ├── MvgRail.php           U-Bahn/Tram-Positionen München aus dem Fahrplan
         └── Providers/
             ├── OebbHafas.php     Fahrplan, Zuggattungen, Ländercodes, Geometrie, Tafel
             ├── DbVendo.php       Echtpreise, alle Tarife, Auslastung, Ausstattung
             ├── Mvg.php           Münchner Nahverkehr: Orte, Verbindungen, Abfahrten
             ├── SwissOpenData.php Schweizer Prognosen (transport.opendata.ch)
+            ├── SwissOjp.php      Schweizer Echtzeit über OJP 2.0 (Schlüssel)
+            ├── SwissFormation.php SBB-Wagenreihung und Baureihe (Schlüssel)
+            ├── DbApi.php         DB API Marketplace: StaDa, FaSta, Timetables (Schlüssel)
             └── CoachSequence.php Wagenreihung und Baureihe (bahn.de)
 ```
 
@@ -2459,6 +2569,10 @@ Alles per GET auf `api/`:
 | `?action=works` | Bauarbeiten im Netz, mit Abschnitt und Zeitraum |
 | `?action=disruptions` | Aktive Störungsmeldungen der MVG München |
 | `?action=walkroute&from=lat,lon&to=lat,lon` | Fußweg auf der Straße: Linie, Länge, Gehzeit (höchstens 10 km) |
+| `?action=pushkey` | Öffentlicher VAPID-Schlüssel und ob der Minutentakt läuft |
+| `POST ?action=pushsubscribe` | `{subscription, journey, confirm}` — Fahrt für Push anmelden |
+| `POST ?action=pushunsubscribe` | `{endpoint}` — wieder abmelden |
+| `?action=pushtick&key=…` | Minutentakt (für Hoster, deren Cron nur URLs aufruft) |
 
 `from`/`to` bei `journeys` sind EVA-Nummern, MVG-Kennungen (`mvg:…`) oder
 Adressen (`A=2@O=…@X=…@Y=…@`). `traindetails` nimmt als `jid` auch
@@ -2713,9 +2827,14 @@ Für den privaten Gebrauch ist das üblich und verbreitet — aber:
   Rolltreppen und Aufzüge je Ebene. Exakte Wege wie in der SBB-App gibt es
   nur mit freigeschaltetem Zugang zur Journey-Maps-API und nur in der
   Schweiz.
-- **Schweizer Echtzeit** kommt nur als Rückfallebene über
-  transport.opendata.ch, und der Dienst drosselt (`HTTP 429`). Die Zuordnung
-  zum Zug geht über Gattung, Minute und Richtung, nicht über die Zugnummer.
+- **Schweizer Echtzeit** kommt als Rückfallebene über OJP (mit Schlüssel, über
+  die Zugnummer) oder sonst über transport.opendata.ch — der drosselt
+  (`HTTP 429`) und kennt nur Gattung, Minute und Richtung. Die Meldungen von
+  OJP bleiben weg: sie hängen an jeder Abfahrt eines Bahnhofs, nicht nur an
+  den betroffenen Zügen.
+- **SBB-Wagenreihung** gibt es nur für heute (der Formation Service kennt
+  morgen noch nichts) und ohne Lage am Bahnsteig in Metern: die Wagen stehen
+  maßstäblich zueinander, die Sektoren sind aus den Wagen darin abgeleitet.
 - **Wagenreihung** nur für deutschen Fernverkehr am Reisetag.
 - **Die MVG-Abfahrten reichen nur ab jetzt** bis einen Tag voraus; für eine
   Tafel nächste Woche gibt es in München nur HAFAS, also keine U-Bahn.

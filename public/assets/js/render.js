@@ -760,25 +760,38 @@ function renderTransferPlan(journey, leg, actions) {
   const ladeWagen = async () => {
     if (wagenGeladen || !actions.loadSequence) return;
     wagenGeladen = true;
-    const fern = (l) => /^(ICE|IC|EC|ECE)$/i.test(String(l.category || '').trim()) && l.trainNumber;
+    // Deutschland: Fernverkehr über die DB. Schweiz: auch IR und RE, über
+    // den Train Formation Service (braucht einen Schlüssel auf dem Server).
+    const gattung = (l) => String(l.category || '').trim().toUpperCase();
+    const passt = (l, eva) => l.trainNumber && (
+      (String(eva).startsWith('80') && /^(ICE|IC|EC|ECE)$/.test(gattung(l)))
+      || (String(eva).startsWith('85') && /^(ICE|IC|ICN|EC|ECE|IR|IRE|RE)$/.test(gattung(l))));
     const fragen = [
       ['Ankunft', prev, prev.to?.id, prev.arrival],
       ['Abfahrt', leg, leg.from?.id, leg.departure],
-    ].filter(([, l, eva, t]) => fern(l) && eva && t && String(eva).startsWith('80'));
+    ].filter(([, l, eva, t]) => eva && t && passt(l, eva));
     if (fragen.length === 0) return;
     const antworten = await Promise.all(fragen.map(([, l, eva, t]) => actions.loadSequence({
       eva: String(eva), cat: String(l.category).trim().toUpperCase(), num: String(l.trainNumber), time: t,
     }).catch(() => null)));
     const teile = [];
+    const quellen = new Set();
     fragen.forEach(([rolle, l], i) => {
       const seq = antworten[i]?.sequence;
-      if (seq?.vehicles?.length) teile.push(renderSequence(rolle, l, seq));
+      if (seq?.vehicles?.length) {
+        teile.push(renderSequence(rolle, l, seq));
+        quellen.add(seq.source === 'sbb' ? 'sbb' : 'db');
+      }
     });
     if (teile.length === 0) return;
+    const quelle = [
+      quellen.has('db') ? 'DB (deutscher Fernverkehr)' : null,
+      quellen.has('sbb') ? 'SBB (Train Formation Service; Wagen maßstäblich zueinander, nicht zum Bahnsteig)' : null,
+    ].filter(Boolean).join(' und ');
     wagen.replaceChildren(
       el('p', 'wagen__title', 'Wagenreihung'),
       ...teile,
-      el('p', 'wagen__source', 'Von der DB, nur für deutschen Fernverkehr am Reisetag. Sektor A ist links.'),
+      el('p', 'wagen__source', `Von ${quelle}, nur am Reisetag. Sektor A ist links.`),
     );
   };
 
@@ -800,7 +813,7 @@ function renderTransferPlan(journey, leg, actions) {
     inArbeit = true;
     try {
       for (let versuch = 1; versuch <= VERSUCHE; versuch++) {
-        const res = await actions.loadPlatforms(lat, lon, String(from), String(to));
+        const res = await actions.loadPlatforms(lat, lon, String(from), String(to), leg.from?.id);
 
         // Wiederholt wird nur, wenn der DIENST gepatzt hat. Eine gültige
         // Antwort ohne Bahnsteige heißt "dieser Bahnhof ist in OSM nicht
@@ -898,14 +911,17 @@ function renderSequence(rolle, leg, seq) {
       : [`Wagen ${v.n}`, v.first && v.second ? '1./2. Klasse' : v.first ? '1. Klasse' : '2. Klasse',
         v.dining ? 'Bordrestaurant' : null, v.bike ? 'Fahrradstellplätze' : null,
         v.wheelchair ? 'Rollstuhlplatz' : null, v.closed ? 'geschlossen' : null,
-        v.sector ? `Sektor ${v.sector}` : null].filter(Boolean).join(' · ');
+        v.sector ? `Sektor ${(v.sectors?.length ? v.sectors : [v.sector]).join('/')}` : null].filter(Boolean).join(' · ');
     bar.append(c);
   }
   box.append(bar);
 
-  const sek = (pred) => sectorRange(seq.vehicles.filter(pred).map((v) => v.sector), seq.sectors);
+  // Ein Wagen kann über zwei Sektoren reichen (SBB: "C,B") - dann zählen beide.
+  const sek = (pred) => sectorRange(seq.vehicles.filter(pred).flatMap((v) => v.sectors || [v.sector]), seq.sectors);
   const teile = [];
-  const erste = sek((v) => v.first);
+  // Reine 1.-Klasse-Wagen zuerst: ein gemischter Wagen, der über zwei
+  // Sektoren reicht, machte sonst aus "A und C" ein "A–C".
+  const erste = sek((v) => v.first && !v.second) || sek((v) => v.first);
   if (erste) teile.push(`1. Klasse: Sektor ${erste}`);
   const bistro = sek((v) => v.dining);
   if (bistro) teile.push(`Bordrestaurant: ${bistro}`);
@@ -1029,6 +1045,24 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
     });
   });
 
+  // Was gerade nicht geht, laut DB - als eigene Zeile, weil es die
+  // Wegwahl ändert. Auch Anlagen, die OpenStreetMap nicht kennt.
+  const kaputt = res?.outages || [];
+  if (kaputt.length > 0) {
+    const box = el('div', 'xfer__outages');
+    box.append(el('p', 'xfer__outages-title',
+      `${kaputt.length === 1 ? 'Außer Betrieb' : `${kaputt.length} Anlagen außer Betrieb`} (laut DB, gerade eben)`));
+    const ul = el('ul', 'xfer__outages-list');
+    for (const o of kaputt.slice(0, 8)) {
+      const was = o.type === 'elevator' ? 'Aufzug' : 'Rolltreppe';
+      ul.append(el('li', '', `${was}${o.description ? ' ' + o.description : ''}`
+        + (o.explanation && o.explanation !== 'außer Betrieb' ? ` — ${o.explanation}` : '')));
+    }
+    if (kaputt.length > 8) ul.append(el('li', '', `… und ${kaputt.length - 8} weitere`));
+    box.append(ul);
+    out.push(box);
+  }
+
   // Legende, sobald Treppen & Co. im Plan stehen.
   if ((res?.connectors || []).length > 0) {
     const leg = el('p', 'xfer__legend');
@@ -1041,6 +1075,7 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
       item('is-steps', '┅', 'Treppe'),
       item('is-escalator', '➔', 'Rolltreppe, Pfeil = Fahrtrichtung'),
       item('is-elevator', '⇅', 'Aufzug'),
+      ...(res?.facilitySource === 'db' ? [item('is-broken', '✕', 'außer Betrieb (DB)')] : []),
       el('span', 'xfer__legend-note', 'Die Zahl daneben: die Ebene, zu der es führt.'),
     );
     out.push(leg);
@@ -1049,6 +1084,7 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
   out.push(el('p', 'xfer__source',
     (res?.connectors || []).length > 0
       ? 'Bahnhofsplan aus OpenStreetMap: Bahnsteige, Treppen, Rolltreppen und Aufzüge. '
+        + (res?.facilitySource === 'db' ? 'Ob Aufzüge und Rolltreppen gehen, meldet die DB (FaSta). ' : '')
         + 'Ein berechneter Laufweg ist es nicht — die Gänge dazwischen sind in OSM zu lückenhaft.'
       : 'Bahnhofsplan aus OpenStreetMap. Gezeigt ist die Lage der Bahnsteige, nicht '
         + 'der Weg dorthin — den findet man im Bahnhof besser als jede Karte.'));

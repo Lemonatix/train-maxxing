@@ -31,6 +31,7 @@ globalThis.document ??= {
 };
 const { LiveTracker } = await import('../public/assets/js/live.js');
 const { isStation } = await import('../public/assets/js/autocomplete.js');
+const { affectsWindow, upcomingFrom } = await import('../public/assets/js/mvgTicker.js');
 
 let fehlgeschlagen = 0;
 let gesamt = 0;
@@ -413,6 +414,16 @@ console.log('\nFahrgastrechte — ab wann, wie viel');
     [mitPrognose.stops[0].platform, new Date(mitPrognose.stops[1].arrivalReal).getTime()
       - new Date('2026-09-24T09:12:00+02:00').getTime(), mitPrognose.hasRealtime],
     ['14', 4 * 60000, true]);
+
+  // Von OJP: jeder Halt dazwischen mit eigener Prognose - die gilt statt
+  // der verschobenen Planzeit.
+  const ojp = LiveTracker.withPrognosis(lauf, leg, {
+    delay: 4, departureReal: '2026-09-24T09:06:00+02:00', source: 'ojp',
+    stops: [{ id: '8503016', arrivalReal: '2026-09-24T09:14:30+02:00', platform: '7' }],
+  });
+  pruefe('OJP: Zwischenhalt mit eigener Ist-Zeit und Gleis',
+    [ojp.stops[1].arrivalReal, ojp.stops[1].platform, ojp.realtimeSource],
+    ['2026-09-24T09:14:30+02:00', '7', 'OJP (SBB)']);
 }
 
 // ---------------------------------------------------------------------
@@ -478,6 +489,20 @@ console.log('\nLive-Karte — U-Bahn und Tram nach Fahrplan');
   pruefe('HAFAS-Züge weiter über den Namen', sameTrain({ category: 'S', name: 'S1' }, { category: 'S', name: 'S1' }), true);
   pruefe('ohne HTTPS: Hinweis auf https://', geoErrorText(null).includes('https://'), true);
   pruefe('abgelehnt: Weg zur Freigabe genannt', /erlauben|Ortungsdienste/i.test(geoErrorText({ code: 1 })), true);
+}
+
+console.log('\nMVG-Meldungen — gilt sie für diese Fahrt?');
+{
+  // Die Sperrung "Nacht 12./13.10.", veröffentlicht ab 28.09.
+  const m = { validFrom: '2026-09-28T21:20:00+02:00', validTo: '2026-10-13T04:40:00+02:00',
+    incidents: [{ from: '2026-10-12T21:20:00+02:00', to: '2026-10-13T04:40:00+02:00' }] };
+  const t = (iso) => Date.parse(iso);
+  pruefe('Fahrt heute: nicht betroffen', affectsWindow(m, t('2026-09-29T06:00:00+02:00'), t('2026-09-29T08:00:00+02:00')), false);
+  pruefe('Fahrt in der Sperrnacht: betroffen', affectsWindow(m, t('2026-10-12T23:00:00+02:00'), t('2026-10-13T00:30:00+02:00')), true);
+  pruefe('ohne Zeiträume: das Veröffentlichungsfenster', affectsWindow({ validFrom: m.validFrom, validTo: m.validTo },
+    t('2026-09-29T06:00:00+02:00'), t('2026-09-29T08:00:00+02:00')), true);
+  pruefe('Ticker: "ab 12.10. 21:20"', upcomingFrom(m, t('2026-09-29T06:00:00+02:00')), '12.10. 21:20');
+  pruefe('Ticker: in der Sperrnacht ohne "ab"', upcomingFrom(m, t('2026-10-12T23:00:00+02:00')), null);
 }
 
 console.log('\nImporte — benutzt, aber nicht geholt?');
