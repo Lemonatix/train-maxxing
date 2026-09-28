@@ -119,6 +119,9 @@ final class Locations
         $byId    = [];
         $sources = [];
         $errors  = [];
+        // Adressen und POIs, je Quelle in deren Reihenfolge. DB zuerst: sie
+        // kennt Deutschland, die ÖBB Österreich.
+        $orte    = [];
 
         // --- DB: beste Abdeckung für Deutschland inkl. Stadtverkehr ---
         if (($this->cfg['db']['enabled'] ?? false) === true) {
@@ -129,6 +132,7 @@ final class Locations
                 foreach ($res['data'] as $i => $loc) {
                     $this->merge($byId, $this->fromDb($loc, $i));
                 }
+                array_push($orte, ...($res['places'] ?? []));
             } else {
                 $errors[] = $res['error'];
             }
@@ -142,6 +146,7 @@ final class Locations
             foreach ($res['data'] as $i => $loc) {
                 $this->merge($byId, $this->fromOebb($loc, $i));
             }
+            array_push($orte, ...($res['places'] ?? []));
         } else {
             $errors[] = $res['error'];
         }
@@ -166,11 +171,13 @@ final class Locations
         // steuert nur zusätzliche Verkehrsmittel bei.
         $this->foldMvgIntoHafas($byId);
 
+        $orte = self::pickPlaces($query, $orte);
+
         if ($byId === []) {
             return [
-                'ok'      => $errors === [],
-                'error'   => $errors[0] ?? null,
-                'data'    => [],
+                'ok'      => $errors === [] || $orte !== [],
+                'error'   => $orte === [] ? ($errors[0] ?? null) : null,
+                'data'    => $orte,
                 'sources' => $sources,
             ];
         }
@@ -224,7 +231,59 @@ final class Locations
         }
         unset($row);
 
+        // Adressen hinter die Bahnhöfe - außer die Eingabe sieht nach einer
+        // Adresse aus. Dann ist die Hausnummer gemeint, nicht der Bahnhof
+        // "Leopoldstraße" in Lahr.
+        $out = self::looksLikeAddress($query)
+            ? array_merge($orte, $out)
+            : array_merge($out, $orte);
+
         return ['ok' => true, 'error' => null, 'data' => $out, 'sources' => $sources];
+    }
+
+    /** Höchstens so viele Adressen bzw. POIs je Suche. */
+    private const MAX_ADDRESSES = 4;
+    private const MAX_POIS = 2;
+
+    /**
+     * Die Adressen und POIs, die in die Vorschlagsliste kommen: ohne
+     * Doppelte (DB und ÖBB kennen beide die Grenzregion), gedeckelt.
+     *
+     * @param array<int,array<string,mixed>> $orte
+     * @return array<int,array<string,mixed>>
+     */
+    private static function pickPlaces(string $query, array $orte): array
+    {
+        $out = [];
+        $gesehen = [];
+        $anzahl = ['address' => 0, 'poi' => 0];
+        $max = ['address' => self::MAX_ADDRESSES, 'poi' => self::MAX_POIS];
+        foreach ($orte as $o) {
+            $kind = $o['kind'] === 'poi' ? 'poi' : 'address';
+            // Gleicher Ort: auf rund 30 m gleiche Koordinaten.
+            $key = sprintf('%.4f,%.4f', $o['lat'], $o['lon']);
+            if (isset($gesehen[$key]) || $anzahl[$kind] >= $max[$kind]) {
+                continue;
+            }
+            // POIs sucht HAFAS sehr unscharf ("Bahnhofstrasse 10" liefert
+            // jeden Zahnarzt an einer Bahnhofstraße). Nur behalten, wenn der
+            // Name wirklich passt.
+            if ($kind === 'poi' && self::nameRelevance($query, (string) $o['name']) === 0) {
+                continue;
+            }
+            $gesehen[$key] = true;
+            $anzahl[$kind]++;
+            $out[] = $o;
+        }
+        // Adressen vor POIs.
+        usort($out, static fn($a, $b) => ($a['kind'] === 'poi') <=> ($b['kind'] === 'poi'));
+        return $out;
+    }
+
+    /** Hausnummer oder typische Straßenendung in der Eingabe? */
+    public static function looksLikeAddress(string $query): bool
+    {
+        return preg_match('/\d|stra(ss|ß)e\b|str\.|weg\b|gasse\b|allee\b|ring\b|platz\s+\d/iu', $query) === 1;
     }
 
     /**

@@ -89,9 +89,11 @@ final class DbVendo
     /** @return array{ok:bool,error:?string,data:array} */
     public function locations(string $query, int $limit = 8): array
     {
+        // Ein paar mehr als gewünscht: Adressen und POIs teilen sich die
+        // Liste mit den Bahnhöfen, und Bahnhöfe sollen nicht herausfallen.
         $url = $this->cfg['bahnde']['locations']
             . '?suchbegriff=' . rawurlencode($query)
-            . '&typ=ALL&limit=' . $limit;
+            . '&typ=ALL&limit=' . ($limit + 6);
 
         $res = $this->http->getJson($url, $this->browserHeaders());
 
@@ -104,12 +106,31 @@ final class DbVendo
         }
 
         $out = [];
+        $orte = [];
         foreach ($res['json'] as $item) {
             if (!is_array($item)) {
                 continue;
             }
-            // Adressen und Sehenswürdigkeiten sind für eine Zugsuche nutzlos.
-            if (($item['type'] ?? 'ST') !== 'ST') {
+            // Adressen und Sehenswürdigkeiten gehen getrennt zurück - siehe
+            // Walks. Die Verbindungssuche nimmt sie als Start und Ziel.
+            $typ = (string) ($item['type'] ?? 'ST');
+            if ($typ === 'ADR' || $typ === 'POI') {
+                $crd = $this->coordsFromId((string) ($item['id'] ?? ''));
+                $ort = Walks::place(
+                    $typ === 'POI' ? 'poi' : 'address',
+                    (string) ($item['name'] ?? ''),
+                    isset($item['lat']) ? (float) $item['lat'] : $crd['lat'],
+                    isset($item['lon']) ? (float) $item['lon'] : $crd['lon'],
+                    // Die DB kennt auch Wiener Adressen - das Land steht
+                    // nicht dabei, also lieber keins als ein falsches.
+                    ''
+                );
+                if ($ort !== null) {
+                    $orte[] = $ort;
+                }
+                continue;
+            }
+            if ($typ !== 'ST') {
                 continue;
             }
             $eva  = (string) ($item['extId'] ?? '');
@@ -127,7 +148,7 @@ final class DbVendo
             ];
         }
 
-        return ['ok' => true, 'error' => null, 'data' => $out];
+        return ['ok' => true, 'error' => null, 'data' => array_slice($out, 0, $limit), 'places' => $orte];
     }
 
     /**
@@ -603,7 +624,7 @@ final class DbVendo
                     'durationMin' => (int) round(((int) ($a['abschnittsDauer'] ?? 0)) / 60),
                     // Wechselt der Halt, muss man tatsächlich ein Stück gehen.
                     'changesPlace' => ($from['name'] ?? '') !== ($to['name'] ?? ''),
-                ];
+                ] + (isset($a['distanz']) && is_numeric($a['distanz']) ? ['distance' => (int) $a['distanz']] : []);
                 continue;
             }
 

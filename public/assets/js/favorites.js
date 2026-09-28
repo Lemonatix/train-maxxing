@@ -46,6 +46,8 @@ function slim(loc) {
     lon: loc.lon ?? null,
     noJourneys: Boolean(loc.noJourneys),
     longDistance: Boolean(loc.longDistance),
+    // Adresse oder POI - die Abfahrtstafel lässt sie aus.
+    ...(loc.kind && loc.kind !== 'station' ? { kind: loc.kind } : {}),
   };
 }
 

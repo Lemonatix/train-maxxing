@@ -22,7 +22,7 @@
 
 // Bei jeder Änderung an dieser Datei hochzählen - dann räumt activate()
 // die alten Caches weg.
-const VERSION = 'omnirail-v2';
+const VERSION = 'omnirail-v3';
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 
@@ -60,6 +60,8 @@ const CACHED_ACTIONS = new Set([
   'platforms', 'works', 'offers', 'fxrate', 'disruptions', 'nextconnection', 'localroute',
   // Eine geteilte Fahrt soll sich auch im Funkloch wieder öffnen lassen.
   'shared',
+  // Fußwege ändern sich nicht - der von vorhin taugt auch offline.
+  'walkroute',
 ]);
 
 self.addEventListener('install', (event) => {

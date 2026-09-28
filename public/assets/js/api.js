@@ -83,6 +83,17 @@ export const api = {
 
   locations: (q, opts) => call('locations', { q }, opts),
 
+  /**
+   * Fußweg zwischen zwei Punkten, auf der Straße: `{ geometry, distance,
+   * durationMin }`. Für die gestrichelte Linie von der Haustür zur
+   * Haltestelle, wenn der Fahrplan keine mitliefert.
+   */
+  walkRoute: (a, b, opts) =>
+    call('walkroute', {
+      from: `${a.lat.toFixed(6)},${a.lon.toFixed(6)}`,
+      to: `${b.lat.toFixed(6)},${b.lon.toFixed(6)}`,
+    }, opts),
+
   /** @param {number[]} bounds [süd, west, nord, ost] */
   liveTrains: (bounds, products, opts) =>
     call('livetrains', {

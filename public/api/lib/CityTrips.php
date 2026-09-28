@@ -55,6 +55,14 @@ final class CityTrips
         if (str_starts_with($id, 'mvg:')) {
             return substr($id, 4);
         }
+        // Eine Adresse bleibt ein Punkt: die MVG sucht von dort selbst die
+        // passenden Haltestellen und liefert den Fußweg mit.
+        $adresse = Walks::parse($id);
+        if ($adresse !== null) {
+            return Mvg::inArea($adresse['lat'], $adresse['lon'])
+                ? sprintf('coord:%.6f,%.6f', $adresse['lat'], $adresse['lon'])
+                : null;
+        }
         if ($lat === null || $lon === null || !Mvg::inArea($lat, $lon)) {
             return null;
         }

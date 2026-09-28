@@ -14,7 +14,7 @@
  */
 
 import { api } from './api.js';
-import { setupAutocomplete, renderFavoriteChips } from './autocomplete.js';
+import { setupAutocomplete, renderFavoriteChips, isStation } from './autocomplete.js';
 import { places } from './favorites.js';
 import { trainLabel } from './map.js';
 import { typeOf } from './data/trains.js';
@@ -110,8 +110,11 @@ export function initBoard(root) {
     refresh();
   };
 
-  setupAutocomplete(input, $('#board-list'), setStation);
-  renderFavoriteChips($('#board-fav'), { target: () => 'board', fill: (_, loc) => setStation(loc) });
+  // Eine Tafel gibt es nur für Bahnhöfe - Adressen bleiben draußen.
+  setupAutocomplete(input, $('#board-list'), setStation, { stationsOnly: true });
+  renderFavoriteChips($('#board-fav'), {
+    target: () => 'board', fill: (_, loc) => setStation(loc), stationsOnly: true,
+  });
 
   const renderStar = () => {
     const passt = s.station && input.value.trim() === s.station.name;
@@ -165,7 +168,7 @@ export function initBoard(root) {
     if (q && q !== s.station?.name) {
       try {
         const res = await api.locations(q);
-        const hit = (res.locations || [])[0];
+        const hit = (res.locations || []).find(isStation);
         if (hit) { setStation(hit); return; }
       } catch { /* bleibt bei der Meldung unten */ }
     }

@@ -21,6 +21,7 @@ $lib = __DIR__ . '/../public/api/lib';
 require $lib . '/Health.php';
 require $lib . '/Http.php';
 require $lib . '/Text.php';
+require $lib . '/Walks.php';
 require $lib . '/Products.php';
 require $lib . '/Providers/OebbHafas.php';
 require $lib . '/Providers/DbVendo.php';
@@ -30,6 +31,8 @@ require $lib . '/Providers/Overpass.php';
 require $lib . '/Cache.php';
 require $lib . '/Providers/CoachSequence.php';
 require $lib . '/Providers/SwissOpenData.php';
+require $lib . '/Locations.php';
+require $lib . '/MvgRail.php';
 
 $gesamt = 0;
 $fehler = 0;
@@ -277,6 +280,85 @@ pruefe('Richtung mit Klammerzusatz ("Chur (GR)")',
     SwissOpenData::find($tafel, 'departure', $plan, 'IR', 'Chur (GR)')['number'] ?? null, '36');
 pruefe('andere Minute: kein Treffer',
     SwissOpenData::find($tafel, 'departure', $plan + 300, 'IR', ''), null);
+
+// ---------------------------------------------------------------------
+echo "\nAdressen - Kennung, Fahrplan-Ort, Fußwege\n";
+
+$kennung = Walks::id('address', 'München, Leopoldstraße 50', 48.158036, 11.584821);
+pruefe('gekürzte HAFAS-Kennung', $kennung, 'A=2@O=München, Leopoldstraße 50@X=11584821@Y=48158036@');
+pruefe('und zurück', Walks::parse($kennung),
+    ['name' => 'München, Leopoldstraße 50', 'kind' => 'address', 'lat' => 48.158036, 'lon' => 11.584821]);
+pruefe('"@" im Namen zerschneidet die Kennung nicht', Walks::parse(Walks::id('poi', 'a@b', 1.0, 2.0))['name'] ?? null, 'a b');
+pruefe('EVA-Nummer ist keine Adresse', Walks::parse('8000261'), null);
+pruefe('ÖBB: Adresse als Typ A', privat(OebbHafas::class, 'locRef', $kennung)['type'], 'A');
+pruefe('ÖBB: POI als Typ P', privat(OebbHafas::class, 'locRef', 'A=4@O=Arena@X=1@Y=2@')['type'], 'P');
+pruefe('ÖBB: Bahnhof bleibt Bahnhof', privat(OebbHafas::class, 'locRef', '8000261'),
+    ['type' => 'S', 'lid' => 'A=1@L=8000261@']);
+pruefe('MVG: Adresse als Koordinate', privat(Mvg::class, 'endpoint', 'origin', 'coord:48.158036,11.584821'),
+    ['originLatitude' => '48.158036', 'originLongitude' => '11.584821']);
+pruefe('MVG: Haltestelle als globalId', privat(Mvg::class, 'endpoint', 'destination', 'de:09162:2'),
+    ['destinationStationGlobalId' => 'de:09162:2']);
+pruefe('Hausnummer: Adressen zuerst', Locations::looksLikeAddress('Leopoldstraße 50'), true);
+pruefe('Bahnhofsname: Bahnhöfe zuerst', Locations::looksLikeAddress('München Hbf'), false);
+
+// Die DB nennt beim Fußweg keine Koordinaten - die kommen von den Nachbarn.
+$dbReise = ['legs' => [
+    ['mode' => 'walk', 'from' => ['name' => 'Leopoldstraße 50', 'lat' => null, 'lon' => null],
+        'to' => ['name' => 'Giselastraße', 'lat' => null, 'lon' => null], 'durationMin' => 2, 'distance' => 121, 'changesPlace' => true],
+    ['mode' => 'train', 'from' => ['name' => 'Giselastraße', 'lat' => null], 'to' => ['name' => 'Hbf Nord', 'lat' => null],
+        'stops' => [['name' => 'Giselastraße', 'lat' => 48.157236, 'lon' => 11.584803], ['name' => 'Hbf Nord', 'lat' => 48.1415, 'lon' => 11.5601]]],
+    ['mode' => 'walk', 'from' => ['name' => 'Hbf Nord', 'lat' => null], 'to' => ['name' => 'Ziel', 'lat' => null],
+        'durationMin' => 0, 'changesPlace' => true],
+]];
+$fertig = Walks::complete($dbReise, ['lat' => 48.158036, 'lon' => 11.584821, 'name' => ''], ['lat' => 48.1402, 'lon' => 11.5583, 'name' => 'München Hbf']);
+pruefe('Start des ersten Fußwegs: die Adresse', [$fertig['legs'][0]['from']['lat'], $fertig['legs'][0]['from']['lon']], [48.158036, 11.584821]);
+pruefe('Ende des ersten Fußwegs: erster Halt des Zuges', $fertig['legs'][0]['to']['lat'], 48.157236);
+pruefe('Start des letzten Fußwegs: letzter Halt davor', $fertig['legs'][2]['from']['lat'], 48.1415);
+pruefe('Ziel mit eingegebenem Namen', $fertig['legs'][2]['to']['name'], 'München Hbf');
+pruefe('Länge vom Fahrplan bleibt', $fertig['legs'][0]['distance'], 121);
+pruefe('fehlende Länge geschätzt', ($fertig['legs'][2]['distanceEstimated'] ?? false) && $fertig['legs'][2]['distance'] > 150, true);
+pruefe('fehlende Gehzeit aus der Länge', $fertig['legs'][2]['durationMin'] === Walks::minutesFor($fertig['legs'][2]['distance']), true);
+
+// ---------------------------------------------------------------------
+echo "\nU-Bahn und Tram nach Fahrplan (MvgRail)\n";
+
+// Eine Linie, drei Halte auf einer Geraden nach Norden, je zwei Minuten
+// Fahrt und eine halbe Minute Halt. Eine Fahrt um 10:00, eine um 23:58,
+// die nach Mitternacht weiterfährt.
+$basis = (new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin')))->modify('-1 day')->format('Ymd');
+$testDaten = [
+    'v' => 1, 'base' => $basis, 'days' => 5,
+    'lines' => [['U9', 'U']],
+    'stops' => [['Süd', 48.10, 11.50], ['Mitte', 48.11, 11.50], ['Nord', 48.12, 11.50]],
+    'services' => ['11111'],
+    'shapes' => [[[48.10, 11.50, 0], [48.11, 11.50, 1112], [48.12, 11.50, 2224]]],
+    'patterns' => [[
+        'l' => 0, 'h' => 'Nord', 'sh' => 0, 's' => [0, 1, 2],
+        'a' => [0, 120, 270], 'd' => [0, 150, 270], 'm' => [0, 1112, 2224],
+        'bb' => [48.10, 11.50, 48.12, 11.50],
+        't' => [[36000, 0], [86280, 0]],
+    ]],
+];
+$datei = tempnam(sys_get_temp_dir(), 'rail');
+file_put_contents($datei, json_encode($testDaten));
+$rail = MvgRail::load($datei);
+unlink($datei);
+$tz = new DateTimeZone('Europe/Berlin');
+$heute10 = (new DateTimeImmutable('today 10:00', $tz))->getTimestamp();
+$bahnen = $rail->vehicles(48.0, 11.4, 48.2, 11.6, $heute10 + 60);
+pruefe('eine Minute nach dem Start: halbe Strecke zum zweiten Halt', count($bahnen) === 1 ? round($bahnen[0]['lat'], 3) : null, 48.105);
+pruefe('... nächster Halt ist "Mitte"', $bahnen[0]['nextStop'] ?? null, 'Mitte');
+pruefe('beim Halt steht sie dort', round($rail->vehicles(48.0, 11.4, 48.2, 11.6, $heute10 + 135)[0]['lat'] ?? 0, 3), 48.11);
+pruefe('außerhalb des Ausschnitts: nichts', $rail->vehicles(48.3, 11.4, 48.4, 11.6, $heute10 + 60), []);
+pruefe('nach der Ankunft: nichts', $rail->vehicles(48.0, 11.4, 48.2, 11.6, $heute10 + 400), []);
+$mitternacht = (new DateTimeImmutable('today 00:00', $tz))->getTimestamp();
+pruefe('Fahrt von gestern 23:58 fährt nach Mitternacht weiter',
+    count($rail->vehicles(48.0, 11.4, 48.2, 11.6, $mitternacht + 30)), 1);
+$lauf = $rail->run($bahnen[0]['jid']);
+pruefe('Lauf zum Antippen: alle Halte mit Planzeit', array_map(static fn($h) => substr((string) ($h['departure'] ?? $h['arrival']), 11, 5), $lauf['stops']),
+    ['10:00', '10:02', '10:04']);
+pruefe('... ohne Echtzeit', $lauf['hasRealtime'], false);
+pruefe('Ausschnitt fern von München: gar nicht erst laden', MvgRail::touches(47.0, 9.0, 47.5, 9.5), false);
 
 // ---------------------------------------------------------------------
 echo "\nText - Fremdtexte als Klartext\n";

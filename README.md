@@ -1595,7 +1595,45 @@ Die Positionen kommen von HAFAS (`JourneyGeoPos`) und werden aus Fahrplan und
 Echtzeitlage **berechnet**, nicht per GPS geortet. Sie sind eine gute Näherung,
 keine Ortung auf den Meter. Die Verspätungen dagegen sind echte Echtzeitdaten.
 Beim Verschieben und Zoomen wird nachgeladen (gedrosselt, 30 Sekunden Cache);
-ein zu großer Ausschnitt liefert bewusst nichts.
+ein zu großer Ausschnitt liefert bewusst nichts. Ohne Suche lädt die Karte
+Züge, sobald man hineinzoomt (Ausschnitt unter 1,5 Breitengraden).
+
+**Gezählt wird, was im Ausschnitt liegt.** HAFAS liefert zu einem Rechteck
+auch Züge, die gerade weit außerhalb fahren — sie kommen nur irgendwann
+hindurch. Im Allgäu mit „nur ICE & railjet" stand deshalb „21 Züge im
+Ausschnitt" da, wo keiner zu sehen war (gemessen: 20 geliefert, 0 im Bild).
+Das Backend fragt jetzt bis zu 120 Züge ab und schneidet auf den Ausschnitt
+zu; mit Filter heißt es „kein Zug dieser Auswahl".
+
+#### U-Bahn und Tram in München
+
+Die Positionsdaten der ÖBB kennen in München S-Bahn und Regionalzüge, aber
+**keine einzige U-Bahn oder Tram** (in Wien dagegen beides). Eine offene
+Schnittstelle mit echten Fahrzeugpositionen gibt es für München nicht. Die MVG
+veröffentlicht aber ihren Fahrplan als GTFS — täglich neu, mit dem
+Streckenverlauf jeder Linie. Daraus rechnet `lib/MvgRail.php` für jetzt aus, wo
+jede U-Bahn und Tram laut Plan ist: zwischen welchen Halten, wie weit, als
+Punkt auf dem Gleis. So rechnet auch HAFAS, wenn kein Zug seine Position meldet.
+
+- Auf der Karte: **U-Bahn blau, Tram rot, hohl** (= nach Fahrplan, nicht
+  gemeldet), ab Stadtzoom mit Liniennummer. Antippen zeigt den Lauf mit
+  Planzeiten; die Verspätung steht auf der Abfahrtstafel.
+- Nur bis zu einem Ausschnitt von 0,6 Breitengraden — darüber wären es
+  zweihundert Punkte auf einem Fleck.
+- Filter-Voreinstellung **„S-, U-Bahn & Tram"** im Menü über der Karte.
+
+Die Daten baut ein Skript, einmal lokal:
+
+```bash
+php bin/build_mvg_rail.php
+```
+
+Es lädt den Feed (`https://www.mvg.de/static/gtfs/google_transit.zip`, CC BY
+4.0, ~30 MB), nimmt U-Bahn und Tram heraus und schreibt
+`public/api/data/mvg_rail.json` (~2 MB) — **diese Datei mit hochladen.** Der
+Feed reicht einige Monate voraus; nach dem Fahrplanwechsel im Dezember oder
+wenn check.php warnt, neu bauen. Läuft sie ab, verschwinden die Bahnen
+einfach von der Karte, und über der Karte steht der Hinweis.
 
 ### Auslastung, knappe Umstiege, Bestpreis, Historie
 
@@ -2153,6 +2191,41 @@ Sortiert wird in drei Stufen:
    verfügbare Ersatz für „Größe der Stadt", die keine der APIs mitliefert.
 3. **Rang der Quelle**, bei Gleichstand mit Vorrang für die DB.
 
+#### Adressen und Orte als Start und Ziel
+
+Beide Quellen kennen auch **Adressen und Sehenswürdigkeiten**: die DB in
+Deutschland (und teils darüber hinaus), die ÖBB in Österreich. Sie stehen in
+der Vorschlagsliste mit der Plakette „Adresse" bzw. „Ort" — hinter den
+Bahnhöfen, außer die Eingabe hat eine Hausnummer oder endet auf „-straße",
+„-gasse", „-weg". Höchstens vier Adressen und zwei Orte; POIs nur, wenn der
+Name wirklich passt (HAFAS liefert zu „Bahnhofstrasse 10" sonst jeden
+Zahnarzt an jeder Bahnhofstraße).
+
+Die Kennung ist die gekürzte HAFAS-Form `A=2@O=Name@X=Länge·10⁶@Y=Breite·10⁶@`
+(A=4 für POIs), die beide Fahrpläne verstehen (`lib/Walks.php`). Die Suche
+beginnt dann mit einem **Fußweg**:
+
+- **ÖBB** findet Adressen nur in Österreich; für eine Münchner Adresse
+  antwortet sie „Nearby to the given address stations could not be found".
+  Dann übernimmt die DB, wie bei unbekannten Haltestellen.
+- **München:** liegt die Adresse im MVV, sucht die MVG direkt ab der
+  Koordinate (`originLatitude`/`originLongitude`) und liefert den Fußweg auf
+  der Straße gleich mit.
+- **Die DB** nennt beim Fußweg Dauer und Länge, aber keine Koordinaten.
+  `Walks::complete()` nimmt sie von den Nachbarn: der Fußweg beginnt, wo der
+  Zug davor ankam — am Anfang und Ende der Reise an der Adresse selbst.
+
+**Auf der Karte** steht der Fußweg der gewählten Verbindung gestrichelt in
+Lila, mit der Gehzeit daneben („🚶 4 Min"), in der Liste mit Länge
+(„🚶 Zu Fuß: Leopoldstraße 50 → Giselastraße · 4 Min · 200 m"). Hat der
+Fahrplan keine Linie geliefert, holt die App den Weg auf der Straße nach —
+über den Fußgänger-Router von FOSSGIS (`routing.openstreetmap.de`, kein
+Schlüssel, 30 Tage Cache). Bis dahin, oder wenn er nicht antwortet, steht die
+Luftlinie da, weiter gestrichelt. Wo nur die Luftlinie bekannt ist, rechnet die
+App mit einem Viertel Umweg und 4,5 km/h und schreibt „ca." davor.
+
+Abfahrtstafel und Via-Feld nehmen weiterhin nur Bahnhöfe.
+
 ### Wenn die ÖBB die Station nicht kennt
 
 Die Fahrplansuche läuft normalerweise über die ÖBB. Die kennt deutsche
@@ -2333,12 +2406,13 @@ public/
 │       ├── map.js                SVG-Routenkarte inkl. Label-Platzierung
 │       ├── live.js               Live-Verfolgung, Anschlusswache, Benachrichtigungen
 │       ├── board.js              Abfahrtstafel
-│       ├── autocomplete.js       Vorschlagsliste mit Favoriten
+│       ├── autocomplete.js       Vorschlagsliste mit Favoriten, Adressen
 │       ├── favorites.js          Lieblingsorte und Verlauf
 │       └── data/trains.js        Gattungen, Fahrzeugmodelle, Komfortwerte
 └── api/
     ├── index.php                 Router, führt Fahrplan und Preise zusammen
     ├── config.php                Einzige Datei, die du anfassen musst
+    ├── data/mvg_rail.json        U-Bahn/Tram-Fahrplan (bin/build_mvg_rail.php)
     └── lib/
         ├── Http.php              cURL-Wrapper inkl. Browser-TLS-Profil
         ├── Cache.php             Dateicache, degradiert still
@@ -2350,6 +2424,8 @@ public/
         ├── Health.php            Wie es den fremden Diensten zuletzt ging
         ├── Shops.php             Buchungs-Deeplinks je Land
         ├── CityTrips.php         Stadtfahrten und Zubringer in München
+        ├── Walks.php             Adressen als Start/Ziel, Fußwege, Fußweg-Router
+        ├── MvgRail.php           U-Bahn/Tram-Positionen München aus dem Fahrplan
         └── Providers/
             ├── OebbHafas.php     Fahrplan, Zuggattungen, Ländercodes, Geometrie, Tafel
             ├── DbVendo.php       Echtpreise, alle Tarife, Auslastung, Ausstattung
@@ -2366,9 +2442,9 @@ Alles per GET auf `api/`:
 |---|---|
 | `?action=health` | Welche Quellen sind erreichbar? |
 | `?action=catalogue` | Abo-Liste fürs Frontend |
-| `?action=locations&q=Bern` | Stationssuche |
+| `?action=locations&q=Bern` | Ortssuche: Bahnhöfe, dazu Adressen und POIs (`kind: address \| poi`) |
 | `?action=journeys&from=…&to=…&date=…&time=…` | Verbindungen inklusive Preis (`&scroll=…` blättert; der Kontext trägt seine Richtung selbst — `scroll` aus der Antwort führt zu späteren, `scrollBack` zu früheren Abfahrten) |
-| `?action=livetrains&bbox=süd,west,nord,ost` | Züge, die dort gerade fahren |
+| `?action=livetrains&bbox=süd,west,nord,ost` | Züge, die dort gerade fahren — nur im Ausschnitt, in München plus U-Bahn und Tram nach Fahrplan (`counts.live`, `counts.plan`) |
 | `?action=traindetails&jid=…` | Zuglauf mit Halten und Verspätung — statt `jid` auch `db=<journeyId>` (Zuglauf bei der DB) oder `mvgFrom`, `mvgTo`, `line`, `dep`, `arr` (Echtzeit eines MVG-Abschnitts) oder `chFrom`, `chTo`, `cat`, `dir`, `dep`, `arr` (Schweizer Prognose über opendata.ch) |
 | `?action=bestprices&from=…&to=…&date=…` | Günstigste Zeitfenster am Tag |
 | `?action=nextconnection&from=…&to=…&date=…&time=…` | Nächster Anschluss nach einem knappen Umstieg oder Ausfall (mit Echtzeit) |
@@ -2382,6 +2458,11 @@ Alles per GET auf `api/`:
 | `?action=platforms&lat=…&lon=…&from=…&to=…` | Bahnsteige, Treppen, Rolltreppen und Aufzüge eines Bahnhofs aus OpenStreetMap (`from`/`to` = die beiden Gleise des Umstiegs) |
 | `?action=works` | Bauarbeiten im Netz, mit Abschnitt und Zeitraum |
 | `?action=disruptions` | Aktive Störungsmeldungen der MVG München |
+| `?action=walkroute&from=lat,lon&to=lat,lon` | Fußweg auf der Straße: Linie, Länge, Gehzeit (höchstens 10 km) |
+
+`from`/`to` bei `journeys` sind EVA-Nummern, MVG-Kennungen (`mvg:…`) oder
+Adressen (`A=2@O=…@X=…@Y=…@`). `traindetails` nimmt als `jid` auch
+`mvgplan:…` für eine nach Fahrplan gerechnete U-Bahn oder Tram.
 
 `journeys` versteht zusätzlich `discounts` (kommagetrennt), `products`
 (kommagetrennt, leer = alle), `class` (1/2), `results`, `arrival=1`, `via`
@@ -2638,3 +2719,11 @@ Für den privaten Gebrauch ist das üblich und verbreitet — aber:
 - **Wagenreihung** nur für deutschen Fernverkehr am Reisetag.
 - **Die MVG-Abfahrten reichen nur ab jetzt** bis einen Tag voraus; für eine
   Tafel nächste Woche gibt es in München nur HAFAS, also keine U-Bahn.
+- **U-Bahn und Tram in München stehen nach Fahrplan** auf der Karte, ohne
+  Verspätung und ohne Ausfälle. Echte Positionen gäbe es nur über einen
+  Dienst mit Schlüssel (geOps Realtime API).
+- **Adressen** findet die DB in Deutschland, die ÖBB in Österreich. Für
+  Schweizer Adressen gibt es keine Quelle; dort bleibt es beim Bahnhof.
+- **Standort nur über HTTPS.** Über `http://` geöffnet leitet die Seite selbst
+  auf `https://` um. Eine vorher über `http://` auf den Home-Bildschirm
+  gelegte App muss man einmal löschen und neu anlegen.

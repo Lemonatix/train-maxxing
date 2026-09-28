@@ -44,6 +44,7 @@ final class Health
         // Schweizer Prognosen: der Dienst drosselt (HTTP 429) - das soll
         // sichtbar sein, bevor jemand fragt, warum die Echtzeit fehlt.
         'transport.opendata.ch' => 'opendata.ch',
+        'routing.openstreetmap.de' => 'fusswege',
     ];
 
     private static ?string $dir = null;

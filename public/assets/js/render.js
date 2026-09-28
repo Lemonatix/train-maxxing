@@ -7,7 +7,7 @@
  */
 
 import { typeOf } from './data/trains.js';
-import { trainLabel, RouteMap } from './map.js';
+import { trainLabel, RouteMap, walkText } from './map.js';
 import { formatDuration, formatTime, formatPrice, priceOrigin, counterValue, fxInfo } from './scoring.js';
 
 /**
@@ -1098,8 +1098,9 @@ function renderLegs(journey, entry, state, actions) {
       const walksBetween = leg.changesPlace && leg.from?.name && leg.to?.name;
       if (!walksBetween && (leg.durationMin || 0) < 1) continue;
 
+      // Gehzeit und Länge - "ca.", wo sie geschätzt sind (Walks.php).
       const text = walksBetween
-        ? `Zu Fuß: ${leg.from.name} → ${leg.to.name} · ${formatDuration(leg.durationMin)}`
+        ? `🚶 Zu Fuß: ${leg.from.name} → ${leg.to.name} · ${walkText(leg) || formatDuration(leg.durationMin)}`
         : `Umstieg am selben Halt · ${formatDuration(leg.durationMin)}`;
 
       const row = el('div', 'leg leg--walk');

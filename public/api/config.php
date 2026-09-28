@@ -28,6 +28,7 @@ return [
         // Streckenverläufe aus OSM. Der längste Wert hier bestimmt zugleich,
         // wie lange der Cache-Ordner Dateien behält - siehe gc() in index.php.
         'railgeom'    => 2592000, // 30 Tage (Schienen ziehen nicht um)
+        'walkroute'   => 2592000, // Fußwege auf der Straße: 30 Tage
     ],
 
     // Timeout pro Upstream-Request in Sekunden.
@@ -103,6 +104,19 @@ return [
         'mvg' => [
             'enabled'    => true,
             'endpoint'   => 'https://www.mvg.de/api/bgw-pt/v3',
+            'user_agent' => 'train-maxxing (+https://github.com/)',
+        ],
+
+        // --- Fußwege auf der Straße (OSRM, Profil "zu Fuß"). ---
+        //
+        // Für die gestrichelte Linie von der Haustür zur Haltestelle, wenn
+        // der Fahrplan selbst keine liefert. FOSSGIS betreibt den Router
+        // kostenlos für OpenStreetMap-Projekte; gefragt wird nur für die
+        // gewählte Verbindung, und jede Antwort gilt dreißig Tage. Abgeschaltet
+        // zeichnet die Karte die Luftlinie, ebenfalls gestrichelt.
+        'foot' => [
+            'enabled'    => true,
+            'endpoint'   => 'https://routing.openstreetmap.de/routed-foot/route/v1/foot',
             'user_agent' => 'train-maxxing (+https://github.com/)',
         ],
 

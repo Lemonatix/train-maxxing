@@ -15,7 +15,7 @@ import { ROUTES, ratingsBySpeed } from './data/routes.js';
 import { initMvgTicker } from './mvgTicker.js';
 import { initWorks } from './works.js';
 import { LiveTracker } from './live.js';
-import { setupAutocomplete, renderFavoriteChips } from './autocomplete.js';
+import { setupAutocomplete, renderFavoriteChips, isStation } from './autocomplete.js';
 import { places } from './favorites.js';
 import { initBoard } from './board.js';
 
@@ -417,6 +417,7 @@ function setupLiveFilter(products) {
   const PRESETS = {
     fern: ['highspeed', 'longdistance', 'night'],
     ice:  ['highspeed'],
+    stadt: ['suburban', 'subway', 'tram'],
     alle: [],
   };
 
@@ -674,11 +675,12 @@ function setupStationInputs() {
   $('#to').addEventListener('input', renderStars);
   renderStars();
 
+  // Umsteigen kann man nur an einem Bahnhof, nicht an einer Hausnummer.
   setupAutocomplete($('#via'), $('#via-list'), (loc) => {
     state.via = loc;
     renderVia();
     saveSettings();
-  });
+  }, { stationsOnly: true });
 
   $('#via-clear').addEventListener('click', () => {
     state.via = null;
@@ -937,7 +939,7 @@ function needsLookup(sel, aktuell) {
  *
  * @returns {Promise<?object>} der gewählte Ort, oder null
  */
-async function resolveTyped(sel, aktuell) {
+async function resolveTyped(sel, aktuell, stationsOnly = false) {
   const input = $(sel);
   const q = input?.value.trim() || '';
   if (aktuell && q === aktuell.name) return aktuell;
@@ -946,7 +948,7 @@ async function resolveTyped(sel, aktuell) {
 
   try {
     const res = await api.locations(q);
-    const hit = (res.locations || [])[0] || null;
+    const hit = (res.locations || []).find((l) => !stationsOnly || isStation(l)) || null;
     if (hit) input.value = hit.name;
     return hit;
   } catch {
@@ -969,7 +971,7 @@ async function runSearch() {
   const [von, nach, via] = await Promise.all([
     resolveTyped('#from', state.from),
     resolveTyped('#to', state.to),
-    resolveTyped('#via', state.via),
+    resolveTyped('#via', state.via, true),
   ]);
   if (von !== state.from || nach !== state.to || via !== state.via) {
     state.from = von;
@@ -1139,6 +1141,67 @@ function draw() {
   map.setData(ranked.slice(0, state.visible), state.selectedIndex, select);
   scheduleLiveTrains();
   ensureFallbacks();
+  loadWalks(ranked[state.selectedIndex]?.journey);
+}
+
+/** Schon geholte Fußwege, nach Start und Ziel - dieselben Wege kommen oft vor. */
+const walkCache = new Map();
+
+/**
+ * Fußwege der gewählten Verbindung auf der Straße nachladen.
+ *
+ * Die DB liefert für den Weg von der Haustür zur Haltestelle nur Dauer und
+ * Länge, keine Linie; die Karte zeigt bis dahin die Luftlinie. Die Antwort
+ * ersetzt auch geschätzte Länge und Gehzeit durch die des Weges.
+ */
+async function loadWalks(journey) {
+  if (!journey) return;
+  const offen = (journey.legs || []).filter((l) => l.mode === 'walk' && l.changesPlace
+    && !(l.geometry?.length > 1) && !l.walkTried
+    && l.from?.lat != null && l.to?.lat != null);
+  if (offen.length === 0) return;
+
+  let geaendert = false;
+  // Höchstens vier Wege je Verbindung - mehr hat keine sinnvolle Reise.
+  await Promise.all(offen.slice(0, 4).map(async (leg) => {
+    leg.walkTried = true;
+    const luft = distanceM(leg.from, leg.to);
+    // Unter 40 m ist die Luftlinie der Weg; über fünf Kilometer ist es
+    // keiner, den der Router gern rechnet.
+    if (luft < 40 || luft > 5000) return;
+    const key = [leg.from.lat, leg.from.lon, leg.to.lat, leg.to.lon].map((v) => v.toFixed(5)).join(',');
+    try {
+      let w = walkCache.get(key);
+      if (!w) {
+        w = (await api.walkRoute(leg.from, leg.to)).walk;
+        walkCache.set(key, w);
+      }
+      if (!(w?.geometry?.length > 1)) return;
+      leg.geometry = w.geometry;
+      if (leg.distance == null || leg.distanceEstimated) {
+        leg.distance = w.distance;
+        leg.distanceEstimated = false;
+      }
+      if (!(leg.durationMin > 0) || leg.durationEstimated) {
+        leg.durationMin = w.durationMin;
+      }
+      geaendert = true;
+    } catch {
+      // Dann bleibt es bei der gestrichelten Luftlinie.
+    }
+  }));
+  if (geaendert) map.render();
+}
+
+/** Luftlinie zwischen zwei Punkten in Metern. */
+function distanceM(a, b) {
+  const r = 6371000;
+  const p1 = (a.lat * Math.PI) / 180;
+  const p2 = (b.lat * Math.PI) / 180;
+  const dp = p2 - p1;
+  const dl = ((b.lon - a.lon) * Math.PI) / 180;
+  const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * r * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
 /**
@@ -1972,7 +2035,11 @@ function renderTrainPanel(panel, head, t) {
 async function fetchLiveTrains() {
   // Auch ohne Trefferliste sinnvoll, sobald eine Verbindung verfolgt wird -
   // dann liefern die Live-Züge die gemeldete Position des eigenen Zuges.
-  if (!state.liveTrains || (state.ranked.length === 0 && !live?.journey)) return;
+  // Und sobald man in eine Stadt hineinzoomt: wer die Karte über München
+  // aufzieht, will die U-Bahnen sehen, auch ohne vorher zu suchen.
+  const [s, , n] = map.bounds();
+  const nah = n - s <= 1.5;
+  if (!state.liveTrains || (state.ranked.length === 0 && !live?.journey && !nah)) return;
 
   if (liveAbort) liveAbort.abort();
   liveAbort = new AbortController();
@@ -1981,14 +2048,30 @@ async function fetchLiveTrains() {
     const res = await api.liveTrains(map.bounds(), state.liveProducts, { signal: liveAbort.signal });
     map.setLiveTrains(res.trains || []);
     const box = $('#live-note');
-    if (box) {
-      box.textContent = res.note
-        ? res.note
-        : `${(res.trains || []).length} Züge gerade unterwegs im Ausschnitt`;
-    }
+    if (box) box.textContent = liveNote(res);
   } catch (err) {
     if (err.name !== 'AbortError') map.setLiveTrains([]);
   }
+}
+
+/**
+ * Die Zeile unter der Karte: was gerade im Ausschnitt fährt.
+ *
+ * Gezählt wird nur, was im Ausschnitt LIEGT - siehe handleLiveTrains. Mit
+ * Filter heißt es "dieser Auswahl", damit "0 Züge" im Allgäu mit "nur ICE"
+ * nicht nach einer Störung aussieht.
+ */
+function liveNote(res) {
+  if (res.note) return res.note;
+  const live = res.counts?.live ?? (res.trains || []).length;
+  const plan = res.counts?.plan ?? 0;
+  const auswahl = state.liveProducts.length > 0 ? ' dieser Auswahl' : '';
+  const teile = [];
+  if (live > 0) teile.push(`${live} ${live === 1 ? 'Zug' : 'Züge'}${auswahl} gerade im Ausschnitt`);
+  if (plan > 0) teile.push(`${plan} U-Bahnen/Trams nach Fahrplan`);
+  if (teile.length === 0) teile.push(`Gerade kein Zug${auswahl} im Ausschnitt`);
+  if (res.planNote) teile.push(res.planNote);
+  return teile.join(' · ');
 }
 
 /** Auswahl wechseln - egal ob per Klick auf Karte oder Liste. */

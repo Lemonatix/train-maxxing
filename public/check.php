@@ -17,6 +17,7 @@ declare(strict_types=1);
 require __DIR__ . '/api/lib/Http.php';
 require __DIR__ . '/api/lib/Health.php';
 require __DIR__ . '/api/lib/Cache.php';
+require __DIR__ . '/api/lib/Walks.php';
 require __DIR__ . '/api/lib/Providers/OebbHafas.php';
 require __DIR__ . '/api/lib/Providers/DbVendo.php';
 require __DIR__ . '/api/lib/Providers/Mvg.php';
@@ -64,6 +65,30 @@ $checks[] = [
         ? ''
         : 'Ohne diese Option lässt sich der TLS-Fingerprint nicht anpassen und die DB antwortet mit 403. '
           . 'Nötig sind cURL 7.61+ mit OpenSSL 1.1.1+. Fahrplan und Schätzpreise funktionieren trotzdem.',
+];
+
+// U-Bahn und Tram in München: aus einer Datei, die bin/build_mvg_rail.php
+// baut. Sie läuft ab - dann zeigt die Karte keine Bahnen mehr, ohne dass
+// irgendwo ein Fehler stünde. Deshalb steht ihr Datum hier.
+$railDatei = __DIR__ . '/api/data/mvg_rail.json';
+$rail = is_file($railDatei) ? json_decode((string) file_get_contents($railDatei), true) : null;
+$railBis = null;
+if (is_array($rail) && isset($rail['base'], $rail['days'])) {
+    $railStart = DateTimeImmutable::createFromFormat('!Ymd', (string) $rail['base']);
+    $railBis = $railStart ? $railStart->modify('+' . ((int) $rail['days'] - 1) . ' days') : null;
+}
+$railRest = $railBis ? (int) floor(($railBis->getTimestamp() - time()) / 86400) : null;
+$railAlter = is_array($rail) && isset($rail['built']) ? (int) floor((time() - strtotime((string) $rail['built'])) / 86400) : null;
+$checks[] = [
+    'name'   => 'U-Bahn/Tram-Fahrplan München (Live-Karte)',
+    'state'  => $railBis === null ? 'warn' : ($railRest < 0 ? 'fail' : ($railRest < 14 || $railAlter > 45 ? 'warn' : 'ok')),
+    'detail' => $railBis === null
+        ? 'api/data/mvg_rail.json fehlt'
+        : 'gültig bis ' . $railBis->format('d.m.Y') . ($railAlter !== null ? ', gebaut vor ' . $railAlter . ' Tagen' : ''),
+    'hint'   => $railBis === null || $railRest < 14 || $railAlter > 45
+        ? 'Lokal "php bin/build_mvg_rail.php" ausführen und api/data/mvg_rail.json hochladen. '
+          . 'Baustellen-Fahrpläne der MVG kommen nur so auf die Karte.'
+        : '',
 ];
 
 $cache   = new Cache((string) $config['cache_dir']);

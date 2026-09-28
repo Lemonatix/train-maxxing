@@ -27,6 +27,18 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/assets/pictures/MMR_v2.png?v=2">
   <link rel="apple-touch-icon" href="/assets/pictures/MMR_v2.png?v=2">
 
+  <!-- Immer über HTTPS. Über http:// geöffnet - von Hand getippt oder so
+       auf den Home-Bildschirm gelegt - verweigert der Browser den Standort
+       ("Standort geht nur über HTTPS") und den Service Worker. Der Server
+       leitet nicht selbst um; das hier tut es, bevor irgendetwas lädt.
+       Lokale Entwicklung (localhost, 127.x, *.test) bleibt unberührt. -->
+  <script>
+    if (location.protocol === 'http:'
+      && !/^(localhost|127\.|\[::1\]$)|\.(localhost|test)$/.test(location.hostname)) {
+      location.replace('https://' + location.host + location.pathname + location.search + location.hash);
+    }
+  </script>
+
   <!-- Installierbar und offline nutzbar: siehe sw.js. -->
   <link rel="manifest" href="manifest.webmanifest">
 
@@ -275,6 +287,7 @@
           <div class="live-filter__presets">
             <button type="button" data-preset="fern" class="live-filter__preset">nur Fernverkehr</button>
             <button type="button" data-preset="ice" class="live-filter__preset">nur ICE &amp; railjet</button>
+            <button type="button" data-preset="stadt" class="live-filter__preset">S-, U-Bahn &amp; Tram</button>
             <button type="button" data-preset="alle" class="live-filter__preset">alle</button>
           </div>
           <div id="live-filter-list" class="live-filter__list"></div>

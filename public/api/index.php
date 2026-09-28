@@ -21,6 +21,7 @@
  *   ?action=platforms&lat=..&lon=..         Bahnsteiglage aus OSM für den Umstiegsplan
  *   ?action=works                           Bauarbeiten im Netz, mit Abschnitt und Zeitraum
  *   ?action=disruptions                     MVG-Störungsticker München
+ *   ?action=walkroute&from=lat,lon&to=lat,lon  Fußweg auf der Straße (Linie, Länge, Gehzeit)
  *
  * Strategie bei journeys:
  *   1. Fahrplan von der ÖBB holen (zuverlässig, mit Zuggattung + Ländercodes)
@@ -121,6 +122,8 @@ require __DIR__ . '/lib/Locations.php';
 require __DIR__ . '/lib/Punctuality.php';
 require __DIR__ . '/lib/Fleet.php';
 require __DIR__ . '/lib/Health.php';
+require __DIR__ . '/lib/Walks.php';
+require __DIR__ . '/lib/MvgRail.php';
 require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
 require __DIR__ . '/lib/Providers/CoachSequence.php';
@@ -203,6 +206,7 @@ const RATE_COST = [
     'shared'         => 1,
     'bestprices'     => 5,
     'journeys'       => 5,
+    'walkroute'      => 1,
 ];
 
 /** Voreinstellung für alles, was nicht in der Tabelle steht. */
@@ -290,8 +294,11 @@ try {
         case 'disruptions':
             handleDisruptions($http, $config, $cache);
             break;
+        case 'walkroute':
+            handleWalkRoute($http, $config, $cache);
+            break;
         default:
-            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, localroute, offers, departures, sequence, share, shared, fxrate, platforms, works, disruptions', 400);
+            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, localroute, offers, departures, sequence, share, shared, fxrate, platforms, works, disruptions, walkroute', 400);
     }
 } catch (Throwable $e) {
     // Details bleiben im Log, der Client bekommt nur eine generische Meldung.
@@ -360,7 +367,9 @@ function handleLocations(Http $http, array $config, Cache $cache): void
         ok(['locations' => []]);
     }
 
-    $key    = 'loc:' . mb_strtolower($q);
+    // "loc2": seit die Suche auch Adressen liefert. Die alten Einträge ohne
+    // sie sollen nicht noch einen Tag lang ausgeliefert werden.
+    $key    = 'loc2:' . mb_strtolower($q);
     $cached = $cache->get($key, (int) $config['cache_ttl']['locations']);
     if ($cached !== null) {
         ok(['locations' => $cached, 'cached' => true]);
@@ -405,23 +414,65 @@ function handleLiveTrains(Http $http, array $config, Cache $cache): void
         static fn($p) => $p !== '' && in_array($p, Products::allIds(), true)
     ));
 
-    $key = 'live:' . implode(',', array_map(static fn($v) => round((float) $v, 2), $bbox))
+    // U-Bahn und Tram in München rechnet MvgRail aus dem Fahrplan - die
+    // Positionsabfrage der ÖBB kennt sie nicht. Nur bei Stadtzoom: im
+    // Ausschnitt "halb Bayern" wären es zweihundert Punkte auf einem Fleck.
+    $bahnen = [];
+    if ($products === [] || in_array('subway', $products, true)) {
+        $bahnen[] = 'U';
+    }
+    if ($products === [] || in_array('tram', $products, true)) {
+        $bahnen[] = 'Tram';
+    }
+    $plan = [];
+    $planHinweis = null;
+    if ($bahnen !== [] && MvgRail::touches($south, $west, $north, $east)) {
+        if (($north - $south) > MvgRail::MAX_SPAN_LAT) {
+            $planHinweis = 'U-Bahn und Tram in München erscheinen beim Hineinzoomen.';
+        } else {
+            $rail = MvgRail::load(__DIR__ . '/data/mvg_rail.json');
+            if ($rail !== null) {
+                $plan = $rail->vehicles($south, $west, $north, $east, time(), $bahnen);
+                if ($plan === [] && ($rail->validUntil() ?? '') < date('Y-m-d')) {
+                    $planHinweis = 'Fahrplandaten für U-Bahn und Tram sind abgelaufen - bin/build_mvg_rail.php neu ausführen.';
+                }
+            }
+        }
+    }
+    $antwort = static fn(array $zuege, bool $cached, ?string $fehler = null): array => array_filter([
+        'trains' => array_merge($zuege, $plan),
+        'counts' => ['live' => count($zuege), 'plan' => count($plan)],
+        'planNote' => $planHinweis,
+        'cached' => $cached,
+        'error' => $fehler,
+    ], static fn($v) => $v !== null);
+
+    $key = 'live2:' . implode(',', array_map(static fn($v) => round((float) $v, 2), $bbox))
          . ':' . implode('+', $products);
     $cached = $cache->get($key, 30);
     if ($cached !== null) {
-        ok(['trains' => $cached, 'cached' => true]);
+        ok($antwort($cached, true));
     }
 
+    // Mehr als angezeigt wird: HAFAS liefert zum Ausschnitt auch Züge, die
+    // gerade weit außerhalb fahren - sie sind nur irgendwann in diesem
+    // Rechteck unterwegs. Mitgezählt standen sie als "21 Züge im Ausschnitt"
+    // da, wo kein einziger zu sehen war. Deshalb wird unten auf den
+    // Ausschnitt zugeschnitten, und die Obergrenze muss dafür Luft lassen.
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
-    $res  = $oebb->liveTrains($south, $west, $north, $east, 40, Products::bitmask($products));
+    $res  = $oebb->liveTrains($south, $west, $north, $east, 120, Products::bitmask($products));
 
     if (!$res['ok']) {
         // Live-Positionen sind Beiwerk - ein Fehler darf die Karte nicht stören.
-        ok(['trains' => [], 'error' => $res['error']]);
+        ok($antwort([], false, $res['error']));
     }
 
-    $cache->set($key, $res['data']);
-    ok(['trains' => $res['data'], 'cached' => false]);
+    $zuege = array_values(array_filter(
+        $res['data'],
+        static fn($t) => $t['lat'] >= $south && $t['lat'] <= $north && $t['lon'] >= $west && $t['lon'] <= $east
+    ));
+    $cache->set($key, $zuege);
+    ok($antwort($zuege, false));
 }
 
 /**
@@ -524,6 +575,17 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
     $jid = trim((string) ($_GET['jid'] ?? ''));
     if ($jid === '') {
         fail('Parameter "jid", "db" oder "mvgFrom" fehlt.', 400);
+    }
+
+    // U-Bahn und Tram in München, nach Fahrplan gerechnet (siehe MvgRail):
+    // der Lauf steht in den eigenen Daten, gefragt wird niemand.
+    if (str_starts_with($jid, 'mvgplan:')) {
+        $rail = MvgRail::load(__DIR__ . '/data/mvg_rail.json');
+        $lauf = $rail?->run($jid);
+        if ($lauf === null) {
+            fail('Fahrt nicht mehr im Fahrplan.', 404);
+        }
+        ok(['train' => $lauf, 'cached' => false]);
     }
 
     // Die Pünktlichkeitshistorie kommt NICHT in den Cache: sie wächst mit
@@ -1521,7 +1583,10 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     $time = trim((string) ($_GET['time'] ?? '08:00'));
 
     if ($from === '' || $to === '') {
-        fail('Parameter "from" und "to" sind erforderlich (EVA-Nummern).', 400);
+        fail('Parameter "from" und "to" sind erforderlich (EVA-Nummern oder Adressen).', 400);
+    }
+    if (strlen($from) > 300 || strlen($to) > 300) {
+        fail('Parameter "from" oder "to" ist zu lang.', 400);
     }
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         fail('Parameter "date" muss YYYY-MM-DD sein.', 400);
@@ -1727,8 +1792,12 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         if ($journeys === [] && $priced['ok'] && $priced['data'] !== []) {
             $journeys    = $priced['data'];
             $priceSource = 'db';
-            $notices[]   = 'Fahrplan von der DB — die ÖBB kennt diese Station nicht. '
-                         . 'Auf der Karte fehlt dadurch der genaue Streckenverlauf.';
+            // Bei einer Adresse ist das der Normalfall: die ÖBB findet Adressen
+            // nur in Österreich. Das ist keine Meldung wert.
+            if (!Walks::isPlace($hFrom) && !Walks::isPlace($hTo)) {
+                $notices[] = 'Fahrplan von der DB — die ÖBB kennt diese Station nicht. '
+                           . 'Auf der Karte fehlt dadurch der genaue Streckenverlauf.';
+            }
         } elseif ($journeys !== [] && $priced['ok'] && $priced['data'] !== []) {
             // Läuft auch ohne Preise: der Merge bringt Echtzeit und Auslastung.
             $matched = mergePrices($journeys, $priced['data']);
@@ -1874,6 +1943,18 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         }
     }
 
+    // Fußwege: Koordinaten an beiden Enden, Länge, notfalls geschätzte
+    // Gehzeit - die Karte zeichnet sie gestrichelt. Siehe Walks.
+    $endpunkt = static function (string $id, string $prefix) use ($coord): array {
+        $adresse = Walks::parse($id);
+        return $adresse ?? ['lat' => $coord($prefix . 'Lat'), 'lon' => $coord($prefix . 'Lon'), 'name' => ''];
+    };
+    $vonPunkt = $endpunkt($from, 'from');
+    $nachPunkt = $endpunkt($to, 'to');
+    foreach ($journeys as $i => $j) {
+        $journeys[$i] = Walks::complete($j, $vonPunkt, $nachPunkt);
+    }
+
     $payload = [
         'journeys'    => $journeys,
         'priceSource' => $priceSource,
@@ -1894,6 +1975,56 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
         $cache->set($cacheKey, $payload);
     }
     ok($payload + ['cached' => false]);
+}
+
+/**
+ * Der Fußweg zwischen zwei Punkten, auf der Straße statt als Luftlinie.
+ *
+ * Die Karte fragt das für die Fußwege der gewählten Verbindung, zu denen
+ * der Fahrplan keine Linie geliefert hat - meist das Stück von der Haustür
+ * zur Haltestelle. Wege ändern sich kaum; dreißig Tage Cache.
+ */
+function handleWalkRoute(Http $http, array $config, Cache $cache): void
+{
+    // Fehlt der Eintrag in einer älteren config.php, gilt der öffentliche
+    // Router - abschalten geht nur ausdrücklich.
+    $cfg = ($config['providers']['foot'] ?? []) + [
+        'enabled'  => true,
+        'endpoint' => 'https://routing.openstreetmap.de/routed-foot/route/v1/foot',
+    ];
+    if ($cfg['enabled'] !== true) {
+        fail('Fußweg-Router ist abgeschaltet.', 404);
+    }
+    $punkt = static function (string $k): ?array {
+        $p = array_map('trim', explode(',', (string) ($_GET[$k] ?? '')));
+        if (count($p) !== 2 || !is_numeric($p[0]) || !is_numeric($p[1])) {
+            return null;
+        }
+        [$lat, $lon] = [(float) $p[0], (float) $p[1]];
+        return abs($lat) <= 90 && abs($lon) <= 180 ? [$lat, $lon] : null;
+    };
+    $a = $punkt('from');
+    $b = $punkt('to');
+    if ($a === null || $b === null) {
+        fail('Parameter "from" und "to" erwarten "Breite,Länge".', 400);
+    }
+    // Ein Fußweg über zehn Kilometer ist keiner, sondern ein Tippfehler -
+    // und für den Router eine teure Anfrage.
+    if (Walks::distance($a[0], $a[1], $b[0], $b[1]) > 10000) {
+        fail('Zu weit für einen Fußweg.', 400);
+    }
+
+    $key = sprintf('walk:%.5f,%.5f;%.5f,%.5f', $a[0], $a[1], $b[0], $b[1]);
+    $cached = $cache->get($key, (int) ($config['cache_ttl']['walkroute'] ?? 30 * 86400));
+    if ($cached !== null) {
+        ok(['walk' => $cached, 'cached' => true]);
+    }
+    $res = Walks::route($http, $cfg, $a[0], $a[1], $b[0], $b[1]);
+    if (!$res['ok']) {
+        fail($res['error'] ?? 'Fußweg nicht verfügbar.', 502);
+    }
+    $cache->set($key, $res['data']);
+    ok(['walk' => $res['data'], 'cached' => false]);
 }
 
 // ======================================================================

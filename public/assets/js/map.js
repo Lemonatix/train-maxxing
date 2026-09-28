@@ -178,6 +178,10 @@ export function trainLabel(t) {
 export function sameTrain(a, b) {
   if (!a || !b) return false;
   if (a.jid && b.jid && a.jid === b.jid) return true;
+  // Nach Fahrplan gerechnete U-Bahnen und Trams (MvgRail) haben weder
+  // Nummer noch Meldung - "U3" ist eine Linie mit zwanzig Bahnen darauf.
+  // Als "der verfolgte Zug" taugt keine von ihnen.
+  if (a.source === 'mvg-plan' || b.source === 'mvg-plan') return false;
 
   const norm = (v) => String(v || '').replace(/\s+/g, '').toUpperCase();
 
@@ -251,6 +255,59 @@ export function snapToLine(pt, parts) {
   return best;
 }
 
+/** iPhone oder iPad - auch das iPad, das sich als Mac ausgibt. */
+const IOS = typeof navigator !== 'undefined'
+  && (/iPhone|iPad|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+/**
+ * Warum der Standort nicht kommt - mit dem Weg, es zu ändern.
+ *
+ * Auf dem iPhone reicht "abgelehnt" nicht: Safari fragt nach einem Nein
+ * nicht wieder, und die Web-App vom Home-Bildschirm hat gar keinen eigenen
+ * Schalter. Beide hängen an "Safari-Websites" in den Ortungsdiensten - das
+ * muss man wissen, sonst sucht man in den Einstellungen der App, die es
+ * nicht gibt.
+ *
+ * @param {GeolocationPositionError|null} err  null = kein sicherer Kontext
+ */
+export function geoErrorText(err) {
+  if (err == null) {
+    return 'Standort geht nur über HTTPS. Bitte die Seite mit https:// öffnen'
+      + (IOS ? ' und die App auf dem Home-Bildschirm neu anlegen.' : '.');
+  }
+  if (err.code === 1) {
+    return IOS
+      ? 'Standortzugriff ist blockiert. iPhone: Einstellungen → Datenschutz & Sicherheit → Ortungsdienste '
+        + '→ Safari-Websites → „Beim Verwenden der App“. In Safari zusätzlich „aA“ → Website-Einstellungen '
+        + '→ Standort → Erlauben. Danach neu laden.'
+      : 'Standortzugriff wurde abgelehnt. Über das Schloss-Symbol in der Adresszeile lässt er sich wieder erlauben.';
+  }
+  if (err.code === 2) {
+    return IOS
+      ? 'Standort nicht verfügbar. Sind die Ortungsdienste an? Einstellungen → Datenschutz & Sicherheit → Ortungsdienste.'
+      : 'Standort ist gerade nicht verfügbar (kein GPS/Ortungsdienst).';
+  }
+  if (err.code === 3) return 'Standortabfrage hat zu lange gedauert. Unter freiem Himmel klappt es meist schneller.';
+  return 'Standort konnte nicht ermittelt werden.';
+}
+
+/** "450 m" bzw. "1,2 km" - Fußwege in der Einheit, in der man sie geht. */
+export function formatMeters(m) {
+  if (!(m > 0)) return '';
+  if (m < 1000) return `${Math.max(10, Math.round(m / 10) * 10)} m`;
+  return `${(m / 1000).toFixed(1).replace('.', ',')} km`;
+}
+
+/** Gehzeit und Länge eines Fußwegs: "ca. 6 Min · 450 m". */
+export function walkText(leg) {
+  const teile = [];
+  if (leg.durationMin > 0) teile.push(`${leg.durationEstimated ? 'ca. ' : ''}${leg.durationMin} Min`);
+  const m = formatMeters(leg.distance);
+  if (m) teile.push((leg.distanceEstimated ? 'ca. ' : '') + m);
+  return teile.join(' · ');
+}
+
 export function geometryOf(journey) {
   const parts = [];
   for (const leg of journey.legs || []) {
@@ -267,10 +324,49 @@ export function geometryOf(journey) {
   return parts;
 }
 
+/**
+ * Die Fußwege einer Verbindung, die man auf der Karte sehen soll: jeder,
+ * der den Ort wechselt und an beiden Enden Koordinaten hat. Mit der Linie
+ * auf der Straße, wo es eine gibt, sonst mit der Luftlinie.
+ *
+ * @returns {{points: Array<[number, number]>, leg: object, exact: boolean}[]}
+ */
+export function walksOf(journey) {
+  const out = [];
+  for (const leg of journey.legs || []) {
+    if (leg.mode !== 'walk' || !leg.changesPlace) continue;
+    const a = leg.from, b = leg.to;
+    if (a?.lat == null || a?.lon == null || b?.lat == null || b?.lon == null) continue;
+    const exact = Array.isArray(leg.geometry) && leg.geometry.length > 1;
+    out.push({ points: exact ? leg.geometry : [[a.lat, a.lon], [b.lat, b.lon]], leg, exact });
+  }
+  return out;
+}
+
+/** Alle Punkte einer Verbindung, für den Kartenausschnitt - Fußwege inklusive. */
+function pointsOf(journey) {
+  const pts = [];
+  for (const part of geometryOf(journey)) pts.push(...part);
+  for (const w of walksOf(journey)) pts.push(...w.points);
+  return pts;
+}
+
 function stopsOf(journey) {
   const out = [];
   const seen = new Set();
-  const legs = (journey.legs || []).filter((l) => l.mode === 'train');
+  const all = journey.legs || [];
+  const legs = all.filter((l) => l.mode === 'train');
+
+  // Beginnt oder endet die Reise an einer Adresse, gehört die als großer
+  // Punkt auf die Karte - sonst endet die gestrichelte Linie im Nichts.
+  const ende = (p) => {
+    if (p?.lat == null || p?.lon == null || !p.name) return;
+    const key = `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ ...p, major: true });
+  };
+  if (all[0]?.mode === 'walk') ende(all[0].from);
 
   legs.forEach((leg, i) => {
     const stops = (leg.stops || []).filter((s) => s.lat != null && s.lon != null);
@@ -285,6 +381,8 @@ function stopsOf(journey) {
       out.push({ ...s, major });
     });
   });
+  const last = all[all.length - 1];
+  if (last?.mode === 'walk') ende(last.to);
   return out;
 }
 
@@ -694,9 +792,7 @@ export class RouteMap {
     }
 
 
-    for (const e of this.ranked) {
-      for (const part of geometryOf(e.journey)) pts.push(...part);
-    }
+    for (const e of this.ranked) pts.push(...pointsOf(e.journey));
     // Ohne Suchergebnisse trotzdem etwas zeigen: die verfolgte Route.
     if (pts.length < 2 && this.tracked) pts.push(...this.tracked.geometry.flat());
     this.fitPoints(pts);
@@ -760,8 +856,7 @@ export class RouteMap {
     const entry = this.ranked[index];
     if (!entry) return;
 
-    const pts = [];
-    for (const part of geometryOf(entry.journey)) pts.push(...part);
+    const pts = pointsOf(entry.journey);
     if (pts.length < 2) return;
 
     const { w, h } = this.size();
@@ -1384,7 +1479,7 @@ export class RouteMap {
       return;
     }
     if (!window.isSecureContext) {
-      this.setHint('Standort geht nur über HTTPS oder localhost.', true);
+      this.setHint(geoErrorText(null), true);
       return;
     }
     // Falls ein alter Watch noch läuft: erst aufräumen.
@@ -1410,12 +1505,7 @@ export class RouteMap {
         this.setHint('Position verfeinert sich… (aktuell ±' + Math.round(accuracy) + ' m)');
       }
     };
-    const errMsg = (err) => (
-      err.code === err.PERMISSION_DENIED ? 'Standortzugriff wurde abgelehnt.' :
-      err.code === err.POSITION_UNAVAILABLE ? 'Standort ist gerade nicht verfügbar (kein GPS/Location-Service).' :
-      err.code === err.TIMEOUT ? 'Standortabfrage hat zu lange gedauert.' :
-      'Standort konnte nicht ermittelt werden.'
-    );
+    const errMsg = geoErrorText;
 
     // Schritt 1: hochgenau, ohne Cache — maximale Präzision.
     navigator.geolocation.getCurrentPosition(
@@ -1681,6 +1771,7 @@ export class RouteMap {
     // --- Halte der aktiven Route ---
     const active = this.ranked[this.activeIdx];
     if (active) {
+      this.renderWalks(svg, active.journey, toPx);
       const stops = stopsOf(active.journey);
       for (const s of stops) {
         const [x, y] = toPx([s.lat, s.lon]);
@@ -1709,6 +1800,62 @@ export class RouteMap {
     this.renderTracked(svg, toPx);
     this.renderLiveTrains(svg, w, h, toPx);
     this.renderUserLocation(svg, w, h, toPx);
+  }
+
+  /**
+   * Fußwege der gewählten Verbindung: gestrichelt, mit der Gehzeit daneben.
+   *
+   * Nur für die gewählte - fünf Verbindungen mit je drei Fußwegen wären
+   * ein Strichmuster, in dem keiner mehr etwas findet. Wo der Fahrplan
+   * keine Linie mitgeliefert hat, steht erst die Luftlinie da; app.js holt
+   * den Weg auf der Straße nach (loadWalks) und zeichnet dann neu.
+   */
+  renderWalks(svg, journey, toPx) {
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', 'map__walks');
+    for (const w of walksOf(journey)) {
+      const px = w.points.map((p) => toPx(p));
+      const d = px.map(([x, y], k) => `${k === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+
+      const casing = document.createElementNS(NS, 'path');
+      casing.setAttribute('d', d);
+      casing.setAttribute('class', 'map__walk-casing');
+      g.append(casing);
+
+      const line = document.createElementNS(NS, 'path');
+      line.setAttribute('d', d);
+      line.setAttribute('class', 'map__walk' + (w.exact ? ' is-exact' : ''));
+      const title = document.createElementNS(NS, 'title');
+      title.textContent = walkText(w.leg);
+      line.append(title);
+      g.append(line);
+
+      // Gehzeit an die Mitte des Weges - aber nur, wo Platz ist. Bei einem
+      // Umstieg über zwanzig Pixel stünde sie auf dem Bahnhof.
+      let laenge = 0;
+      for (let k = 1; k < px.length; k++) {
+        laenge += Math.hypot(px[k][0] - px[k - 1][0], px[k][1] - px[k - 1][1]);
+      }
+      if (laenge < 60 || !(w.leg.durationMin > 0)) continue;
+      let rest = laenge / 2;
+      let mitte = px[0];
+      for (let k = 1; k < px.length; k++) {
+        const seg = Math.hypot(px[k][0] - px[k - 1][0], px[k][1] - px[k - 1][1]);
+        if (seg >= rest) {
+          const t = seg === 0 ? 0 : rest / seg;
+          mitte = [px[k - 1][0] + (px[k][0] - px[k - 1][0]) * t, px[k - 1][1] + (px[k][1] - px[k - 1][1]) * t];
+          break;
+        }
+        rest -= seg;
+      }
+      const label = document.createElementNS(NS, 'text');
+      label.setAttribute('x', (mitte[0] + 7).toFixed(1));
+      label.setAttribute('y', (mitte[1] - 6).toFixed(1));
+      label.setAttribute('class', 'map__walk-label');
+      label.textContent = `🚶 ${w.leg.durationEstimated ? 'ca. ' : ''}${w.leg.durationMin} Min`;
+      g.append(label);
+    }
+    svg.append(g);
   }
 
   /**
@@ -1914,9 +2061,14 @@ export class RouteMap {
       if (x < 0 || y < 0 || x > w || y > h) continue;
 
       const g = document.createElementNS(NS, 'g');
+      // U-Bahn und Tram in eigener Farbe: in München rechnet sie das Backend
+      // aus dem Fahrplan (MvgRail), in Wien meldet HAFAS sie selbst.
+      const stadt = t.category === 'U' ? ' is-subway' : /^(tram|str)$/i.test(t.category || '') ? ' is-tram' : '';
       g.setAttribute('class', 'map__train'
         + (t.onRoute ? ' is-onroute' : '')
         + (t === own ? ' is-tracked' : '')
+        + stadt
+        + (t.source === 'mvg-plan' ? ' is-plan' : '')
         // Hochgerechnete Position: derselbe Punkt, nur hohl - damit man
         // sieht, dass die Stelle geschätzt und nicht gemeldet ist.
         + (t.estimated ? ' is-estimated' : ''));
@@ -1953,9 +2105,21 @@ export class RouteMap {
 
       const title = document.createElementNS(NS, 'title');
       title.textContent = `${trainLabel(t)}${t.direction ? ' → ' + t.direction : ''}`
+        + (t.nextStop ? ` — nächster Halt ${t.nextStop}` : '')
         + (t.estimated ? ' — Position aus dem Fahrplan geschätzt' : '')
         + (t.jid ? ' (antippen für Details)' : '');
       g.append(title);
+
+      // Ab Stadtzoom steht die Linie neben U-Bahn und Tram - bei zwanzig
+      // Punkten in der Innenstadt fragt man sonst jeden einzeln ab.
+      if (stadt && this.zoom >= 13 && t.line) {
+        const lab = document.createElementNS(NS, 'text');
+        lab.setAttribute('x', (x + 6).toFixed(1));
+        lab.setAttribute('y', (y - 5).toFixed(1));
+        lab.setAttribute('class', 'map__train-label');
+        lab.textContent = t.line;
+        g.append(lab);
+      }
 
       if (t.jid) {
         g.addEventListener('keydown', (e) => {

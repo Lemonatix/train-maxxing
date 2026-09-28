@@ -401,11 +401,14 @@ final class OebbHafas
     /** Ortssuche. @return array{ok:bool,error:?string,data:array} */
     public function locations(string $query, int $limit = 8): array
     {
+        // 'ALL' statt nur Stationen: Adressen und POIs in Österreich kennt
+        // nur die ÖBB. Mit ein paar Plätzen mehr, damit die Bahnhöfe nicht
+        // verdrängt werden.
         $res = $this->call('LocMatch', [
             'input' => [
                 'field'  => 'S',
-                'loc'    => ['name' => $query . '?', 'type' => 'S'],
-                'maxLoc' => $limit,
+                'loc'    => ['name' => $query . '?', 'type' => 'ALL'],
+                'maxLoc' => $limit + 6,
             ],
         ]);
 
@@ -415,9 +418,24 @@ final class OebbHafas
 
         $locs = $res['data']['res']['match']['locL'] ?? [];
         $out  = [];
+        $orte = [];
         foreach ($locs as $l) {
-            if (($l['type'] ?? '') !== 'S') {
-                continue; // nur Stationen, keine Adressen/POIs
+            $typ = (string) ($l['type'] ?? '');
+            if ($typ === 'A' || $typ === 'P') {
+                $ort = Walks::place(
+                    $typ === 'P' ? 'poi' : 'address',
+                    (string) ($l['name'] ?? ''),
+                    isset($l['crd']['y']) ? $l['crd']['y'] / 1000000 : null,
+                    isset($l['crd']['x']) ? $l['crd']['x'] / 1000000 : null,
+                    strtolower((string) ($l['countryCodeL'][0] ?? ''))
+                );
+                if ($ort !== null) {
+                    $orte[] = $ort;
+                }
+                continue;
+            }
+            if ($typ !== 'S') {
+                continue;
             }
             $pCls = (int) ($l['pCls'] ?? 0);
             $out[] = [
@@ -437,7 +455,7 @@ final class OebbHafas
         // eigenem Relevanzgewicht. Namen mit "(U)" sind keine U-Bahn-Stationen,
         // sondern Meta-Stationen, die alle Bahnsteige eines Bahnhofs bündeln -
         // für eine Verbindungssuche genau die richtige Wahl.
-        return ['ok' => true, 'error' => null, 'data' => $out];
+        return ['ok' => true, 'error' => null, 'data' => array_slice($out, 0, $limit), 'places' => $orte];
     }
 
     /**
@@ -468,8 +486,8 @@ final class OebbHafas
         bool $realtime = false
     ): array {
         $req = [
-            'depLocL'     => [['type' => 'S', 'lid' => 'A=1@L=' . $fromId . '@']],
-            'arrLocL'     => [['type' => 'S', 'lid' => 'A=1@L=' . $toId . '@']],
+            'depLocL'     => [self::locRef($fromId)],
+            'arrLocL'     => [self::locRef($toId)],
             'outDate'     => str_replace('-', '', $date),
             'outTime'     => str_replace(':', '', $time) . '00',
             // Zwischenhalte brauchen wir doppelt: für den Streckenverlauf im
@@ -549,6 +567,23 @@ final class OebbHafas
             // Und derselbe Kontext rückwärts - frühere Abfahrten.
             'scrollB' => isset($body['outCtxScrB']) ? (string) $body['outCtxScrB'] : null,
         ];
+    }
+
+    /**
+     * Start oder Ziel für TripSearch: ein Bahnhof über seine EVA-Nummer,
+     * eine Adresse (A=2) oder ein POI (A=4) über die Kennung aus Walks.
+     *
+     * @return array{type:string,lid:string}
+     */
+    private static function locRef(string $id): array
+    {
+        if (str_starts_with($id, 'A=2@')) {
+            return ['type' => 'A', 'lid' => $id];
+        }
+        if (str_starts_with($id, 'A=4@')) {
+            return ['type' => 'P', 'lid' => $id];
+        }
+        return ['type' => 'S', 'lid' => 'A=1@L=' . $id . '@'];
     }
 
     /**
@@ -1028,7 +1063,7 @@ final class OebbHafas
                 // Alles außer einer Fahrt ist ein Weg zu Fuß: WALK, TRSF,
                 // aber auch seltenere Typen wie DEVI oder KISS. Sie hier
                 // aufzuführen wäre zu eng - was kein JNY ist, fährt nicht.
-                $legs[] = [
+                $walk = [
                     'mode'        => 'walk',
                     'kind'        => strtolower($type),
                     'from'        => $fromLoc,
@@ -1039,6 +1074,17 @@ final class OebbHafas
                     // Wechselt der Halt, geht man wirklich ein Stück.
                     'changesPlace' => ($fromLoc['name'] ?? '') !== ($toLoc['name'] ?? ''),
                 ];
+                // Länge und, bei Umstiegen, der Weg selbst - für die
+                // gestrichelte Linie auf der Karte.
+                $gis = $sec['gis'] ?? [];
+                if (isset($gis['dist']) && is_numeric($gis['dist'])) {
+                    $walk['distance'] = (int) $gis['dist'];
+                }
+                $weg = $this->geometryOf($gis, $common);
+                if (count($weg) > 1) {
+                    $walk['geometry'] = $weg;
+                }
+                $legs[] = $walk;
             }
         }
 

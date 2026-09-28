@@ -7,6 +7,12 @@
  * Tippt man in ein leeres Feld, stehen Favoriten und die zuletzt benutzten
  * Orte da, ohne dass man etwas eingeben muss. Jeder Vorschlag trägt einen
  * Stern, der ihn zum Favoriten macht oder wieder entfernt.
+ *
+ * ADRESSEN: Die Ortssuche liefert neben Bahnhöfen auch Adressen und
+ * Sehenswürdigkeiten (`kind: 'address' | 'poi'`). Start und Ziel dürfen
+ * das sein - die Verbindung beginnt dann mit einem Fußweg. Die
+ * Abfahrtstafel und das Via-Feld brauchen dagegen einen Bahnhof; dort
+ * bleiben sie mit `stationsOnly` draußen.
  */
 
 import { api } from './api.js';
@@ -19,12 +25,26 @@ const node = (tag, className, text) => {
   return n;
 };
 
+/** Ein Bahnhof oder eine Haltestelle - keine Adresse, kein POI. */
+export function isStation(loc) {
+  if (!loc) return false;
+  if (loc.kind) return loc.kind === 'station';
+  // Aus einem geteilten Link kommt nur die Kennung: A=2 ist eine Adresse,
+  // A=4 ein POI (siehe Walks.php).
+  return !/^A=[24]@/.test(String(loc.id || ''));
+}
+
+/** Kurzbezeichnung für Orte, die kein Bahnhof sind. */
+const KIND_LABEL = { address: 'Adresse', poi: 'Ort' };
+
 /**
  * @param {HTMLInputElement} input
  * @param {HTMLElement} list    <ul> für die Vorschläge
  * @param {(loc: object) => void} onPick
+ * @param {{stationsOnly?: boolean}} [opts]
  */
-export function setupAutocomplete(input, list, onPick) {
+export function setupAutocomplete(input, list, onPick, opts = {}) {
+  const usable = (loc) => !opts.stationsOnly || isStation(loc);
   let timer = null;
   let abort = null;
   /** @type {{loc: object, group?: string}[]} */
@@ -63,7 +83,12 @@ export function setupAutocomplete(input, list, onPick) {
 
       li.append(node('span', 'ac__name', loc.name));
 
-      if (loc.country) li.append(node('span', 'ac__country', loc.country.toUpperCase()));
+      if (KIND_LABEL[loc.kind]) {
+        li.classList.add('ac__item--place');
+        li.append(node('span', 'ac__kind', KIND_LABEL[loc.kind]));
+      } else if (loc.country) {
+        li.append(node('span', 'ac__country', loc.country.toUpperCase()));
+      }
 
       const fav = places.isFavorite(loc);
       const star = node('button', 'ac__star' + (fav ? ' is-on' : ''), fav ? '★' : '☆');
@@ -94,8 +119,8 @@ export function setupAutocomplete(input, list, onPick) {
 
   /** Favoriten und Verlauf - für ein leeres Feld statt einer leeren Liste. */
   const showSaved = () => {
-    const fav = places.favorites().map((loc) => ({ loc, group: 'Favoriten' }));
-    const rec = places.recent().map((loc) => ({ loc, group: 'Zuletzt' }));
+    const fav = places.favorites().filter(usable).map((loc) => ({ loc, group: 'Favoriten' }));
+    const rec = places.recent().filter(usable).map((loc) => ({ loc, group: 'Zuletzt' }));
     items = [...fav, ...rec];
     active = -1;
     draw();
@@ -118,7 +143,7 @@ export function setupAutocomplete(input, list, onPick) {
       abort = new AbortController();
       try {
         const res = await api.locations(q, { signal: abort.signal });
-        items = (res.locations || []).map((loc) => ({ loc }));
+        items = (res.locations || []).filter(usable).map((loc) => ({ loc }));
         active = -1;
         draw();
       } catch (err) {
@@ -158,9 +183,9 @@ export function setupAutocomplete(input, list, onPick) {
  * @param {HTMLElement} box
  * @param {{ target: () => string, fill: (field: string, loc: object) => void }} opts
  */
-export function renderFavoriteChips(box, { target, fill }) {
+export function renderFavoriteChips(box, { target, fill, stationsOnly = false }) {
   const draw = () => {
-    const favs = places.favorites();
+    const favs = places.favorites().filter((loc) => !stationsOnly || isStation(loc));
     box.replaceChildren();
     box.hidden = favs.length === 0;
     if (favs.length === 0) return;

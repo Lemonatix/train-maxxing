@@ -19,7 +19,7 @@
  */
 
 import { typeOf, modelOf, FLEET_RULES, TRAIN_MODELS } from '../public/assets/js/data/trains.js';
-import { trainLabel, sameTrain } from '../public/assets/js/map.js';
+import { trainLabel, sameTrain, walkText, formatMeters, walksOf, geoErrorText } from '../public/assets/js/map.js';
 
 // LiveTracker legt im Konstruktor einen Listener an, und api.js baut beim
 // Laden eine URL aus `document.baseURI`. Mehr Browser braucht es für diese
@@ -30,6 +30,7 @@ globalThis.document ??= {
   createElement: () => ({ append() {}, classList: { add() {} }, setAttribute() {} }),
 };
 const { LiveTracker } = await import('../public/assets/js/live.js');
+const { isStation } = await import('../public/assets/js/autocomplete.js');
 
 let fehlgeschlagen = 0;
 let gesamt = 0;
@@ -438,6 +439,47 @@ console.log('\nAbfahrtstafel — Filtergruppen');
 }
 
 // ---------------------------------------------------------------------
+console.log('\nAdressen und Fußwege');
+{
+  pruefe('Meter unter einem Kilometer, auf zehn gerundet', formatMeters(447), '450 m');
+  pruefe('ab einem Kilometer mit Komma', formatMeters(1234), '1,2 km');
+  pruefe('ohne Länge nichts', formatMeters(null), '');
+  pruefe('Gehzeit und Länge, geschätztes mit "ca."',
+    walkText({ durationMin: 6, distance: 420, distanceEstimated: true }), '6 Min · ca. 420 m');
+  pruefe('geschätzte Gehzeit ebenso',
+    walkText({ durationMin: 3, durationEstimated: true }), 'ca. 3 Min');
+
+  const reise = { legs: [
+    { mode: 'walk', changesPlace: true, from: { name: 'Leopoldstraße 50', lat: 48.158, lon: 11.5848 },
+      to: { name: 'Giselastraße', lat: 48.1565, lon: 11.5845 }, durationMin: 4 },
+    zug({ category: 'U', line: 'U6', stops: [{ name: 'Giselastraße', lat: 48.1565, lon: 11.5845 }, { name: 'Marienplatz', lat: 48.137, lon: 11.575 }] }),
+    // Umstieg am selben Halt: keine Linie auf der Karte.
+    { mode: 'walk', changesPlace: false, from: { name: 'Marienplatz', lat: 48.137, lon: 11.575 }, to: { name: 'Marienplatz', lat: 48.1372, lon: 11.5752 } },
+    // Ohne Koordinaten am Ende: ebenfalls nicht zeichnen.
+    { mode: 'walk', changesPlace: true, from: { name: 'Marienplatz', lat: 48.137, lon: 11.575 }, to: { name: 'Rathaus' } },
+  ] };
+  const wege = walksOf(reise);
+  pruefe('nur Fußwege mit Ortswechsel und beiden Enden', wege.length, 1);
+  pruefe('ohne Linie vom Fahrplan: die Luftlinie', wege[0].exact, false);
+  reise.legs[0].geometry = [[48.158, 11.5848], [48.1572, 11.5847], [48.1565, 11.5845]];
+  pruefe('mit Linie: der Weg auf der Straße', walksOf(reise)[0].points.length, 3);
+
+  pruefe('Adresse ist kein Bahnhof', isStation({ id: 'A=2@O=X@X=1@Y=2@', name: 'X', kind: 'address' }), false);
+  pruefe('aus einem Link nur die Kennung: trotzdem erkannt', isStation({ id: 'A=4@O=Arena@X=1@Y=2@', name: 'Arena' }), false);
+  pruefe('EVA-Nummer ist ein Bahnhof', isStation({ id: '8000261', name: 'München Hbf' }), true);
+  pruefe('MVG-Halt ist ein Bahnhof', isStation({ id: 'mvg:de:09162:2', name: 'Marienplatz' }), true);
+}
+
+console.log('\nLive-Karte — U-Bahn und Tram nach Fahrplan');
+{
+  const verfolgt = { category: 'U', line: 'U3', name: 'U3', trainNumber: '' };
+  const plan = { category: 'U', line: 'U3', name: 'U3', trainNumber: '', source: 'mvg-plan', jid: 'mvgplan:1:20260926:3600' };
+  pruefe('eine gerechnete U3 ist nie "der verfolgte Zug"', sameTrain(verfolgt, plan), false);
+  pruefe('HAFAS-Züge weiter über den Namen', sameTrain({ category: 'S', name: 'S1' }, { category: 'S', name: 'S1' }), true);
+  pruefe('ohne HTTPS: Hinweis auf https://', geoErrorText(null).includes('https://'), true);
+  pruefe('abgelehnt: Weg zur Freigabe genannt', /erlauben|Ortungsdienste/i.test(geoErrorText({ code: 1 })), true);
+}
+
 console.log('\nImporte — benutzt, aber nicht geholt?');
 
 // ZWEIMAL ist genau dieser Fehler durchgerutscht: `sameTrain` und

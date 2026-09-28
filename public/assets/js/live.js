@@ -27,7 +27,7 @@
 
 import { api } from './api.js';
 // sameTrain war benutzt, aber nie importiert — siehe trainPosition().
-import { geometryOf, trainLabel, sameTrain, snapToLine } from './map.js';
+import { geometryOf, trainLabel, sameTrain, snapToLine, geoErrorText } from './map.js';
 import { spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
 import { typeOf } from './data/trains.js';
 
@@ -1300,7 +1300,7 @@ ${url.href}`);
       return;
     }
     if (!window.isSecureContext) {
-      this.error = 'Standort geht nur über HTTPS oder localhost.';
+      this.error = geoErrorText(null);
       return;
     }
 
@@ -1310,6 +1310,7 @@ ${url.href}`);
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
         this.position = { lat: latitude, lon: longitude, acc: accuracy };
+        this.error = null;
         this.map?.setUserLocation(latitude, longitude, accuracy);
         // Mitziehen, aber den Zoom des Nutzers respektieren.
         if (this.map) {
@@ -1320,10 +1321,11 @@ ${url.href}`);
         this.render();
       },
       (err) => {
-        this.error = err.code === err.PERMISSION_DENIED
-          ? 'Standortzugriff wurde abgelehnt.'
-          : 'Standort ist gerade nicht verfügbar.';
-        this.stopGps();
+        this.error = geoErrorText(err);
+        // Nur ein Nein beendet das Mitfahren. Kein Empfang im Tunnel oder
+        // ein langsamer erster Fix sind vorübergehend - die Beobachtung
+        // läuft weiter und meldet sich, sobald wieder eine Position kommt.
+        if (err.code === err.PERMISSION_DENIED) this.stopGps();
         this.render();
       },
       { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }

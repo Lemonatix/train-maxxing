@@ -426,13 +426,29 @@ final class Mvg
 
     private function routesUrl(string $from, string $to, string $isoUtc, bool $isArrival): string
     {
-        return rtrim((string) ($this->cfg['endpoint'] ?? ''), '/') . '/routes?' . http_build_query([
-            'originStationGlobalId'      => $from,
-            'destinationStationGlobalId' => $to,
-            'routingDateTime'            => $isoUtc,
-            'routingDateTimeIsArrival'   => $isArrival ? 'true' : 'false',
-            'transportTypes'             => 'SCHIFF,RUFTAXI,BAHN,UBAHN,TRAM,SBAHN,BUS,REGIONAL_BUS',
-        ]);
+        return rtrim((string) ($this->cfg['endpoint'] ?? ''), '/') . '/routes?' . http_build_query(
+            self::endpoint('origin', $from) + self::endpoint('destination', $to) + [
+                'routingDateTime'            => $isoUtc,
+                'routingDateTimeIsArrival'   => $isArrival ? 'true' : 'false',
+                'transportTypes'             => 'SCHIFF,RUFTAXI,BAHN,UBAHN,TRAM,SBAHN,BUS,REGIONAL_BUS',
+            ]
+        );
+    }
+
+    /**
+     * Start oder Ziel einer Routenanfrage: eine Haltestelle über ihre
+     * globalId, oder - für eine Adresse - ein Punkt "coord:Breite,Länge".
+     * Von einem Punkt aus sucht die MVG selbst die Haltestellen in der
+     * Nähe und liefert den Fußweg dorthin mit.
+     *
+     * @return array<string,string>
+     */
+    private static function endpoint(string $which, string $id): array
+    {
+        if (preg_match('/^coord:(-?[\d.]+),(-?[\d.]+)$/', $id, $m) === 1) {
+            return [$which . 'Latitude' => $m[1], $which . 'Longitude' => $m[2]];
+        }
+        return [$which . 'StationGlobalId' => $id];
     }
 
     /** @return array{ok:bool,error:?string,data:array} */
@@ -523,7 +539,7 @@ final class Mvg
             $live     = !empty($part['realTime']);
 
             if ($type === 'PEDESTRIAN') {
-                $legs[] = [
+                $walk = [
                     'mode'         => 'walk',
                     'kind'         => 'walk',
                     'from'         => $from,
@@ -533,6 +549,17 @@ final class Mvg
                     'durationMin'  => self::minutes($dep, $arr),
                     'changesPlace' => $from['name'] !== $to['name'],
                 ];
+                // Die MVG liefert den Fußweg auf der Straße gleich mit.
+                if (is_numeric($part['distance'] ?? null)) {
+                    $walk['distance'] = (int) round((float) $part['distance']);
+                }
+                if (is_string($part['pathPolyline'] ?? null) && $part['pathPolyline'] !== '') {
+                    $weg = OebbHafas::decodePolyline($part['pathPolyline']);
+                    if (count($weg) > 1) {
+                        $walk['geometry'] = $weg;
+                    }
+                }
+                $legs[] = $walk;
                 continue;
             }
 

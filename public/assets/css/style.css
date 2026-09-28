@@ -554,6 +554,19 @@ input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   border-radius: 3px;
 }
 
+/* Adresse oder POI statt Bahnhof: dieselbe Plakette wie das Land, in der
+   Farbe der Fußwege - von dort geht es zu Fuß los. */
+.ac__kind {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  color: var(--purple);
+  background: var(--purple-soft);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+}
+
 /* Name links, Land und Stern rechts - der Name darf umbrechen, nicht
    die Knöpfe verdrängen. */
 .ac__name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
@@ -1334,6 +1347,43 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   stroke: #ffffff;
 }
 
+/* Fußwege der gewählten Verbindung: gestrichelt in der Farbe, die sie
+   auch in der Liste haben. Die Luftlinie (noch kein Weg geladen) mit
+   längeren Lücken, damit man sie als Platzhalter erkennt. */
+.map__walk-casing {
+  fill: none;
+  stroke: var(--map-casing);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.map__walk {
+  fill: none;
+  stroke: var(--purple);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 3 8;
+  opacity: 0.85;
+}
+
+.map__walk.is-exact { stroke-dasharray: 7 5; opacity: 1; }
+
+.map__walk-label {
+  fill: var(--purple);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--map-label-halo);
+  stroke-width: 3.5px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
 .map__stop {
   fill: var(--map-stop-fill);
   stroke: var(--accent);
@@ -1408,6 +1458,35 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .map__train.is-tracked:focus-visible .map__train-dot {
   fill: var(--map-stop-fill);
   stroke: var(--rose);
+}
+
+/* U-Bahn blau, Tram rot - die Farben der Münchner und Wiener Netzpläne. */
+.map__train.is-subway { --train-color: #1f6fd1; }
+.map__train.is-tram { --train-color: #d8333a; }
+.map__train.is-subway .map__train-dot,
+.map__train.is-tram .map__train-dot { fill: var(--train-color); }
+.map__train.is-subway .map__train-halo,
+.map__train.is-tram .map__train-halo { fill: var(--train-color); }
+
+/* Nach Fahrplan gerechnet (MvgRail): hohl und ohne Pulsieren - das Pulsieren
+   steht für eine gemeldete Position. */
+.map__train.is-plan .map__train-halo { display: none; }
+.map__train.is-plan .map__train-dot {
+  fill: var(--map-stop-fill);
+  stroke: var(--train-color, var(--green));
+  stroke-width: 2.2;
+}
+
+.map__train-label {
+  fill: var(--train-color, var(--map-label));
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--map-label-halo);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
 }
 
 @keyframes trainPulse {
