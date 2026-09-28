@@ -10,7 +10,10 @@
  * Hoster, deren Cron nur URLs aufrufen kann, nehmen stattdessen
  * .../api/index.php?action=pushtick&key=… (tick_key aus config.local.php).
  */
-if (PHP_SAPI !== 'cli') {
+// Über den Browser: gesperrt. Ein Cronjob startet PHP ohne Webanfrage -
+// meist als Kommandozeile, bei manchen Hostern (IONOS) auch als CGI. Das
+// Erkennungszeichen einer Webanfrage ist REQUEST_METHOD.
+if (PHP_SAPI !== 'cli' && isset($_SERVER['REQUEST_METHOD'])) {
     http_response_code(403);
     exit;
 }

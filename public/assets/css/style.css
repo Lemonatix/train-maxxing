@@ -3754,6 +3754,21 @@ details.live__msg .live__msg-text {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b93a7' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E");
 }
 
+/* FIREFOX zeichnet sein eigenes Kalender- bzw. Uhrsymbol, auch mit
+   `appearance: none` - und es lässt sich dort nicht ausblenden (die
+   ::-webkit-calendar-picker-indicator-Regel oben kennt Firefox nicht). Mit
+   dem gezeichneten SVG daneben standen dann zwei Uhren im Feld. In Firefox
+   bleibt deshalb nur das eigene, das ohnehin den Picker öffnet.
+   Erkannt wird Firefox an -moz-appearance; Chrome und Safari kennen es
+   nicht und behalten das SVG (Safari auf dem iPhone hat kein eigenes). */
+@supports (-moz-appearance: none) {
+  .row--options input[type="date"],
+  .row--options input[type="time"] {
+    background-image: none;
+    padding-right: 0.6rem;
+  }
+}
+
 /* --- Telefone -------------------------------------------------------
    Ziele: keine horizontale Scrollleiste, Touch-Flächen ab 44 px und
    Eingabefelder mit mindestens 16 px, damit iOS beim Fokus nicht
@@ -3840,6 +3855,12 @@ details.live__msg .live__msg-text {
     min-height: 44px;
     padding: 0.5rem 2rem 0.5rem 0.55rem;
     text-align: left;
+  }
+
+  /* Firefox: nur das eigene Symbol, siehe oben - also kein Platz fürs SVG. */
+  @supports (-moz-appearance: none) {
+    .row--options input[type="date"],
+    .row--options input[type="time"] { padding-right: 0.55rem; }
   }
 
   /* Ganze Breite für alles, was sonst zu eng wird. */
