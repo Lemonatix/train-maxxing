@@ -1,0 +1,9 @@
+# Die Fahrplandaten liest nur index.php (MvgRail) vom Dateisystem. Über den
+# Browser braucht sie niemand - und 2 MB je Abruf sind unnötiger Traffic.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>
