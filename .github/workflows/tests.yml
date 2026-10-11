@@ -37,7 +37,10 @@ jobs:
 
       - name: JavaScript-Syntax
         run: |
-          for f in public/assets/js/*.js public/assets/js/data/*.js public/sw.js; do
+          # bin/*.mjs gehört dazu: ein Syntaxfehler IM TESTSKRIPT fiel hier
+          # sonst nicht auf, sondern erst beim Ausführen - und dann als
+          # "Test fehlgeschlagen", was in die falsche Richtung schickt.
+          for f in public/assets/js/*.js public/assets/js/data/*.js public/sw.js bin/*.mjs; do
             node --check "$f"
           done
 

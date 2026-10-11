@@ -559,8 +559,7 @@ console.log('\nImporte — benutzt, aber nicht geholt?');
 }
 
 // ---------------------------------------------------------------------
-console.log('
-Anschluss im Taktverkehr - die naechste Fahrt derselben Linie');
+console.log('\nAnschluss im Taktverkehr - die naechste Fahrt derselben Linie');
 {
   const { rank } = await import('../public/assets/js/scoring.js');
 
@@ -634,8 +633,7 @@ Anschluss im Taktverkehr - die naechste Fahrt derselben Linie');
 }
 
 // ---------------------------------------------------------------------
-console.log('
-Nachladen - jede Abfrage genau einmal');
+console.log('\nNachladen - jede Abfrage genau einmal');
 {
   const { pendingLoads } = await import('../public/assets/js/prefetch.js');
 
