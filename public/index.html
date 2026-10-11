@@ -187,6 +187,25 @@
       <button type="button" id="products-reset" class="btn btn--ghost">Alle wieder aktivieren</button>
     </details>
 
+    <details class="section">
+      <summary>Nachtzüge</summary>
+      <p class="hint">
+        Ein Nachtzug spart eine Hotelnacht — im reinen Preisvergleich steht er
+        deshalb schlechter da, als er ist. Trag hier ein, was dir die gesparte
+        Nacht wert ist; der Betrag wird beim Vergleich vom Preis des Nachtzugs
+        abgezogen. Angezeigt und bezahlt wird weiterhin der echte Preis.
+      </p>
+      <div class="slider">
+        <label for="night-value">Gesparte Hotelnacht</label>
+        <input type="range" id="night-value" min="0" max="150" step="10" value="0">
+        <output id="night-value-out">zählt nicht</output>
+        <p class="hint">
+          Wirkt nur im Normal-Modus und nur auf die Reihenfolge — der
+          Nerd-Modus rechnet ohnehin nicht mit Preisen.
+        </p>
+      </div>
+    </details>
+
     <!-- Nur im Nerd-Modus sichtbar -->
     <div class="nerd-only">
 
@@ -307,6 +326,21 @@
          Abschnitte plus optionale GPS-Mitfahrt. -->
     <aside id="live-panel" class="live" hidden aria-live="polite"></aside>
   </div>
+
+  <!-- Hin- und Rückfahrt. Erscheint erst, sobald an einer Verbindung
+       „Rückfahrt" angetippt wurde - vorher gibt es keine Hinfahrt, die man
+       daneben stellen könnte. -->
+  <div id="trip-tabs" class="trip-tabs" role="tablist" aria-label="Fahrten" hidden>
+    <button type="button" class="trip-tab is-active" data-trip="return"
+            role="tab" aria-selected="true">Rückfahrten</button>
+    <button type="button" class="trip-tab" data-trip="both"
+            role="tab" aria-selected="false">Hin &amp; zurück</button>
+    <button type="button" id="trip-clear" class="trip-tabs__clear"
+            title="Hinfahrt vergessen und normal weitersuchen">Hinfahrt verwerfen</button>
+  </div>
+
+  <!-- Beide Fahrten zusammen, wenn der Reiter „Hin &amp; zurück" offen ist. -->
+  <section id="trip-pair" class="pair" hidden aria-live="polite"></section>
 
   <!-- Sortierung der Trefferliste. Erscheint erst, wenn es etwas zu
        sortieren gibt. -->

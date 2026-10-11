@@ -50,6 +50,110 @@ const el = (tag, className, text) => {
   return n;
 };
 
+/**
+ * Hin- und Rückfahrt zusammen.
+ *
+ * WOZU: Wer eine Rückfahrt sucht, hat sich für eine Hinfahrt schon
+ * entschieden - und will dann sehen, was beides zusammen kostet und wie
+ * viel Zeit am Ziel bleibt. Die Hinfahrt verschwand bisher aus dem Blick,
+ * sobald die Suche auf die Gegenrichtung umgestellt hatte.
+ *
+ * Die Hinfahrt steht fest (die ausgewählte), die Rückfahrt ist die gerade
+ * in der Liste markierte - ein Klick in der Liste wechselt sie, und die
+ * Summe rechnet sich neu.
+ *
+ * @param {object} hin    Eintrag der Hinfahrt, wie ihn rank() liefert
+ * @param {?object} zurueck Eintrag der gewählten Rückfahrt, oder null
+ */
+export function renderTripPair(container, hin, zurueck, state, actions) {
+  container.replaceChildren();
+
+  const zeile = (titel, eintrag, hinweis) => {
+    const kopf = el('div', 'pair__head');
+    kopf.append(el('span', 'pair__label', titel));
+    if (hinweis) kopf.append(el('span', 'pair__hint', hinweis));
+    container.append(kopf);
+    if (eintrag) {
+      container.append(renderCard(eintrag, -1, {}, state, null, actions));
+    } else {
+      container.append(el('p', 'pair__empty', 'Noch keine Rückfahrt gewählt — '
+        + 'oben im Reiter „Rückfahrten" eine aussuchen.'));
+    }
+  };
+
+  zeile('Hinfahrt', hin, hin ? `${formatTime(hin.journey.departure)} → ${formatTime(hin.journey.arrival)}` : '');
+  zeile('Rückfahrt', zurueck, zurueck
+    ? `${formatTime(zurueck.journey.departure)} → ${formatTime(zurueck.journey.arrival)}`
+    : '');
+
+  container.append(renderPairSummary(hin, zurueck, state));
+}
+
+/**
+ * Die Summe unter beiden Fahrten.
+ *
+ * Drei Zahlen, und jede nur, wenn sie wirklich bekannt ist: Gesamtpreis
+ * (beide Preise müssen da sein - eine Summe aus einem Preis und einer
+ * Lücke wäre eine Falschaussage), reine Fahrzeit und die Zeit, die
+ * zwischen Ankunft und Rückfahrt am Ziel bleibt.
+ */
+function renderPairSummary(hin, zurueck, state) {
+  const box = el('div', 'pair__sum');
+  if (!hin || !zurueck) {
+    box.append(el('span', 'pair__sum-note', 'Sobald eine Rückfahrt gewählt ist, steht hier die Summe.'));
+    return box;
+  }
+
+  const a = hin.journey;
+  const b = zurueck.journey;
+
+  const paar = (label, wert) => {
+    const t = el('span', 'pair__sum-item');
+    t.append(el('span', 'pair__sum-label', label));
+    t.append(el('span', 'pair__sum-value', wert));
+    box.append(t);
+  };
+
+  // PREIS nur, wenn beide einen haben. Sonst steht da eine Summe, die
+  // weniger ist als die Reise kostet - schlimmer als keine Angabe.
+  const pa = hin.price;
+  const pb = zurueck.price;
+  if (typeof pa === 'number' && typeof pb === 'number') {
+    // formatPrice() will das Preis-Objekt, nicht den blossen Betrag - und
+    // kuemmert sich selbst um Waehrung und das "ca." bei Schaetzungen.
+    // Ist auch nur eine Richtung geschaetzt, ist es die Summe ebenso.
+    paar('Zusammen', formatPrice({
+      amount: pa + pb,
+      currency: a.price?.currency === 'CHF' && b.price?.currency === 'CHF' ? 'CHF' : 'EUR',
+      estimated: Boolean(a.price?.estimated || b.price?.estimated),
+      basedOnReal: Boolean(a.price?.estimated || b.price?.estimated),
+    }) || '—');
+  } else {
+    paar('Zusammen', 'Preis nur für eine Richtung bekannt');
+  }
+
+  paar('Fahrzeit', formatDuration((a.durationMin || 0) + (b.durationMin || 0)));
+
+  // ZEIT AM ZIEL: zwischen Ankunft der Hinfahrt und Abfahrt der Rückfahrt.
+  // Negativ heisst, die Rückfahrt liegt vor der Ankunft - das kommt vor,
+  // wenn jemand die Uhrzeit von Hand zurückgedreht hat, und gehört gesagt.
+  const an = Date.parse(a.arrivalReal || a.arrival || '');
+  const ab = Date.parse(b.departureReal || b.departure || '');
+  if (Number.isFinite(an) && Number.isFinite(ab)) {
+    const min = Math.round((ab - an) / 60000);
+    if (min < 0) {
+      const warn = el('span', 'pair__sum-item pair__sum-item--warn');
+      warn.append(el('span', 'pair__sum-label', 'Achtung'));
+      warn.append(el('span', 'pair__sum-value', 'Die Rückfahrt fährt vor der Ankunft der Hinfahrt.'));
+      box.append(warn);
+    } else {
+      paar('Am Ziel', formatDuration(min));
+    }
+  }
+
+  return box;
+}
+
 export function renderResults(container, ranked, marks, state, onSelect, onMore, liveCtl, onEarlier) {
   container.replaceChildren();
 
@@ -453,7 +557,10 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
     back.title = 'Rückfahrt suchen — ab einer Stunde nach der Ankunft dieser Verbindung.';
     back.addEventListener('click', (e) => {
       e.stopPropagation();
-      liveCtl.returnTrip(j);
+      // Den ganzen Eintrag, nicht nur die Verbindung: der Reiter
+      // „Hin & zurück“ zeichnet die Hinfahrt später als Karte neu und
+      // braucht dazu Komfort- und Preisangaben aus der Bewertung.
+      liveCtl.returnTrip(entry);
     });
     aktionen.append(back);
   }
@@ -629,6 +736,68 @@ function expandableNote(cls, label, text) {
 }
 
 /**
+ * Hinweis auf eine knappe Umsteigezeit.
+ *
+ * Die Zahl allein sagt wenig — entscheidend ist, was ein verpasster
+ * Anschluss KOSTET. Bei einem Fernzug ist das die nächste Fahrtmöglichkeit
+ * in Stunden, bei einer U-Bahn eine Taktlücke. Vorher stand an beiden
+ * dasselbe „bei Verspätung weg"; für eine U6 war das schlicht falsch.
+ *
+ * Steht die nächste Fahrt derselben Linie zur Verfügung (app.js holt sie
+ * bei Taktverkehr von der Abfahrtstafel), nennt der Hinweis sie — und der
+ * Alarmton fällt weg, weil es keiner ist. Solange sie noch geladen wird
+ * oder keine gefunden wurde, bleibt es bei der vorsichtigen Formulierung:
+ * ohne Gegenbeweis kann es die letzte Bahn des Tages gewesen sein.
+ */
+function renderTransferWarning(leg) {
+  const n = leg.nextOnLine;
+  const minuten = `${leg.transferRisk === 'risky' ? 'Nur ' : ''}${leg.transferMin} min zum Umsteigen`;
+
+  // Die nächste Fahrt steht fest: das ist die ganze Antwort, und sie ist
+  // keine Warnung.
+  if (n) {
+    const box = el('div', 'leg__transfer leg__transfer--frequent');
+    box.append(el('span', 'leg__transfer-gap', minuten));
+    box.append(el('span', 'leg__transfer-next',
+      `nächste ${trainLabel(leg)} um ${formatTime(n.real || n.planned)} — ${n.laterMin} min später`));
+
+    // Ist die Ersatzbahn selbst verspätet, steht oben schon ihre Ist-Zeit.
+    // Der Zuschlag sagt, dass 14:17 ein verspätetes 14:16 ist - sonst sieht
+    // es wie ein regulärer Takt aus und man wundert sich später.
+    if (typeof n.delay === 'number' && n.delay > 0) {
+      const d = el('span', 'leg__transfer-delay', `+${n.delay}`);
+      d.title = `Auch diese Fahrt ist ${n.delay} min verspätet.`;
+      box.append(d);
+    }
+    return box;
+  }
+
+  // Noch keine Auskunft, aber ein Taktverkehrsmittel: dann wird hier NICHT
+  // "bei Verspätung weg" behauptet. Die Karte wird einmal gezeichnet, bevor
+  // die Tafelabfrage überhaupt läuft - stünde dort der Alarmsatz, blitzte
+  // genau der Fehlalarm auf, um den es hier geht, und würde eine Sekunde
+  // später ersetzt. Erst wenn die Tafel wirklich nichts gefunden hat
+  // ('none'), ist der Satz berechtigt: dann kann es die letzte Fahrt des
+  // Tages gewesen sein.
+  const offen = typeOf(leg).frequent
+    && leg.nextOnLineState !== 'none'
+    && leg.nextOnLineState !== 'error';
+
+  if (offen) {
+    const box = el('div', 'leg__transfer leg__transfer--frequent');
+    box.append(el('span', 'leg__transfer-gap', minuten));
+    box.append(el('span', 'leg__transfer-next', 'nächste Fahrt dieser Linie wird geprüft …'));
+    return box;
+  }
+
+  const box = el('div', `leg__transfer leg__transfer--${leg.transferRisk}`);
+  box.append(el('span', 'leg__transfer-gap', minuten));
+  box.append(el('span', 'leg__transfer-next',
+    leg.transferRisk === 'risky' ? 'bei Verspätung weg' : 'knapp'));
+  return box;
+}
+
+/**
  * "Wenn du den Anschluss nicht kriegst": die nächsten Verbindungen ab dem
  * Umsteigebahnhof, jede davon übernehmbar.
  *
@@ -640,6 +809,10 @@ function expandableNote(cls, label, text) {
  */
 function renderFallback(journey, leg, actions) {
   if (!leg.fallbackState) return null;
+  // Gar nicht erst gefragt (keine brauchbare Abfahrtszeit): dann auch nichts
+  // behaupten - "kein Anschluss gefunden" wäre eine Aussage, die wir nicht
+  // geprüft haben.
+  if (leg.fallbackState === 'skipped') return null;
 
   // Beim Ausfall ist der Ersatz die Hauptsache, nicht die Absicherung —
   // deshalb andere Worte und eine eigene, deutlichere Kennzeichnung.
@@ -752,49 +925,6 @@ function renderTransferPlan(journey, leg, actions) {
   const body = el('div', 'xfer__body', 'Lade Bahnsteige …');
   box.append(body);
 
-  // Darunter die Wagenreihung beider Züge - eigener Kasten, damit das
-  // Nachladen des Plans ihn nicht überschreibt.
-  const wagen = el('div', 'wagen');
-  box.append(wagen);
-  let wagenGeladen = false;
-  const ladeWagen = async () => {
-    if (wagenGeladen || !actions.loadSequence) return;
-    wagenGeladen = true;
-    // Deutschland: Fernverkehr über die DB. Schweiz: auch IR und RE, über
-    // den Train Formation Service (braucht einen Schlüssel auf dem Server).
-    const gattung = (l) => String(l.category || '').trim().toUpperCase();
-    const passt = (l, eva) => l.trainNumber && (
-      (String(eva).startsWith('80') && /^(ICE|IC|EC|ECE)$/.test(gattung(l)))
-      || (String(eva).startsWith('85') && /^(ICE|IC|ICN|EC|ECE|IR|IRE|RE)$/.test(gattung(l))));
-    const fragen = [
-      ['Ankunft', prev, prev.to?.id, prev.arrival],
-      ['Abfahrt', leg, leg.from?.id, leg.departure],
-    ].filter(([, l, eva, t]) => eva && t && passt(l, eva));
-    if (fragen.length === 0) return;
-    const antworten = await Promise.all(fragen.map(([, l, eva, t]) => actions.loadSequence({
-      eva: String(eva), cat: String(l.category).trim().toUpperCase(), num: String(l.trainNumber), time: t,
-    }).catch(() => null)));
-    const teile = [];
-    const quellen = new Set();
-    fragen.forEach(([rolle, l], i) => {
-      const seq = antworten[i]?.sequence;
-      if (seq?.vehicles?.length) {
-        teile.push(renderSequence(rolle, l, seq));
-        quellen.add(seq.source === 'sbb' ? 'sbb' : 'db');
-      }
-    });
-    if (teile.length === 0) return;
-    const quelle = [
-      quellen.has('db') ? 'DB (deutscher Fernverkehr)' : null,
-      quellen.has('sbb') ? 'SBB (Train Formation Service; Wagen maßstäblich zueinander, nicht zum Bahnsteig)' : null,
-    ].filter(Boolean).join(' und ');
-    wagen.replaceChildren(
-      el('p', 'wagen__title', 'Wagenreihung'),
-      ...teile,
-      el('p', 'wagen__source', `Von ${quelle}, nur am Reisetag. Sektor A ist links.`),
-    );
-  };
-
   // WIEDERHOLEN, statt den Fehler stehen zu lassen.
   //
   // Overpass ist ein Gemeinschaftsdienst und stellt Anfragen bei Last in eine
@@ -845,9 +975,9 @@ function renderTransferPlan(journey, leg, actions) {
   box.open = Boolean(leg._xferOpen);
   box.addEventListener('toggle', () => {
     leg._xferOpen = box.open;
-    if (box.open) { laden(); ladeWagen(); }
+    if (box.open) laden();
   });
-  if (box.open) { laden(); ladeWagen(); }
+  if (box.open) laden();
 
   return box;
 }
@@ -883,6 +1013,103 @@ export function sectorRange(liste, alle) {
  * GETEILT wird. Ein Flügelzug mit zwei Zielen ist die Falle, in die man
  * sonst tappt: vorn nach Wien, hinten nach Innsbruck.
  */
+/**
+ * Gilt für diesen Abschnitt überhaupt eine Wagenreihung?
+ *
+ * Deutschland: Fernverkehr über die DB. Schweiz: auch IR und RE, über den
+ * Train Formation Service (braucht einen Schlüssel auf dem Server). Die
+ * Bahnhofsnummer sagt, welches Netz - 80 ist Deutschland, 85 die Schweiz.
+ */
+function hatReihung(leg, eva) {
+  const gattung = String(leg?.category || '').trim().toUpperCase();
+  return Boolean(leg?.trainNumber) && (
+    (String(eva).startsWith('80') && /^(ICE|IC|EC|ECE)$/.test(gattung))
+    || (String(eva).startsWith('85') && /^(ICE|IC|ICN|EC|ECE|IR|IRE|RE)$/.test(gattung)));
+}
+
+/**
+ * Die Wagenreihung EINES Zuges, am Zug selbst.
+ *
+ * WOZU HIER UND NICHT NUR AM UMSTIEG: Die Reihung hing früher im Lageplan
+ * des Umsteigebahnhofs. Damit sah sie nur, wer umsteigt - wer durchfährt,
+ * bekam sie nie zu Gesicht, obwohl die Frage dieselbe ist: in welchem
+ * Sektor steht mein Wagen, wo ist die 1. Klasse, wo das Bordrestaurant.
+ *
+ * Gefragt wird am EINSTIEG des Abschnitts: dort steht man auf dem
+ * Bahnsteig, und dort gilt die Sektorangabe.
+ *
+ * Zugeklappt kostet sie nichts - geladen wird erst beim Aufklappen, und
+ * jede Abfrage geht an die DB bzw. die SBB.
+ */
+function renderCoachSequence(leg, actions) {
+  const eva = leg?.from?.id;
+  if (!actions?.loadSequence || !eva || !leg.departure || !hatReihung(leg, eva)) return null;
+
+  const box = el('details', 'wagen-box');
+  const sum = el('summary', 'wagen-box__sum');
+  sum.append(el('span', 'wagen-box__label', 'Wagenreihung'));
+  sum.append(el('span', 'wagen-box__hint', `${trainLabel(leg)} ab ${leg.from?.name || ''}`.trim()));
+  box.append(sum);
+
+  const body = el('div', 'wagen');
+  box.append(body);
+
+  let geladen = false;
+  const laden = async () => {
+    if (geladen) return;
+    geladen = true;
+    body.replaceChildren(el('p', 'wagen__source', 'Lade Wagenreihung …'));
+
+    const res = await actions.loadSequence({
+      eva: String(eva),
+      cat: String(leg.category).trim().toUpperCase(),
+      num: String(leg.trainNumber),
+      time: leg.departure,
+    }).catch(() => null);
+
+    const seq = res?.sequence;
+    if (!seq?.vehicles?.length) {
+      // Nicht als Fehler verkaufen: die Reihung gibt es nur am Reisetag und
+      // meist erst wenige Stunden vor Abfahrt.
+      body.replaceChildren(el('p', 'wagen__source',
+        'Für diesen Zug liegt noch keine Wagenreihung vor — sie erscheint meist '
+        + 'erst am Reisetag, wenige Stunden vor der Abfahrt.'));
+      return;
+    }
+
+    body.replaceChildren(
+      renderSequence('Abfahrt', leg, seq),
+      el('p', 'wagen__source', sequenceSource(seq)),
+    );
+  };
+
+  // Offen bleibt offen, auch wenn die Liste neu gezeichnet wird.
+  box.open = Boolean(leg._wagenOpen);
+  box.addEventListener('toggle', () => {
+    leg._wagenOpen = box.open;
+    if (box.open) laden();
+  });
+  if (box.open) laden();
+
+  return box;
+}
+
+/** Herkunftszeile unter einer Reihung - eine Quelle oder beide. */
+function sequenceSource(...seqs) {
+  const quellen = new Set(seqs.filter(Boolean).map((s) => (s.source === 'sbb' ? 'sbb' : 'db')));
+  const mitTriebkopf = seqs.filter(Boolean).some((s) => (s.vehicles || []).some((v) => v.loco));
+  const quelle = [
+    quellen.has('db') ? 'DB (deutscher Fernverkehr)' : null,
+    quellen.has('sbb') ? 'SBB (Train Formation Service; Wagen maßstäblich zueinander, nicht zum Bahnsteig)' : null,
+  ].filter(Boolean).join(' und ');
+  // Die Keilform nur erklären, wenn überhaupt eine zu sehen ist - und die
+  // Fahrtrichtung ausdrücklich NICHT behaupten: die Reihung ist am
+  // Bahnsteig ausgerichtet, nicht am Zuglauf. Welches Ende vorausfährt,
+  // steht nicht in den Daten.
+  const form = mitTriebkopf ? ' Die Keilform markiert den Triebkopf, nicht die Fahrtrichtung.' : '';
+  return `Von ${quelle}, nur am Reisetag. Sektor A ist links.${form}`;
+}
+
 function renderSequence(rolle, leg, seq) {
   const box = el('div', 'wagen__zug');
   box.append(el('p', 'wagen__head',
@@ -897,6 +1124,21 @@ function renderSequence(rolle, leg, seq) {
     d.style.width = pct(s.end - s.start);
     bar.append(d);
   }
+
+  // DIE BEIDEN ENDEN DES ZUGES.
+  //
+  // Vorher war die Reihung eine Reihe gleich geformter Kästchen - man sah
+  // nicht, wo der Zug aufhört und in welche Richtung er steht. Jetzt
+  // bekommen die äußersten Fahrzeuge eine Zugform: ein Triebkopf wird zur
+  // Nase, ein gewöhnlicher Wagen zum abgerundeten Schluss.
+  //
+  // Welches Ende VORNE im Sinne der Fahrtrichtung ist, sagen die Daten
+  // nicht - die Reihung ist am Bahnsteig ausgerichtet, nicht am Lauf. Hier
+  // wird deshalb gezeigt, was wirklich bekannt ist: wo der Zug endet und wo
+  // die Triebköpfe stehen.
+  const ersterMeter = Math.min(...seq.vehicles.map((v) => v.start));
+  const letzterMeter = Math.max(...seq.vehicles.map((v) => v.end));
+
   for (const v of seq.vehicles) {
     const cls = ['wagen__car'];
     if (v.loco) cls.push('is-loco');
@@ -904,6 +1146,11 @@ function renderSequence(rolle, leg, seq) {
     else if (v.first) cls.push('is-mixed');
     if (v.dining) cls.push('is-dining');
     if (v.closed) cls.push('is-closed');
+
+    // Ein Zug aus einem einzigen Fahrzeug ist an beiden Enden Ende.
+    if (v.start === ersterMeter) cls.push(v.loco ? 'is-nose-l' : 'is-end-l');
+    if (v.end === letzterMeter) cls.push(v.loco ? 'is-nose-r' : 'is-end-r');
+
     const c = el('span', cls.join(' '), v.loco ? '' : v.n);
     c.style.left = pct(v.start);
     c.style.width = pct(v.end - v.start);
@@ -1159,16 +1406,16 @@ function renderLegs(journey, entry, state, actions) {
     // Umsteigezeit vor diesem Zug, wenn sie knapp ist.
     const knapp = leg.transferRisk && leg.transferRisk !== 'ok';
     if (knapp) {
-      const t = el('div', `leg__transfer leg__transfer--${leg.transferRisk}`,
-        leg.transferRisk === 'risky'
-          ? `Nur ${leg.transferMin} min zum Umsteigen — bei Verspätung weg`
-          : `${leg.transferMin} min zum Umsteigen — knapp`);
-      row.append(t);
+      row.append(renderTransferWarning(leg));
 
       // Bei sehr knappen Umstiegen die Alternativen gleich mitliefern:
       // die Frage ist nicht nur, ob man es schafft, sondern auch, ob man
       // lieber gleich anders fährt. Fällt der Zug ohnehin aus, steht der
       // Ersatz schon oben — nicht zweimal.
+      //
+      // Bei Taktverkehr entfällt das: dort steht die nächste Fahrt derselben
+      // Linie schon in der Warnung, und eine komplett andere Route zum Ziel
+      // ist keine sinnvolle Antwort auf eine verpasste U-Bahn.
       const fb = leg.cancelled ? null : renderFallback(journey, leg, actions);
       if (fb) row.append(fb);
     }
@@ -1230,6 +1477,12 @@ function renderLegs(journey, entry, state, actions) {
       info.append(el('span', 'leg__comfort', `Komfort ${comfortEntry.comfort}`));
     }
     row.append(info);
+
+    // Wagenreihung DIESES Zuges - nicht nur beim Umsteigen. Wer durchfährt,
+    // bekam sie früher nie zu sehen, obwohl die Frage dieselbe ist: in
+    // welchem Sektor steht mein Wagen.
+    const reihung = renderCoachSequence(leg, actions);
+    if (reihung) row.append(reihung);
 
     // Ausstattung laut DB. Was die Fahrt verhindern kann (Reservierungs-
     // pflicht, DB-Fahrscheine gelten nicht), steht zuerst und farbig.

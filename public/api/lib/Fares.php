@@ -518,7 +518,12 @@ final class Fares
                     $category,
                     $times[$i],
                     $times[$i + 1],
-                    $dTicket
+                    $dTicket,
+                    $points[$i]['lat'] ?? null,
+                    $points[$i]['lon'] ?? null,
+                    $points[$i + 1]['lat'] ?? null,
+                    $points[$i + 1]['lon'] ?? null,
+                    is_array($leg['geometry'] ?? null) ? $leg['geometry'] : []
                 );
             }
         }
@@ -638,6 +643,181 @@ final class Fares
         return $times;
     }
 
+    /**
+     * Bahn-Grenzübergänge im Einzugsgebiet, als Koordinate.
+     *
+     * WOZU: Fährt ein Zug ohne Zwischenhalt über die Grenze, weiss die
+     * Aufteilung sonst nur "irgendwo zwischen diesen beiden Halten" und
+     * teilte hälftig. München - Kufstein hat aber 90 km auf deutscher und
+     * 5 km auf österreichischer Seite; hälftig ist dort grob falsch, und
+     * genau daran hängen Abo-Anteile wie das KlimaTicket.
+     *
+     * DIE KOORDINATEN SIND GENÄHERT - sie bezeichnen den Punkt, an dem die
+     * Strecke die Grenze quert, auf ein bis zwei Kilometer genau. Das reicht
+     * hier: gesucht wird eine Aufteilung in Prozent, nicht ein Grenzstein.
+     * Gegen falsche Einträge schützt die Prüfung in borderFraction() - wer
+     * nicht nahe genug an der Luftlinie liegt, wird nicht benutzt, und es
+     * bleibt bei der hälftigen Teilung.
+     *
+     * Länderpaar alphabetisch sortiert als Schlüssel.
+     */
+    private const BORDER_CROSSINGS = [
+        'at|de' => [
+            [47.5800, 12.1700, 'Kiefersfelden - Kufstein'],
+            [47.8130, 12.9530, 'Freilassing - Salzburg'],
+            [48.5700, 13.4600, 'Passau - Schärding'],
+            [47.5420, 9.7470,  'Lindau - Bregenz'],
+            [47.3800, 11.2650, 'Mittenwald - Scharnitz'],
+            [47.4760, 10.9330, 'Griesen - Ehrwald'],
+            [48.2660, 13.0330, 'Simbach - Braunau'],
+        ],
+        'ch|de' => [
+            [47.5650, 7.5900,  'Basel Bad Bf - Basel SBB'],
+            [47.6150, 8.2300,  'Waldshut - Koblenz'],
+            [47.7470, 8.7000,  'Thayngen - Schaffhausen'],
+            [47.6600, 9.1750,  'Konstanz - Kreuzlingen'],
+            [47.6400, 8.4600,  'Erzingen - Trasadingen'],
+        ],
+        'at|ch' => [
+            [47.2250, 9.5600,  'Buchs SG - Feldkirch'],
+            [47.4400, 9.6350,  'St. Margrethen - Lustenau'],
+        ],
+        'ch|it' => [
+            [45.8300, 9.0300,  'Chiasso'],
+            [46.2300, 8.1000,  'Simplon - Iselle'],
+            [46.2170, 10.1600, 'Tirano'],
+        ],
+        'at|it' => [
+            [47.0030, 11.5060, 'Brenner'],
+            [46.5040, 13.5900, 'Tarvisio'],
+        ],
+        'ch|fr' => [
+            [47.5600, 7.5750,  'Basel - Saint-Louis'],
+            [46.1500, 6.0200,  'Genève - La Plaine'],
+            [46.7050, 6.3800,  'Vallorbe'],
+        ],
+        'de|fr' => [
+            [48.5800, 7.8000,  'Kehl - Strasbourg'],
+            [49.1800, 6.9300,  'Saarbrücken - Forbach'],
+        ],
+    ];
+
+    /** Höchstabstand eines Übergangs vom Streckenverlauf, in km. */
+    private const BORDER_MAX_OFFSET_KM = 10.0;
+
+    /**
+     * Wo auf dem Abschnitt A->B liegt die Grenze, als Anteil 0..1?
+     *
+     * GERECHNET WIRD AUF DER POLYLINIE, nicht auf der Luftlinie - und das
+     * ist der ganze Trick. Zwischen München und Innsbruck liegt die
+     * Luftlinie näher an Mittenwald als an Kufstein; wer den nächsten
+     * Übergang zur Luftlinie nimmt, teilt 87/12 statt 90/75 und ist damit
+     * schlechter dran als mit der Hälfte. Der tatsächliche Verlauf dagegen
+     * führt über Kufstein und lässt Mittenwald weit liegen.
+     *
+     * Vorgehen: beide Halte und jeder in Frage kommende Übergang werden auf
+     * den Verlauf gelotet. Was zwischen den Halten liegt und nah genug am
+     * Gleis ist, gewinnt; der Anteil ist der Weg bis dorthin, geteilt durch
+     * den Weg zwischen den Halten.
+     *
+     * Ohne Polylinie - DB-Fahrpläne liefern keine - bleibt es bei der
+     * hälftigen Teilung. Raten wäre hier schlechter als nicht zu wissen.
+     *
+     * @param array<int,array{0:float,1:float}> $geo Streckenverlauf des Abschnitts
+     */
+    private static function borderFraction(
+        string $cFrom,
+        string $cTo,
+        ?float $aLat,
+        ?float $aLon,
+        ?float $bLat,
+        ?float $bLon,
+        array $geo
+    ): float {
+        if ($aLat === null || $aLon === null || $bLat === null || $bLon === null) {
+            return 0.5;
+        }
+        if (count($geo) < 2) {
+            return 0.5;
+        }
+        $paar = [strtolower($cFrom), strtolower($cTo)];
+        sort($paar);
+        $kandidaten = self::BORDER_CROSSINGS[implode('|', $paar)] ?? [];
+        if ($kandidaten === []) {
+            return 0.5;
+        }
+
+        $a = self::projectOnPath($aLat, $aLon, $geo);
+        $b = self::projectOnPath($bLat, $bLon, $geo);
+        if ($a === null || $b === null || $b['km'] - $a['km'] < 0.5) {
+            return 0.5;
+        }
+
+        $besterAbstand = null;
+        $besterAnteil  = 0.5;
+
+        foreach ($kandidaten as [$pLat, $pLon]) {
+            $p = self::projectOnPath($pLat, $pLon, $geo);
+            if ($p === null || $p['off'] > self::BORDER_MAX_OFFSET_KM) {
+                continue;
+            }
+            $t = ($p['km'] - $a['km']) / ($b['km'] - $a['km']);
+            // Ganz am Rand ist der Übergang eher ein Halt als eine Querung
+            // mitten im Abschnitt - dann bringt die Aufteilung nichts.
+            if ($t < 0.02 || $t > 0.98) {
+                continue;
+            }
+            if ($besterAbstand === null || $p['off'] < $besterAbstand) {
+                $besterAbstand = $p['off'];
+                $besterAnteil  = $t;
+            }
+        }
+
+        return $besterAnteil;
+    }
+
+    /**
+     * Lotet einen Punkt auf einen Linienzug.
+     *
+     * Ebene Näherung mit Breitenausgleich: über die Länge eines Abschnitts
+     * genau genug und ohne Projektion.
+     *
+     * @return ?array{km:float,off:float} Weg bis zum Lotfusspunkt und Abstand
+     */
+    private static function projectOnPath(float $lat, float $lon, array $geo): ?array
+    {
+        $kx = cos(deg2rad($lat));
+        $lauf = 0.0;
+        $beste = null;
+
+        for ($i = 0, $n = count($geo) - 1; $i < $n; $i++) {
+            $aLat = $geo[$i][0] ?? null;
+            $aLon = $geo[$i][1] ?? null;
+            $bLat = $geo[$i + 1][0] ?? null;
+            $bLon = $geo[$i + 1][1] ?? null;
+            if ($aLat === null || $aLon === null || $bLat === null || $bLon === null) {
+                continue;
+            }
+
+            $dx = ($bLon - $aLon) * $kx;
+            $dy = $bLat - $aLat;
+            $len2 = $dx * $dx + $dy * $dy;
+            $segKm = sqrt($len2) * 111.32;
+
+            $px = ($lon - $aLon) * $kx;
+            $py = $lat - $aLat;
+            $t = $len2 > 0.0 ? max(0.0, min(1.0, ($px * $dx + $py * $dy) / $len2)) : 0.0;
+            $off = sqrt(($px - $dx * $t) ** 2 + ($py - $dy * $t) ** 2) * 111.32;
+
+            if ($beste === null || $off < $beste['off']) {
+                $beste = ['km' => $lauf + $segKm * $t, 'off' => $off];
+            }
+            $lauf += $segKm;
+        }
+
+        return $beste;
+    }
+
     private static function pushSegment(
         array &$out,
         float $km,
@@ -646,7 +826,12 @@ final class Fares
         string $category,
         ?int $start,
         ?int $end,
-        bool $dTicket
+        bool $dTicket,
+        ?float $aLat = null,
+        ?float $aLon = null,
+        ?float $bLat = null,
+        ?float $bLon = null,
+        array $geo = []
     ): void {
         if ($cFrom === '' && $cTo === '') {
             $cFrom = $cTo = 'default';
@@ -670,11 +855,18 @@ final class Fares
             return;
         }
 
-        // Grenzquerung ohne Zwischenhalt: hälftig teilen, auch zeitlich.
-        $mid = ($start !== null && $end !== null) ? (int) round(($start + $end) / 2) : null;
+        // GRENZQUERUNG OHNE ZWISCHENHALT. Geteilt wird am tatsächlichen
+        // Übergang, soweit er bekannt ist - sonst wie früher hälftig.
+        // Die Zeit folgt dem Weg: wer 95 % des Abschnitts in Deutschland
+        // fährt, ist auch 95 % der Zeit dort, und daran hängen die zeitlich
+        // begrenzten Abos.
+        $anteil = self::borderFraction($cFrom, $cTo, $aLat, $aLon, $bLat, $bLon, $geo);
+        $mid = ($start !== null && $end !== null)
+            ? (int) round($start + ($end - $start) * $anteil)
+            : null;
 
-        $out[] = $make($cFrom, $km / 2, $start, $mid ?? $end);
-        $out[] = $make($cTo,   $km / 2, $mid ?? $start, $end);
+        $out[] = $make($cFrom, $km * $anteil,        $start,        $mid ?? $end);
+        $out[] = $make($cTo,   $km * (1 - $anteil),  $mid ?? $start, $end);
     }
 
     /**

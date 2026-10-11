@@ -200,6 +200,61 @@ export function sameTrain(a, b) {
 }
 
 /**
+ * Linienkennung zum Vergleichen: "U 6", "u6" und "U6" sind dieselbe Linie.
+ *
+ * Abschnitt und Abfahrtstafel fuehren sie beide in `line`; fehlt sie dort,
+ * steht sie im Namen ("U6" bei der MVG, "S 3" bei HAFAS). Die GATTUNG ist
+ * bewusst KEINE Rueckfallebene: "S" ist eine Produktklasse, keine Linie -
+ * damit liesse sich eine S3 mit einer S8 verwechseln.
+ */
+export function lineKey(x) {
+  const norm = (v) => String(v ?? '').replace(/\s+/g, '').toLowerCase();
+  return norm(x?.line) || norm(x?.name);
+}
+
+/**
+ * Die naechste Fahrt DERSELBEN Linie auf einer Abfahrtstafel.
+ *
+ * WOZU: Ein zweiminuetiger Umstieg auf eine U-Bahn wurde frueher genauso
+ * angeschrieben wie einer auf einen ICE - "bei Verspaetung weg". Fuer den
+ * ICE stimmt das, fuer die U6 kostet es eine Taktluecke. Was es wirklich
+ * kostet, steht auf der Tafel.
+ *
+ * Gesucht wird die erste Abfahrt der Linie NACH der geplanten, in dieselbe
+ * Richtung. Die Richtung wird nur geprueft, wenn beide Seiten eine nennen -
+ * sonst fiele die Gegenrichtung mangels Angabe mit durch.
+ *
+ * @param {object} leg          Abschnitt mit {line|name, direction, departure}
+ * @param {object[]} departures Eintraege der Tafel
+ * @returns {?{planned:string, real:?string, delay:?number, laterMin:number}}
+ */
+export function nextOnLine(leg, departures) {
+  const plan = Date.parse(leg?.departure || '');
+  const wanted = lineKey(leg);
+  if (!Number.isFinite(plan) || wanted === '') return null;
+
+  const norm = (v) => String(v ?? '').replace(/\s+/g, '').toLowerCase();
+  const ziel = norm(leg.direction);
+
+  const treffer = (departures || [])
+    .filter((d) => lineKey(d) === wanted)
+    .filter((d) => !ziel || !norm(d.direction) || norm(d.direction) === ziel)
+    .map((d) => ({ d, at: Date.parse(d.real || d.planned || '') }))
+    // Eine halbe Minute Luft: dieselbe Fahrt kann auf der Tafel um
+    // Sekunden abweichen und waere sonst ihre eigene Nachfolgerin.
+    .filter((x) => Number.isFinite(x.at) && x.at > plan + 30_000)
+    .sort((a, b) => a.at - b.at)[0];
+
+  if (!treffer) return null;
+  return {
+    planned: treffer.d.planned,
+    real: treffer.d.real || null,
+    delay: typeof treffer.d.delay === 'number' ? treffer.d.delay : null,
+    laterMin: Math.round((treffer.at - plan) / 60000),
+  };
+}
+
+/**
  * Der Punkt auf einem Linienzug, der `pt` am nächsten liegt - oder null,
  * wenn der Linienzug keine Strecke hergibt.
  *

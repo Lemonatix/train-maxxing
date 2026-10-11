@@ -1814,6 +1814,138 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 /* --- Ergebnisse ---------------------------------------------------- */
 
+/* --- Hin- und Rückfahrt ---------------------------------------------- */
+
+/* Dieselbe Sprache wie die Modus-Umschaltung oben: ein Rahmen, darin die
+   Reiter. Erscheint nur, wenn eine Hinfahrt gewählt ist. */
+/* `hidden` allein reicht bei display:flex nicht - das Attribut setzt
+   display:none mit geringerer Spezifität und verliert. Dieselbe Falle wie
+   bei .bp, .train-panel und .board__filter. */
+.trip-tabs[hidden],
+.pair[hidden],
+.results-bar[hidden],
+.results[hidden] { display: none; }
+
+.trip-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 1.1rem;
+  padding: 0.25rem;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.trip-tab {
+  padding: 0.4rem 0.85rem;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.trip-tab:hover { color: var(--text-dim); }
+
+.trip-tab.is-active {
+  background: var(--surface-solid);
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 0 0 1px var(--accent-soft);
+}
+
+.trip-tabs__clear {
+  margin-left: auto;
+  padding: 0.3rem 0.6rem;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.trip-tabs__clear:hover { color: var(--rose); }
+
+/* --- Beide Fahrten zusammen ------------------------------------------ */
+
+.pair { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.8rem; }
+
+.pair__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+
+.pair__label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.pair__hint {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pair__empty {
+  margin: 0;
+  padding: 0.9rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+/* Die Summe trägt das Gewicht - sie ist der Grund, warum man den Reiter
+   überhaupt öffnet. */
+.pair__sum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.4rem;
+  margin-top: 0.3rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pair__sum-item { display: flex; flex-direction: column; gap: 0.1rem; }
+
+.pair__sum-label {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.pair__sum-value {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.pair__sum-item--warn .pair__sum-label,
+.pair__sum-item--warn .pair__sum-value { color: var(--rose); }
+.pair__sum-item--warn .pair__sum-value { font-size: 0.86rem; font-weight: 500; }
+
+.pair__sum-note { font-size: 0.8rem; color: var(--text-muted); }
+
 /* --- Sortierung der Trefferliste ------------------------------------- */
 
 /* Dieselbe Sprache wie die Leiste über der Karte: schmale Zeile, Monoschrift,
@@ -2551,12 +2683,21 @@ details.live__msg .live__msg-text {
 /* --- Umstiegswarnung und Auslastung im Detail ------------------------ */
 
 .leg__transfer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.45rem;
   margin: 0 0 0.25rem;
   padding: 0.3rem 0.5rem;
   border-radius: var(--radius-xs);
   font-family: var(--font-mono);
   font-size: 0.74rem;
 }
+
+/* Die Minutenzahl trägt die Aussage, die Folge steht daneben und etwas
+   zurückgenommen - sonst liest sich beides wie zwei Warnungen. */
+.leg__transfer-gap { font-weight: 500; }
+.leg__transfer-next { opacity: 0.85; }
 
 /* --- Echtzeit in der Trefferliste ------------------------------------ */
 
@@ -2587,6 +2728,27 @@ details.live__msg .live__msg-text {
 
 .leg__transfer--risky { background: var(--rose-soft); color: var(--rose); }
 .leg__transfer--tight { background: var(--amber-soft); color: var(--amber); }
+
+/* Taktverkehr mit bekannter nächster Fahrt: KEIN Alarmton. Rot hiesse hier
+   "das wird knapp und dann stehst du", und genau das ist nicht der Fall -
+   es kostet die Taktlücke, die gleich daneben steht. Deshalb neutral wie
+   die übrigen Hinweiszeilen im Detailbereich. */
+.leg__transfer--frequent {
+  background: var(--surface-inset);
+  color: var(--text-dim);
+}
+
+.leg__transfer--frequent .leg__transfer-gap { color: var(--text); }
+
+/* Verspätung der Ersatzbahn - der eine Wert, der hier doch Signalfarbe
+   verdient, weil er den Trost schmälert. */
+.leg__transfer-delay {
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: var(--rose-soft);
+  color: var(--rose);
+  font-variant-numeric: tabular-nums;
+}
 
 /* Rückfallebene: sitzt direkt unter der Umstiegswarnung und ist bewusst
    ruhiger gehalten - eine Information, keine zweite Warnung. */
@@ -2675,6 +2837,40 @@ details.live__msg .live__msg-text {
 .xfer__hint { color: var(--text-muted); font-size: 0.68rem; }
 
 .xfer__body { padding: 0.1rem 0.5rem 0.5rem; }
+
+/* --- Wagenreihung am Zug --------------------------------------------
+   Dieselbe Sprache wie der Umstiegsplan: ein zugeklappter Kasten am
+   Abschnitt. Sie stand früher nur im Lageplan des Umsteigebahnhofs und war
+   damit für Durchfahrende unsichtbar. */
+.wagen-box {
+  margin: 0.2rem 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface-card);
+}
+
+.wagen-box__sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  list-style: none;
+}
+
+.wagen-box__sum::-webkit-details-marker { display: none; }
+.wagen-box__sum::after { content: '▾'; margin-left: auto; opacity: 0.6; }
+.wagen-box[open] .wagen-box__sum::after { content: '▴'; }
+.wagen-box__sum:hover { color: var(--accent); }
+
+.wagen-box__label { color: var(--text); font-weight: 500; }
+.wagen-box__hint { color: var(--text-muted); font-size: 0.68rem; }
+
+.wagen-box .wagen { margin: 0; padding: 0.1rem 0.5rem 0.5rem; }
 
 .xfer__note {
   margin: 0 0 0.4rem;
@@ -2908,6 +3104,28 @@ details.live__msg .live__msg-text {
 .wagen__car.is-dining { border-color: var(--green); box-shadow: inset 0 -3px 0 var(--green); }
 .wagen__car.is-loco { background: var(--text-muted); border-color: var(--text-muted); }
 .wagen__car.is-closed { opacity: 0.35; }
+
+/* --- Die Enden des Zuges --------------------------------------------
+   Eine Reihe gleich geformter Kästchen sieht aus wie eine Tabelle, nicht
+   wie ein Zug: man erkennt nicht, wo er aufhört. Die äußersten Fahrzeuge
+   bekommen deshalb eine Form.
+
+   NASE für einen Triebkopf: der Keil läuft von der Unterkante schräg nach
+   oben, wie die Silhouette eines ICE. `clip-path` schneidet dabei auch den
+   Rahmen weg - deshalb liegt die Farbe der Nase auf der Fläche, nicht am
+   Rand (is-loco ist ohnehin deckend gefüllt).
+
+   ABGERUNDETES ENDE für einen gewöhnlichen Wagen am Zugschluss: deutlich
+   genug als Abschluss, ohne eine Nase zu behaupten, wo keine ist. */
+.wagen__car.is-nose-l { clip-path: polygon(0 100%, 55% 0, 100% 0, 100% 100%); }
+.wagen__car.is-nose-r { clip-path: polygon(0 0, 45% 0, 100% 100%, 0 100%); }
+
+.wagen__car.is-end-l { border-top-left-radius: 9px; border-bottom-left-radius: 9px; }
+.wagen__car.is-end-r { border-top-right-radius: 9px; border-bottom-right-radius: 9px; }
+
+/* Ein einzelnes Fahrzeug ist an beiden Enden Zugende - beide Keile zugleich
+   ergäben sonst eine Raute statt eines Zuges. */
+.wagen__car.is-nose-l.is-nose-r { clip-path: polygon(0 100%, 30% 0, 70% 0, 100% 100%); }
 
 .wagen__note, .wagen__split { margin: 0.25rem 0 0; font-size: 0.74rem; color: var(--text-muted); }
 .wagen__split { color: var(--rose); font-weight: 500; }

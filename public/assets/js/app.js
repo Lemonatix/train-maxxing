@@ -8,9 +8,10 @@
 
 import { api } from './api.js';
 import { rank, highlights, setFxRates, spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
-import { renderResults, renderNotices } from './render.js';
-import { RouteMap, setMapTheme, trainLabel } from './map.js';
+import { renderResults, renderNotices, renderTripPair } from './render.js';
+import { RouteMap, setMapTheme, trainLabel, lineKey, nextOnLine } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
+import { pendingLoads } from './prefetch.js';
 import { ROUTES, ratingsBySpeed } from './data/routes.js';
 import { initMvgTicker } from './mvgTicker.js';
 import { initWorks } from './works.js';
@@ -29,6 +30,15 @@ const THEME_KEY = 'train-maxxing:theme';
  * Abos und Reglerstellungen, die bei jeder Änderung neu geschrieben werden.
  */
 const TRACK_KEY = 'train-maxxing:tracked';
+
+/**
+ * Die gewählte Hinfahrt, getrennt von den Einstellungen abgelegt.
+ *
+ * Wie die verfolgte Fahrt: gross und kurzlebig, gehört nicht in denselben
+ * Eintrag wie Abos und Reglerstellungen. Überlebt ein Neuladen, damit der
+ * Reiter „Hin & zurück" nach einem Versehen nicht leer dasteht.
+ */
+const OUTBOUND_KEY = 'train-maxxing:outbound';
 
 /**
  * Seitengröße der Ergebnisliste.
@@ -58,6 +68,10 @@ const state = {
   modelPrefs: {},      // Modell-ID  -> Bonus (-5 … +5)
   routePrefs: {},      // Strecken-ID -> Bonus (-5 … +5)
   speedWeight: 0,      // Gewicht für unbenannte Strecken (0 … 5)
+  // Was die durch einen Nachtzug gesparte Hotelnacht wert ist, in Euro.
+  // 0 = zählt nicht. Wirkt nur auf die Reihenfolge, nie auf den Preis, der
+  // angezeigt wird.
+  nightValue: 0,
   liveTrains: true,    // Zugpositionen auf der Karte
   // Welche Verkehrsmittel auf der Karte erscheinen. Leer = alle. Bewusst
   // getrennt von state.products: auf der Karte will man oft nur den
@@ -69,6 +83,13 @@ const state = {
   // dann. Die Empfehlung mischt Preis und Dauer zu einer Punktzahl; als
   // Voreinstellung verbirgt sie, wonach eigentlich sortiert wurde.
   sort: 'departure',
+  // Die gewählte Hinfahrt, sobald jemand „Rückfahrt" angetippt hat. Sie
+  // überlebt die neue Suche in der Gegenrichtung - sonst wäre sie aus dem
+  // Blick, genau wenn man beide vergleichen will.
+  outbound: null,
+  // Welcher Reiter über der Trefferliste offen ist: 'return' = die Liste
+  // der Rückfahrten, 'both' = Hin- und Rückfahrt zusammen.
+  tripTab: 'return',
   // Laufzeit
   lastPayload: null,
   ranked: [],
@@ -96,6 +117,7 @@ let live = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
+  loadOutbound();
   // Theme so früh wie möglich anwenden, damit die Karte gleich die
   // passende Kachel-Quelle wählt und kein Flash entsteht.
   setupTheme();
@@ -122,6 +144,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setupTabs();
   setupMode();
   setupSort();
+  setupTripTabs();
+  setupNightValue();
   setupLiveToggle();
   setupStationInputs();
   setupForm();
@@ -252,6 +276,7 @@ function loadSettings() {
       'mode', 'from', 'to', 'via', 'arrival', 'travelClass',
       'minChange', 'discounts', 'products',
       'modelPrefs', 'routePrefs', 'speedWeight', 'liveTrains', 'liveProducts',
+      'sort', 'nightValue',
     ]) {
       if (saved[key] !== undefined) state[key] = saved[key];
     }
@@ -282,10 +307,33 @@ function saveSettings() {
         modelPrefs: state.modelPrefs, routePrefs: state.routePrefs,
         speedWeight: state.speedWeight, liveTrains: state.liveTrains,
         liveProducts: state.liveProducts,
+        sort: state.sort, nightValue: state.nightValue,
       })
     );
   } catch {
     // Privater Modus o.ae. - kein Grund abzubrechen.
+  }
+}
+
+/** Hinfahrt merken bzw. vergessen. */
+function saveOutbound(entry) {
+  try {
+    if (!entry) localStorage.removeItem(OUTBOUND_KEY);
+    else localStorage.setItem(OUTBOUND_KEY, JSON.stringify(entry));
+  } catch {
+    // Voller oder gesperrter Storage ist kein Grund abzubrechen.
+  }
+}
+
+/** Gemerkte Hinfahrt beim Start zurückholen. */
+function loadOutbound() {
+  try {
+    const roh = localStorage.getItem(OUTBOUND_KEY);
+    if (!roh) return;
+    const e = JSON.parse(roh);
+    if (e?.journey?.legs) state.outbound = e;
+  } catch {
+    // Defekter Eintrag: dann eben ohne.
   }
 }
 
@@ -543,6 +591,107 @@ function applySort() {
       departure: 'Ab der gesuchten Zeit, nach unten wird es später.',
     }[state.sort] || '';
   }
+}
+
+/**
+ * Der Regler fuer die gesparte Hotelnacht.
+ *
+ * Bewusst ein Betrag und keine Punktzahl: "mir ist eine Nacht 80 Euro wert"
+ * ist eine Frage, die man beantworten kann; "Nachtzug-Bonus 3" nicht.
+ */
+function setupNightValue() {
+  const regler = $('#night-value');
+  const anzeige = $('#night-value-out');
+  if (!regler) return;
+
+  const zeigen = () => {
+    if (anzeige) {
+      anzeige.textContent = state.nightValue > 0
+        ? `${state.nightValue} € weniger im Vergleich`
+        : 'zählt nicht';
+    }
+  };
+
+  regler.value = String(state.nightValue);
+  zeigen();
+
+  regler.addEventListener('input', (e) => {
+    state.nightValue = Number(e.target.value) || 0;
+    zeigen();
+    saveSettings();
+    if (state.lastPayload) rerank();
+  });
+}
+
+// ======================================================================
+// Hin- und Rückfahrt
+// ======================================================================
+
+function setupTripTabs() {
+  for (const btn of document.querySelectorAll('.trip-tab[data-trip]')) {
+    btn.addEventListener('click', () => {
+      state.tripTab = btn.dataset.trip;
+      draw();
+    });
+  }
+  const weg = $('#trip-clear');
+  if (weg) {
+    weg.addEventListener('click', () => {
+      state.outbound = null;
+      state.tripTab = 'return';
+      saveOutbound(null);
+      draw();
+    });
+  }
+}
+
+/**
+ * Reiter und kombinierte Ansicht nachziehen.
+ *
+ * Ohne gewählte Hinfahrt gibt es nichts zu vergleichen - dann bleibt alles
+ * verborgen und die Liste verhält sich wie immer.
+ */
+function drawTripTabs() {
+  const tabs = $('#trip-tabs');
+  const pair = $('#trip-pair');
+  const liste = $('#results-list');
+  const hin = state.outbound;
+
+  if (tabs) tabs.hidden = !hin;
+  if (!hin) {
+    if (pair) { pair.hidden = true; pair.replaceChildren(); }
+    if (liste) liste.hidden = false;
+    return;
+  }
+
+  const beide = state.tripTab === 'both';
+  for (const btn of document.querySelectorAll('.trip-tab[data-trip]')) {
+    const aktiv = (btn.dataset.trip === 'both') === beide;
+    btn.classList.toggle('is-active', aktiv);
+    btn.setAttribute('aria-selected', String(aktiv));
+  }
+
+  // Im Reiter „Hin & zurück" tritt die Liste zurück: sonst stünde dieselbe
+  // Rückfahrt zweimal auf dem Schirm.
+  if (liste) liste.hidden = beide;
+  showSortBar(!beide && state.ranked.length > 0);
+
+  if (!pair) return;
+  pair.hidden = !beide;
+  if (!beide) {
+    pair.replaceChildren();
+    return;
+  }
+
+  renderTripPair(pair, hin, state.ranked[state.selectedIndex] || null, state, {
+    toggle: (journey) => live.start(journey),
+    isTracking: (journey) => live.isTracking(journey),
+    trackable: (journey) => LiveTracker.trackableLegs(journey).length > 0,
+    tracked: () => live.journey,
+    loadPlatforms,
+    loadOffers,
+    loadSequence,
+  });
 }
 
 /** Die Sortierleiste erscheint erst, wenn es etwas zu sortieren gibt. */
@@ -1099,6 +1248,7 @@ function rerank(opts) {
     modelPrefs: state.modelPrefs,
     routePrefs: state.routePrefs,
     speedWeight: state.speedWeight,
+    nightValue: state.nightValue,
   });
 
   state.ranked = ranked;
@@ -1142,6 +1292,9 @@ function draw() {
   scheduleLiveTrains();
   ensureFallbacks();
   loadWalks(ranked[state.selectedIndex]?.journey);
+  // Zuletzt, weil es die Sichtbarkeit von Liste und Sortierleiste
+  // überschreibt - und weil es die aktuelle Auswahl braucht.
+  drawTripTabs();
 }
 
 /** Schon geholte Fußwege, nach Start und Ziel - dieselben Wege kommen oft vor. */
@@ -1331,64 +1484,105 @@ async function showEarlier() {
  * (Auswahl, Moduswechsel, Ausklappen) nichts erneut anfragt.
  */
 async function ensureFallbacks() {
-  const jobs = [];
-
-  for (const entry of state.ranked.slice(0, state.visible)) {
-    const journey = entry.journey;
-    const trains = (journey.legs || []).filter((l) => l.mode === 'train');
-    const dest = trains[trains.length - 1]?.to?.id;
-    if (!dest) continue;
-
-    for (const leg of trains) {
-      if (leg.fallbackState) continue;                       // läuft oder erledigt
-
-      // AUSFALL: Ersatz ist hier keine Absicherung, sondern Pflicht.
-      if (leg.cancelled) {
-        jobs.push(loadReplacements(journey, leg, dest));
-        continue;
-      }
-
-      const gap = leg.transferMin;
-      if (typeof gap !== 'number' || gap < 1 || gap > 4) continue;
-      if (!leg.from?.id) continue;
-
-      // Eine Minute nach der geplanten Abfahrt suchen: gefragt ist der Zug
-      // danach, nicht der, den man gerade verpasst hat.
-      const at = shiftIso(leg.departure, 1);
-      if (!at) continue;
-
-      leg.fallbackState = 'loading';
-      jobs.push(
-        api.nextConnection({
-          from: leg.from.id,
-          to: dest,
-          date: at.date,
-          time: at.time,
-          travelClass: state.travelClass,
-          exclude: leg.trainNumber || '',
-          discounts: state.discounts,
-          products: state.products,
-          // Drei zur Auswahl: bei einem Vier-Minuten-Umstieg will man nicht
-          // nur wissen, was sonst passiert, sondern auch gleich umsteigen
-          // können, ohne neu zu suchen.
-          limit: 3,
-        })
-          .then((res) => {
-            leg.fallbacks = res.connections || [];
-            leg.fallbackState = 'done';
-          })
-          .catch(() => {
-            leg.fallbacks = [];
-            leg.fallbackState = 'error';
-          })
-      );
-    }
-  }
+  // Welche Abschnitte noch etwas brauchen, entscheidet prefetch.js - dort
+  // als reine Funktion und von den Tests abgedeckt. Hier wird nur geladen.
+  const jobs = pendingLoads(state.ranked, state.visible).map(({ kind, journey, leg, dest }) => {
+    if (kind === 'replacements') return loadReplacements(journey, leg, dest);
+    if (kind === 'nextOnLine') return loadNextOnLine(leg);
+    return loadNextConnection(leg, dest);
+  });
 
   if (jobs.length === 0) return;
   await Promise.all(jobs);
   // Zweiter Durchlauf findet nur noch 'done'/'error' und startet nichts Neues.
   draw();
+}
+
+/**
+ * Die nächste ganze Verbindung zum Ziel, für einen knappen Umstieg auf einen
+ * Zug ohne dichten Takt.
+ *
+ * Gesucht wird ab einer Minute NACH der geplanten Abfahrt: gefragt ist der
+ * Zug danach, nicht der, den man gerade verpasst. Drei zur Auswahl, weil man
+ * bei vier Minuten Umsteigezeit nicht nur wissen will, was sonst passiert,
+ * sondern auch gleich umsteigen können, ohne neu zu suchen.
+ */
+function loadNextConnection(leg, dest) {
+  const at = shiftIso(leg.departure, 1);
+  if (!at) {
+    // Ohne brauchbare Abfahrtszeit lässt sich nichts suchen. 'skipped' heisst
+    // "nicht gefragt" und zeigt nichts an - im Gegensatz zu einer leeren
+    // Antwort, die "es gibt nichts" behaupten würde. Der Merker verhindert
+    // zugleich, dass jedes Neuzeichnen es erneut versucht.
+    leg.fallbackState = 'skipped';
+    return Promise.resolve();
+  }
+  leg.fallbackState = 'loading';
+
+  return api.nextConnection({
+    from: leg.from.id,
+    to: dest,
+    date: at.date,
+    time: at.time,
+    travelClass: state.travelClass,
+    exclude: leg.trainNumber || '',
+    discounts: state.discounts,
+    products: state.products,
+    limit: 3,
+  })
+    .then((res) => {
+      leg.fallbacks = res.connections || [];
+      leg.fallbackState = 'done';
+    })
+    .catch(() => {
+      leg.fallbacks = [];
+      leg.fallbackState = 'error';
+    });
+}
+
+/**
+ * Holt die Abfahrtstafel der Umsteigestation und merkt sich die nächste
+ * Fahrt derselben Linie am Abschnitt.
+ *
+ * Nachgeschaut statt geschätzt: eine Tabelle mit Taktzeiten wäre abends und
+ * auf dem Land falsch. Die Tafel weiss es wirklich - sie liefert für
+ * München auch die MVG-Halte, die die Fahrplanquelle der ÖBB nicht kennt.
+ *
+ * Das Auswerten der Tafel steckt in nextOnLine() in map.js: dort ist es
+ * eine reine Funktion und wird von bin/test_units.mjs geprüft. Hier bleibt
+ * nur das Laden samt Zustand, damit ensureFallbacks() nicht zweimal fragt.
+ *
+ * Ohne Treffer bleibt es bei der vorsichtigen Formulierung - dann kann es
+ * die letzte Bahn des Tages gewesen sein.
+ */
+function loadNextOnLine(leg) {
+  const at = shiftIso(leg.departure, 0);
+  if (!at || lineKey(leg) === '' || !Number.isFinite(Date.parse(leg.departure || ''))) {
+    // Ohne Zeit oder Linienkennung laesst sich auf der Tafel nichts zuordnen.
+    leg.nextOnLineState = 'none';
+    return Promise.resolve();
+  }
+
+  leg.nextOnLineState = 'loading';
+
+  return api.departures({
+    station: leg.from.id,
+    lat: leg.from.lat, lon: leg.from.lon,
+    date: at.date, time: at.time,
+    type: 'dep',
+    // Eine Stunde reicht: was danach kommt, ist keine Taktluecke mehr.
+    duration: 60,
+  })
+    .then((res) => {
+      const treffer = nextOnLine(leg, res.departures || []);
+      if (!treffer) {
+        leg.nextOnLineState = 'none';
+        return;
+      }
+      leg.nextOnLine = treffer;
+      leg.nextOnLineState = 'done';
+    })
+    .catch(() => { leg.nextOnLineState = 'error'; });
 }
 
 /**
@@ -1515,9 +1709,18 @@ const RETURN_AFTER_MIN = 60;
  * eine andere Kennung laufen als der erste Zug der Verbindung - die
  * Verbindung selbst endet vielleicht in "München Hbf (tief)".
  */
-function returnTrip(journey) {
-  const an = new Date(journey.arrivalReal || journey.arrival || '');
+function returnTrip(entry) {
+  // Angenommen wird der Eintrag; aufgerufen wurde früher mit der blossen
+  // Verbindung, deshalb beides zulassen.
+  const hin = entry?.journey ? entry : { journey: entry };
+  const journey = hin.journey;
+  const an = new Date(journey?.arrivalReal || journey?.arrival || '');
   if (Number.isNaN(an.getTime()) || !state.from || !state.to) return;
+
+  // Die Hinfahrt merken, bevor die Suche auf die Gegenrichtung umstellt.
+  state.outbound = hin;
+  state.tripTab = 'return';
+  saveOutbound(hin);
 
   // Auf volle fünf Minuten aufrunden - 13:07 als Suchzeit liest sich schlecht.
   const ab = new Date(an.getTime() + RETURN_AFTER_MIN * 60000);

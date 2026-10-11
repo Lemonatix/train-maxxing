@@ -50,6 +50,17 @@ export function comfortOf(journey, modelPrefs) {
   };
 }
 
+/**
+ * Fährt die Verbindung in einem Nachtzug?
+ *
+ * Gefragt ist das Fahrzeug, nicht die Uhrzeit: ein ICE um 23 Uhr spart keine
+ * Hotelnacht, ein Nightjet schon. `night` steht an der Gattung in trains.js
+ * (NJ, EN).
+ */
+export function isNightJourney(journey) {
+  return (journey?.legs || []).some((l) => l.mode === 'train' && typeOf(l).night === true);
+}
+
 /** Preis einer Verbindung als Zahl, oder null. Bei Schätzungen der untere Wert. */
 export function priceOf(journey) {
   const p = journey.price;
@@ -76,6 +87,7 @@ export function rank(journeys, opts) {
     modelPrefs = {},
     routePrefs = {},
     speedWeight = 0,
+    nightValue = 0,
     weights = { price: 0.4, duration: 0.4, changes: 0.2 },
   } = opts || {};
 
@@ -86,6 +98,7 @@ export function rank(journeys, opts) {
     return {
       journey: j,
       price: priceOf(j),
+      night: isNightJourney(j),
       departAt: Date.parse(j.departureReal || j.departure || '') || 0,
       durationMin: j.durationMin || 0,
       changes: j.changes || 0,
@@ -107,7 +120,24 @@ export function rank(journeys, opts) {
   if (mode === 'nerd') return rankByRoute(enriched, routePrefs, speedWeight);
 
   // --- Normal: normierte Punktzahl, kleiner ist besser ---
-  const prices = enriched.map((e) => e.price).filter((p) => p != null);
+  //
+  // NACHTZÜGE: Der reine Preisvergleich ist gegen sie unfair, weil sie eine
+  // Hotelnacht ersparen - das stand lange nur als Fussnote am Fahrzeug und
+  // ging in die Wertung nicht ein. `nightValue` ist der Betrag, den der
+  // Nutzer die gesparte Nacht wert ist; er wird VOR dem Vergleich vom Preis
+  // abgezogen.
+  //
+  // Nur für die Punktzahl, nicht für die Anzeige: `price` bleibt der Betrag,
+  // den man wirklich zahlt, und auch "günstigste" in den Kennzeichen bezieht
+  // sich weiter darauf. Sonst stünde an einer Karte ein Preis, den es nicht
+  // gibt.
+  for (const e of enriched) {
+    e.scorePrice = e.price == null || !e.night
+      ? e.price
+      : Math.max(0, e.price - Math.max(0, nightValue));
+  }
+
+  const prices = enriched.map((e) => e.scorePrice).filter((p) => p != null);
   const range = (vals) => {
     if (vals.length === 0) return [0, 1];
     const lo = Math.min(...vals);
@@ -122,7 +152,7 @@ export function rank(journeys, opts) {
   for (const e of enriched) {
     // Ohne Preis nehmen wir den Mittelwert an, damit die Verbindung weder
     // bevorzugt noch bestraft wird.
-    const pNorm = e.price == null ? 0.5 : (e.price - pLo) / (pHi - pLo);
+    const pNorm = e.scorePrice == null ? 0.5 : (e.scorePrice - pLo) / (pHi - pLo);
     const dNorm = (e.durationMin - dLo) / (dHi - dLo);
     const cNorm = (e.changes - cLo) / (cHi - cLo);
 

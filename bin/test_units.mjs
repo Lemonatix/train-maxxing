@@ -19,7 +19,7 @@
  */
 
 import { typeOf, modelOf, FLEET_RULES, TRAIN_MODELS } from '../public/assets/js/data/trains.js';
-import { trainLabel, sameTrain, walkText, formatMeters, walksOf, geoErrorText } from '../public/assets/js/map.js';
+import { trainLabel, sameTrain, walkText, formatMeters, walksOf, geoErrorText, lineKey, nextOnLine } from '../public/assets/js/map.js';
 
 // LiveTracker legt im Konstruktor einen Listener an, und api.js baut beim
 // Laden eine URL aus `document.baseURI`. Mehr Browser braucht es für diese
@@ -556,6 +556,142 @@ console.log('\nImporte — benutzt, aber nicht geholt?');
     }
   }
   pruefe('jedes benutzte Modul-Export ist auch importiert', fehlend, []);
+}
+
+// ---------------------------------------------------------------------
+console.log('
+Anschluss im Taktverkehr - die naechste Fahrt derselben Linie');
+{
+  const { rank } = await import('../public/assets/js/scoring.js');
+
+  pruefe('Linie aus `line`', lineKey({ line: 'U 6', name: 'irgendwas' }), 'u6');
+  pruefe('ersatzweise aus dem Namen', lineKey({ line: '', name: 'S 3' }), 's3');
+  pruefe('Gattung zaehlt NICHT als Linie', lineKey({ line: '', name: '', category: 'S' }), '');
+
+  const tafel = [
+    // Die Bahn, die man gerade erreicht - darf nicht ihre eigene Nachfolgerin sein.
+    { line: 'U6', direction: 'Klinikum Grosshadern', planned: '2026-10-04T14:11:00+02:00', real: null, delay: null },
+    // Gegenrichtung.
+    { line: 'U6', direction: 'Garching-Forschungszentrum', planned: '2026-10-04T14:13:00+02:00', real: null, delay: null },
+    // Fremde Linie.
+    { line: '293', direction: 'Klinikum Grosshadern', planned: '2026-10-04T14:14:00+02:00', real: null, delay: null },
+    // Die richtige, mit Leerzeichen geschrieben und selbst verspaetet.
+    { line: 'U 6', direction: 'Klinikum Grosshadern', planned: '2026-10-04T14:16:00+02:00', real: '2026-10-04T14:17:00+02:00', delay: 1 },
+    { line: 'U6', direction: 'Klinikum Grosshadern', planned: '2026-10-04T14:21:00+02:00', real: null, delay: null },
+  ];
+  const u6 = { line: 'U6', name: 'U6', direction: 'Klinikum Grosshadern', departure: '2026-10-04T14:11:00+02:00' };
+
+  const naechste = nextOnLine(u6, tafel);
+  pruefe('naechste U6: Ist-Zeit, Verspaetung und Abstand',
+    [naechste.real, naechste.delay, naechste.laterMin],
+    ['2026-10-04T14:17:00+02:00', 1, 6]);
+
+  pruefe('leere Tafel: kein Treffer', nextOnLine(u6, []), null);
+  pruefe('nur die eigene Fahrt: kein Treffer', nextOnLine(u6, [tafel[0]]), null);
+  pruefe('nur Gegenrichtung und fremde Linie: kein Treffer',
+    nextOnLine(u6, [tafel[1], tafel[2]]), null);
+  pruefe('ohne Linienkennung: kein Treffer',
+    nextOnLine({ ...u6, line: '', name: '' }, tafel), null);
+  pruefe('ohne Abfahrtszeit: kein Treffer',
+    nextOnLine({ ...u6, departure: '' }, tafel), null);
+
+  // Nennt die Tafel keine Richtung, darf sie trotzdem zaehlen - sonst
+  // faende man an Quellen ohne Richtungsangabe nie etwas.
+  pruefe('Tafel ohne Richtungsangabe zaehlt mit',
+    nextOnLine(u6, [{ line: 'U6', direction: '', planned: '2026-10-04T14:16:00+02:00' }])?.laterMin, 5);
+
+  // ---- Sortierung der Trefferliste --------------------------------
+  const fahrt = (id, abfahrt, dauer, umstiege, preis) => ({
+    id, departure: `2026-10-04T${abfahrt}:00+02:00`, arrival: `2026-10-04T${abfahrt}:00+02:00`,
+    durationMin: dauer, changes: umstiege,
+    price: preis === null ? null : { amount: preis, currency: 'EUR' },
+    legs: [{ mode: 'train', category: 'ICE', trainNumber: String(id), durationMin: dauer, stops: [] }],
+  });
+  const liste = [
+    fahrt(1, '12:00', 300, 1, 99),
+    fahrt(2, '08:15', 420, 3, 39),
+    fahrt(3, '10:30', 280, 0, null),
+    fahrt(4, '09:00', 310, 1, 39),
+    fahrt(5, '14:45', 260, 0, 150),
+  ];
+  const ids = (sort, mode = 'normal') =>
+    rank(liste, { sort, mode, modelPrefs: {}, routePrefs: {}, speedWeight: 0 }).map((e) => e.journey.id);
+
+  pruefe('nach Abfahrt: chronologisch', ids('departure'), [2, 4, 3, 1, 5]);
+  pruefe('nach Preis: guenstigste zuerst, ohne Preis ans Ende', ids('price'), [2, 4, 1, 5, 3]);
+  pruefe('bei gleichem Preis entscheidet die fruehere Abfahrt',
+    ids('price').slice(0, 2), [2, 4]);
+  pruefe('ausdrueckliche Sortierung schlaegt den Nerd-Modus',
+    ids('price', 'nerd'), ids('price'));
+  pruefe('und sie gruppiert dann nicht nach Routenvarianten',
+    rank(liste, { sort: 'price', mode: 'nerd', modelPrefs: {}, routePrefs: {}, speedWeight: 0 })
+      .some((e) => e.group), false);
+  pruefe('ohne ausdrueckliche Sortierung gruppiert der Nerd-Modus weiter',
+    rank(liste, { sort: 'smart', mode: 'nerd', modelPrefs: {}, routePrefs: {}, speedWeight: 0 })
+      .some((e) => e.group), true);
+  pruefe('leere Liste bleibt leer',
+    rank([], { sort: 'price', mode: 'normal', modelPrefs: {}, routePrefs: {}, speedWeight: 0 }), []);
+}
+
+// ---------------------------------------------------------------------
+console.log('
+Nachladen - jede Abfrage genau einmal');
+{
+  const { pendingLoads } = await import('../public/assets/js/prefetch.js');
+
+  const halt = (id) => ({ id, name: id, lat: 48, lon: 11 });
+  const zug = (o) => ({
+    mode: 'train', category: 'ICE', line: '', name: 'ICE 1', trainNumber: '1',
+    from: halt('A'), to: halt('B'), departure: '2026-10-04T10:00:00+02:00', ...o,
+  });
+  const reise = (legs) => ({ journey: { legs } });
+
+  // Ein knapper Umstieg auf einen ICE -> ganze Ersatzverbindung.
+  const fern = zug({ transferMin: 2 });
+  // Derselbe knappe Umstieg auf eine U-Bahn -> Abfahrtstafel.
+  const takt = zug({ category: 'U', line: 'U6', name: 'U6', transferMin: 2 });
+  // Ausfall zaehlt unabhaengig von der Umsteigezeit.
+  const aus = zug({ cancelled: true, transferMin: 30 });
+  // Reichlich Umsteigezeit -> gar nichts.
+  const ruhig = zug({ transferMin: 20 });
+
+  const liste = [reise([zug({}), fern]), reise([zug({}), takt]),
+                 reise([zug({}), aus]), reise([zug({}), ruhig])];
+
+  const arten = (sicht) => pendingLoads(liste, sicht).map((j) => j.kind);
+
+  pruefe('je Umstiegsart der richtige Weg',
+    arten(4), ['nextConnection', 'nextOnLine', 'replacements']);
+
+  // DER FEHLER, DEN ES ZU FANGEN GILT: das Nachladen endet mit draw(), und
+  // draw() ruft das Nachladen wieder auf. Wer einen Zustandsmerker vergisst,
+  // baut damit eine Endlosschleife - gemessen 77 Abfragen fuer eine
+  // Umsteigestation.
+  for (const job of pendingLoads(liste, 4)) {
+    job.leg[job.kind === 'nextOnLine' ? 'nextOnLineState' : 'fallbackState'] = 'loading';
+  }
+  pruefe('zweiter Durchlauf fragt nichts erneut', pendingLoads(liste, 4), []);
+
+  // Auch 'done', 'error' und 'skipped' gelten als erledigt.
+  for (const [zustand, leg] of [['done', fern], ['error', aus], ['skipped', takt]]) {
+    leg.fallbackState = undefined;
+    leg.nextOnLineState = undefined;
+    leg[leg === takt ? 'nextOnLineState' : 'fallbackState'] = zustand;
+  }
+  pruefe('erledigte Zustaende sperren ebenfalls', pendingLoads(liste, 4), []);
+
+  // Eingeklappte Treffer kosten nichts.
+  for (const leg of [fern, takt, aus]) { leg.fallbackState = undefined; leg.nextOnLineState = undefined; }
+  pruefe('nur die sichtbaren Treffer werden geladen', arten(1), ['nextConnection']);
+  pruefe('nichts sichtbar, nichts geladen', arten(0), []);
+
+  // Ein Abschnitt ohne Haltestellen-Kennung laesst sich nicht abfragen.
+  const ohneId = zug({ transferMin: 2, from: { id: '', name: '?' } });
+  pruefe('ohne Halt-Kennung kein Nachladen', pendingLoads([reise([zug({}), ohneId])], 1), []);
+
+  // Ohne Ziel am letzten Abschnitt ist die Reise unbrauchbar.
+  pruefe('ohne Ziel kein Nachladen',
+    pendingLoads([reise([zug({ to: { id: '' } })])], 1), []);
 }
 
 // ---------------------------------------------------------------------

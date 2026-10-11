@@ -353,7 +353,7 @@ Ebene im Plan:
 Einen Laufweg zeichnet der Plan weiterhin nicht. Die Gänge zwischen den
 Treppen sind in OSM zu lückenhaft; siehe oben.
 
-#### Wagenreihung am Umstieg
+#### Wagenreihung
 
 **In der Schweiz (mit Formation-Token):** der Train Formation Service von
 opentransportdata.swiss liefert je Zug des Tages jeden Wagen mit Nummer,
@@ -369,7 +369,32 @@ Kontingent: 20 000 Abfragen am Tag.
 
 Unter dem Plan stehen beide Züge **maßstäblich am Bahnsteig**: oben die
 Sektoren, darunter die Wagen mit Nummer, die 1. Klasse bernsteinfarben, das
-Bordrestaurant grün unterstrichen. Darunter in Worten, was man beim
+Bordrestaurant grün unterstrichen.
+
+**Sie steht am Zug, nicht nur am Umstieg.** Früher hing die Reihung im
+Lageplan des Umsteigebahnhofs — damit sah sie nur, wer umsteigt. Wer
+durchfährt, bekam sie nie zu Gesicht, obwohl die Frage dieselbe ist: in
+welchem Sektor steht mein Wagen, wo ist die 1. Klasse, wo das
+Bordrestaurant. Jetzt hat **jeder Zugabschnitt** seinen eigenen
+zugeklappten Kasten „Wagenreihung", gefragt wird am Einstieg des
+Abschnitts — dort steht man auf dem Bahnsteig, und dort gilt die
+Sektorangabe. Zugeklappt kostet er nichts; geladen wird erst beim
+Aufklappen, und jede Abfrage geht an die DB bzw. die SBB.
+
+**Der Zug hat eine Form.** Eine Reihe gleich geformter Kästchen sieht aus wie
+eine Tabelle — man erkennt nicht, wo der Zug aufhört und wie herum er steht.
+Die äußersten Fahrzeuge bekommen deshalb ein Ende: ein **Triebkopf** wird zur
+Keilform, ein gewöhnlicher Wagen am Zugschluss zum abgerundeten Abschluss.
+Beides kommt aus den Daten (`loco` je Fahrzeug, Lage in Metern), nicht aus
+einer Annahme — ein ICE 1 mit Triebkopf an beiden Enden bekommt folgerichtig
+zwei Keile.
+
+**Die Fahrtrichtung steht nicht dabei**, und sie wird auch nicht behauptet: die
+Reihung ist am *Bahnsteig* ausgerichtet (Sektor A links), nicht am Zuglauf.
+Welches Ende vorausfährt, liefert die DB-Antwort nicht. Der Hinweis unter der
+Reihung sagt das ausdrücklich — „Die Keilform markiert den Triebkopf, nicht die
+Fahrtrichtung" —, damit niemand aus der Nase die falsche Bahnsteigseite
+ableitet. Darunter in Worten, was man beim
 Umsteigen wissen will — „1. Klasse: Sektor F–G · Bordrestaurant: F ·
 Fahrräder: A" — und, rot, wenn ein Zug **geteilt** wird: ein Flügelzug mit
 zwei Zielen ist die Falle, in die man sonst tappt. Quelle ist die
@@ -909,6 +934,24 @@ man sich für eine entschieden und schraubt nur an der Reihenfolge drumherum
 Preis, Dauer und Umstiege werden je auf 0–1 normiert und gewichtet
 (40 % / 40 % / 20 %). Kleinste Punktzahl gewinnt.
 
+**Nachtzüge** bekommen vorher die gesparte Hotelnacht gutgeschrieben. Unter
+„Nachtzüge" lässt sich einstellen, was sie einem wert ist (0–150 €); der
+Betrag wird vom Preis des Nachtzugs abgezogen, **bevor** normiert wird.
+Angezeigt bleibt der echte Preis, und auch das Kennzeichen „günstigste"
+bezieht sich weiter darauf — sonst stünde an einer Karte ein Betrag, den es
+nicht gibt (`scorePrice` neben `price` in `rank()`).
+
+Gefragt ist dabei das Fahrzeug, nicht die Uhrzeit: ein ICE um 23 Uhr spart
+keine Hotelnacht, ein Nightjet schon (`isNightJourney()`, Flagge `night` an
+der Gattung).
+
+**Was das nicht behebt:** Die Fahrzeit zählt weiter voll gegen den Nachtzug,
+obwohl man sie verschläft. Nachgemessen gegen einen ICE, der dieselbe Strecke
+in der halben Zeit fährt, schliesst der volle Nachtwert die Lücke von 0,8 auf
+0,4 Punkte — gleichzieht er nicht. Wer das auch noch will, müsste die
+Schlafstunden anders gewichten als Reisestunden; das ist eine zweite
+Entscheidung und bewusst nicht getroffen.
+
 ### Nerd-Modus
 
 Kein Preismodell, sondern eine Frage des Weges. Die Treffer werden zu
@@ -923,6 +966,38 @@ andere gleich ist — es gibt keinen Wechselkurs zwischen einer Stunde Fahrzeit 
 einem Umstieg. Der Preis steht an der Karte, geht hier aber nicht in die Wertung
 ein. In welcher Reihenfolge die Varianten stehen, bestimmt deine Bewertung unter
 **Lieblingsstrecken** und **Lieblingszüge**.
+
+### Der Streckenverlauf auf der Karte
+
+HAFAS liefert den gefahrenen Weg als Polylinie — für den ICE 618 (München –
+Hamburg-Altona) sind das **2790 Stützpunkte**. So viel schickt die API nicht
+an den Browser; ausgedünnt wird auf höchstens 60.
+
+**Wie ausgedünnt wird, entscheidet alles.** Früher wurde jeder n-te Punkt
+genommen. Das gibt einer geraden Schnellfahrstrecke genauso viele Punkte wie
+einer engen Kurve — und schneidet dadurch Bögen ab. Nachgemessen am ICE 618:
+
+| Halt | jeder n-te Punkt | Douglas-Peucker | + Halte als Stützpunkte |
+|---|---|---|---|
+| Heidelberg Hbf | **2,43 km** daneben | 0,49 km | **0,00 km** |
+| schlimmster Halt | 5,70 km (Münster) | 2,09 km | 0,03 km |
+| Mittel über 22 Halte | 1,16 km | 0,55 km | 0,01 km |
+
+Genau das war der gemeldete Fehler: Heidelberg war als Halt markiert, die
+Linie lief daneben. Ein grösseres Budget hilft nicht — bei 120 Punkten lag
+Heidelberg immer noch 2,15 km daneben, weil der Abstecher dorthin ein kurzer,
+scharfer Bogen ist.
+
+`OebbHafas::thin()` macht deshalb zweierlei: die Polylinienpunkte, die einem
+**Halt** am nächsten liegen, bleiben in jedem Fall stehen, und zwischen ihnen
+vereinfacht **Douglas-Peucker** — der behält die Punkte, die die Form tragen.
+Die Toleranz sucht eine binäre Suche so, dass das Budget gerade eingehalten
+wird; sechzehn Schritte, nicht vierzig, weil beide dasselbe Ergebnis liefern
+und vierzig dreimal so viel kosten. Gibt es mehr Halte als Budget, bleibt es
+bei der alten gleichmässigen Auswahl — lieber ungenau als gar keine Linie.
+
+Geprüft in `bin/test_providers.php` gegen die echte, aufgezeichnete Geometrie
+des ICE 618 (`bin/fixtures/hafas_ice618_geometry.json`).
 
 ### Strecken erkennen
 
@@ -1682,6 +1757,39 @@ Weiterfahrt, Fußwege eingerechnet. Unter 5 Minuten gilt als riskant (rot), unte
 10 als knapp (gelb). Bei drei bis fünf Umstiegen ist das meist der Punkt, an dem
 eine Verbindung in der Praxis platzt.
 
+**Taktverkehr wird dabei anders behandelt.** Die Minutenzahl allein sagt nämlich
+nichts darüber, was ein verpasster Anschluss *kostet*: beim ICE sind das Stunden,
+bei einer U-Bahn eine Taktlücke. Trotzdem stand an beiden dasselbe „bei
+Verspätung weg" — für eine U6 schlicht falsch.
+
+Ist der Anschluss ein Takt-Verkehrsmittel (U-Bahn, Tram, Bus, S-Bahn; Flagge
+`frequent` in `TRAIN_TYPES`), fragt die App deshalb die **Abfahrtstafel der
+Umsteigestation** und nennt die nächste Fahrt derselben Linie:
+
+> Nur 2 min zum Umsteigen · nächste U6 um 14:17 — 6 min später
+
+Ohne Alarmfarbe, denn es ist keiner. Drei Punkte dabei:
+
+- **Nachgeschaut, nicht geschätzt.** Eine Tabelle mit Taktzeiten wäre abends und
+  auf dem Land falsch. Die Tafel weiß es wirklich — und liefert in München auch
+  die MVG-Halte, die die Fahrplanquelle der ÖBB nicht kennt.
+- **Keine zusätzliche Abfrage.** Für Taktverkehr ersetzt die Tafel die Suche nach
+  der nächsten *ganzen* Verbindung zum Ziel. Die war hier ohnehin die falsche
+  Antwort: wer die U6 um zwei Minuten verpasst, nimmt die nächste U6 und nicht
+  eine Route über die halbe Stadt. Es bleibt bei einer Abfrage je knappem
+  Umstieg, serverseitig 60 s gecacht.
+- **Gefunden oder nicht.** Nur wenn die Tafel wirklich keine spätere Fahrt der
+  Linie kennt, steht wieder „bei Verspätung weg" — dann kann es die letzte Bahn
+  des Tages gewesen sein. Solange die Antwort aussteht, heißt es „nächste Fahrt
+  dieser Linie wird geprüft …", nie der Alarmsatz: die Karte wird einmal
+  gezeichnet, bevor die Abfrage überhaupt läuft.
+
+Zugeordnet wird über die **Linie** (`line`, ersatzweise der Name), nicht über die
+Gattung. „S" ist eine Produktklasse, keine Linie — damit ließe sich eine S3 mit
+einer S8 verwechseln. Ohne Linienkennung behauptet die App nichts. Die Richtung
+muss zusätzlich passen, soweit beide Seiten eine nennen, sonst käme die
+Gegenrichtung mit durch.
+
 **Mindestumsteigezeit** lässt sich im Suchformular einstellen (Standard 5 min,
 „egal" bis 30 min). Der Wert wird an **beide** Quellen durchgereicht — HAFAS
 kennt `minChgTime`, die DB `minUmstiegszeit`. Das ist deutlich besser als
@@ -1691,6 +1799,41 @@ Forschungszentrum: ohne Vorgabe Umstiege von 3–4 Minuten, mit `5` dann 8–9, 
 `12` dann 13–14. Ein Nachfilter bleibt als Sicherheitsnetz; bliebe dadurch
 nichts übrig, werden lieber die knappen Verbindungen gezeigt als eine leere
 Liste.
+
+#### Grenzquerung ohne Zwischenhalt
+
+Fährt ein Zug über die Grenze, ohne dort zu halten, weiß die Aufteilung auf
+Länder nur „irgendwo zwischen diesen beiden Halten". Früher wurde hälftig
+geteilt. München–Innsbruck hat aber rund 90 km auf deutscher und 75 km auf
+österreichischer Seite, und an dieser Aufteilung hängen die Abo-Anteile —
+Klimaticket, GA, Deutschlandticket.
+
+Geteilt wird jetzt am tatsächlichen Übergang: `Fares::BORDER_CROSSINGS` führt
+die Bahn-Grenzübergänge der Region als Koordinate, `borderFraction()` lotet
+beide Halte und jeden in Frage kommenden Übergang auf den **Streckenverlauf**
+und nimmt den Weg bis dorthin als Anteil.
+
+**Auf die Polylinie zu rechnen ist der ganze Trick**, und zwar nachgemessen:
+Zwischen München und Innsbruck liegt die *Luftlinie* näher an Mittenwald als
+an Kufstein. Wer den nächsten Übergang zur Luftlinie nimmt, teilt 87/12 statt
+55/45 — **schlechter als die alte Hälfte**. Der tatsächliche Verlauf führt
+über Kufstein und lässt Mittenwald weit liegen. Dieselben zwei Orte über
+Mittenwald statt Kufstein ergeben folgerichtig eine andere Aufteilung; dass
+der *Weg* zählt und nicht nur Start und Ziel, ist der eigentliche Gewinn.
+
+Drei Sicherungen, damit eine ungenaue Tabelle die Schätzung nicht
+verschlechtern kann:
+
+- Ein Übergang zählt nur, wenn er höchstens 10 km neben dem Streckenverlauf
+  liegt. Die Koordinaten sind auf ein bis zwei Kilometer genau — gesucht ist
+  eine Aufteilung in Prozent, kein Grenzstein.
+- Fällt sein Lot auf die ersten oder letzten 2 % des Abschnitts, zählt er
+  nicht: dann ist der Übergang eher ein Halt als eine Querung.
+- **Ohne Streckenverlauf bleibt es bei der Hälfte.** Raten wäre hier
+  schlechter als nicht zu wissen.
+
+Geprüft in `bin/test_providers.php` gegen nachgezeichnete Streckenverläufe,
+inklusive der beiden Wege zwischen denselben Orten.
 
 **Fußwege** werden jetzt zuverlässig erkannt. Vorher tauchten sie als
 „Unbekannt" auf, weil die DB im Nahverkehr das Feld `typ` schlicht weglässt und
@@ -2234,6 +2377,34 @@ Verbindung — die endet vielleicht in „München Hbf (tief)" oder an einem
 MVG-Halt. Unter der Suche steht, womit gerechnet wurde; die Uhrzeit oben ist
 ein Tipp entfernt.
 
+**Hin und zurück nebeneinander.** Sobald „Rückfahrt" gedrückt wurde, merkt
+sich die App die gewählte Hinfahrt und blendet über der Trefferliste zwei
+Reiter ein:
+
+| Reiter | Inhalt |
+|---|---|
+| **Rückfahrten** | die normale Trefferliste der Gegenrichtung |
+| **Hin & zurück** | beide Fahrten untereinander, darunter die Summe |
+
+Die Summe nennt drei Zahlen: **Zusammen** (beide Preise addiert), **Fahrzeit**
+(reine Fahrt, ohne den Aufenthalt) und **Am Ziel** (zwischen Ankunft der
+Hinfahrt und Abfahrt der Rückfahrt). Die Hinfahrt steht fest, die Rückfahrt
+ist die gerade in der Liste markierte — ein Klick dort wechselt sie, und die
+Summe rechnet sich neu.
+
+Zwei Dinge dabei bewusst:
+
+- **Der Preis wird nur addiert, wenn beide Richtungen einen haben.** Sonst
+  stünde dort eine Summe, die weniger ist als die Reise kostet — schlimmer
+  als keine Angabe. Stattdessen: „Preis nur für eine Richtung bekannt".
+- **Liegt die Rückfahrt vor der Ankunft der Hinfahrt**, steht das rot da,
+  statt eine negative Aufenthaltsdauer zu zeigen. Das passiert, wenn jemand
+  die Uhrzeit von Hand zurückdreht.
+
+Die gemerkte Hinfahrt überlebt ein Neuladen (eigener Eintrag im localStorage,
+wie die verfolgte Fahrt) und lässt sich mit **„Hinfahrt verwerfen"** wieder
+loswerden — danach verhält sich die Liste wie immer.
+
 ### Teilen
 
 Der Knopf **„Suche teilen"** legt die komplette Suche in der Adresszeile ab —
@@ -2621,8 +2792,21 @@ in der App:
 | `trainLabel` im Nahverkehr | Zugnummer statt Linie → „S 20318" |
 | `findCancellation` | Ausfall gar nicht bemerkt, keine Alternativen |
 | `trainPosition` | `sameTrain` und `snapToLine` benutzt, nie importiert |
+| `pendingLoads` | vergessener Zustandsmerker → **77 Abfragen** statt einer |
+| `nextOnLine` | Gattung als Linie genommen → S3 mit S8 verwechselt |
+| `rank` mit `sort` | Sortierung war überhaupt nicht geprüft |
 
-Der letzte ist der Grund, warum dort auch `LiveTracker` vorkommt, obwohl der
+**`pendingLoads` ist der jüngste Zugang und der lehrreichste.** Die App lädt
+nach dem Zeichnen Dinge nach, die eine Abfrage kosten; das Nachladen endet mit
+`draw()`, und `draw()` ruft das Nachladen wieder auf. Wer dort einen
+Zustandsmerker vergisst, baut keine doppelte Abfrage, sondern eine
+Endlosschleife — gemessen 77 Abfragen für eine einzige Umsteigestation. Im
+Browser sieht man davon nichts: die Anzeige stimmt, nur das Netz glüht.
+Deshalb steht die Entscheidung „was ist noch offen" seitdem als reine Funktion
+in `prefetch.js`, und der Test prüft vor allem eines — dass ein **zweiter**
+Durchlauf über dieselben Abschnitte nichts mehr zurückgibt.
+
+Der Import-Fall ist der Grund, warum dort auch `LiveTracker` vorkommt, obwohl der
 keine reine Funktion ist: **ein fehlender Import fällt beim Laden des Moduls
 nicht auf**, sondern erst beim Aufruf — und diese Zeile lief nur, wenn man
 tatsächlich im Zug sass. `node --check` sieht so etwas nie.
@@ -2805,20 +2989,24 @@ Für den privaten Gebrauch ist das üblich und verbreitet — aber:
   die Regeln in `FLEET_RULES`.
 - **Preise in Österreich sind ungeprüft.** Keine der beiden Quellen liefert dort
   einen Betrag; die Kurve ist von der deutschen abgeleitet.
-- **Nachtzüge** sind im Preisvergleich benachteiligt, weil die gesparte
-  Hotelnacht nicht eingerechnet wird.
-- **Grenzabschnitte ohne Zwischenhalt** werden hälftig aufgeteilt. Bei Fahrten
-  aus der Schweiz fällt das kaum ins Gewicht, weil Basel, Buchs SG und Chiasso
-  fast immer Halte sind.
+- **Nachtzüge:** Die gesparte Hotelnacht lässt sich unter „Nachtzüge"
+  anrechnen (0–150 €, wird beim Vergleich vom Preis abgezogen). Die längere
+  **Fahrzeit** zählt dagegen weiter voll gegen sie, obwohl man sie verschläft —
+  gegen einen ICE, der dieselbe Strecke in der halben Zeit fährt, verliert ein
+  Nightjet deshalb auch mit vollem Nachtwert noch.
+- **Grenzabschnitte ohne Zwischenhalt** werden am tatsächlichen Übergang
+  aufgeteilt, soweit er bekannt ist — siehe „Grenzquerung ohne Zwischenhalt".
+  Ohne Streckenverlauf (DB-Fahrpläne liefern keinen) bleibt es bei der Hälfte.
 - **Reservierungen und Zuschläge** sind in den Schätzungen nicht enthalten.
 - **Der Umstiegsplan zeigt keinen Laufweg.** Er sagt, wo die beiden Bahnsteige
   liegen — nicht, wie man dazwischen läuft. Der Weg wurde einmal aus OSM
   gerechnet und war zu oft falsch; siehe oben.
 - **Der TLS-Trick kann jederzeit brechen.** Ändert Akamai die Erkennung, kommt
   wieder `OPS_BLOCKED` und das Tool fällt auf Schätzpreise zurück.
-- **Benachrichtigungen brauchen eine offene Seite.** Kein Push-Server; ein
-  Telefon mit dunklem Bildschirm friert die Seite irgendwann ein. Auf dem
-  iPhone nur als installierte App.
+- **Benachrichtigungen brauchen einen Cronjob.** Die Verfolgung läuft auf dem
+  Server (`PushWatch`, Endpunkt `pushtick`); wird der Cronjob nicht
+  eingerichtet, kommt nichts an. Auf dem iPhone nur als installierte App —
+  Web Push gibt es dort nur vom Startbildschirm aus.
 - **Stadtfahrten gibt es nur in München.** Echtzeit für MVG-Abschnitte kommt
   aus der Abfahrtstafel an Ein- und Ausstieg, nicht aus einem Zuglauf — die
   Halte dazwischen sind um die gemeldete Verspätung verschoben, nicht

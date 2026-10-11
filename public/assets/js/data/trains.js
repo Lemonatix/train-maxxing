@@ -46,10 +46,15 @@ export const TRAIN_TYPES = {
   REX: { label: 'REX', long: 'RegionalExpress', country: 'at', comfort: 4, longDistance: false },
   RB:  { label: 'RB', long: 'Regionalbahn', country: 'de', comfort: 3, longDistance: false },
   R:   { label: 'R', long: 'Regionalzug', country: 'ch', comfort: 3, longDistance: false },
-  S:   { label: 'S', long: 'S-Bahn', country: 'eu', comfort: 2, longDistance: false },
-  U:   { label: 'U', long: 'U-Bahn', country: 'eu', comfort: 2, longDistance: false },
-  Tram:{ label: 'Tram', long: 'Straßenbahn', country: 'eu', comfort: 2, longDistance: false },
-  Bus: { label: 'Bus', long: 'Bus', country: 'eu', comfort: 1, longDistance: false },
+  // `frequent` heisst NICHT "faehrt alle fuenf Minuten" - das waere eine
+  // Behauptung, die abends und auf dem Land falsch ist. Es heisst: bei
+  // dieser Gattung lohnt es sich, die naechste Abfahrt derselben Linie
+  // nachzuschauen, statt einen knappen Umstieg pauschal als verloren zu
+  // melden. Was wirklich faehrt, sagt dann die Abfahrtstafel.
+  S:   { label: 'S', long: 'S-Bahn', country: 'eu', comfort: 2, longDistance: false, frequent: true },
+  U:   { label: 'U', long: 'U-Bahn', country: 'eu', comfort: 2, longDistance: false, frequent: true },
+  Tram:{ label: 'Tram', long: 'Straßenbahn', country: 'eu', comfort: 2, longDistance: false, frequent: true },
+  Bus: { label: 'Bus', long: 'Bus', country: 'eu', comfort: 1, longDistance: false, frequent: true },
 };
 
 export const UNKNOWN_TYPE = {

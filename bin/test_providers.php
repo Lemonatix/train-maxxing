@@ -23,6 +23,7 @@ require $lib . '/Http.php';
 require $lib . '/Text.php';
 require $lib . '/Walks.php';
 require $lib . '/Products.php';
+require $lib . '/Fares.php';
 require $lib . '/Providers/OebbHafas.php';
 require $lib . '/Providers/DbVendo.php';
 require $lib . '/Providers/Mvg.php';
@@ -31,6 +32,7 @@ require $lib . '/Providers/Overpass.php';
 require $lib . '/Cache.php';
 require $lib . '/Providers/CoachSequence.php';
 require $lib . '/Providers/SwissOpenData.php';
+require $lib . '/Providers/SwissTransport.php';
 require $lib . '/Locations.php';
 require $lib . '/MvgRail.php';
 require $lib . '/Providers/DbApi.php';
@@ -576,6 +578,159 @@ foreach (array_merge(glob($ordner . '/push/*') ?: [], glob($ordner . '/push/.[a-
 }
 @rmdir($ordner . '/push');
 @rmdir($ordner);
+
+echo PHP_EOL . "Fares - Grenzquerung ohne Zwischenhalt" . PHP_EOL;
+
+// Stuetzpunkte wie HAFAS sie liefert, grob nachgezeichnet.
+$ueberKufstein = [
+    [48.1402, 11.5600], [48.00, 11.75], [47.86, 12.12], [47.73, 12.15],
+    [47.583, 12.166], [47.49, 12.07], [47.42, 11.87], [47.35, 11.70], [47.2632, 11.4010],
+];
+// Derselbe Start, dasselbe Ziel, aber ueber Mittenwald statt Kufstein.
+$ueberMittenwald = [
+    [48.1402, 11.5600], [48.05, 11.45], [47.80, 11.35], [47.60, 11.28],
+    [47.38, 11.265], [47.33, 11.30], [47.2632, 11.4010],
+];
+
+$anteil = static fn(string $a, string $b, array $von, array $nach, array $geo): float => round(
+    (float) privat(Fares::class, 'borderFraction', $a, $b, $von[0], $von[1], $nach[0], $nach[1], $geo),
+    2
+);
+
+$muc = [48.1402, 11.5600];
+$ibk = [47.2632, 11.4010];
+
+// Ueber Kufstein liegt der weitaus groessere Teil in Deutschland. Nach der
+// Luftlinie gewaenne Mittenwald - genau der Fehler, den die Polylinie
+// verhindert, und der schlechter waere als die alte haelftige Teilung.
+pruefe('Muenchen - Innsbruck ueber Kufstein: Grenze nach der Haelfte',
+    $anteil('de', 'at', $muc, $ibk, $ueberKufstein) > 0.50
+    && $anteil('de', 'at', $muc, $ibk, $ueberKufstein) < 0.62, true);
+
+// Dass sich zwei Wege zwischen denselben Orten unterschiedlich aufteilen,
+// ist der eigentliche Gewinn gegenueber 50/50.
+pruefe('derselbe Lauf ueber Mittenwald teilt anders',
+    $anteil('de', 'at', $muc, $ibk, $ueberMittenwald)
+    !== $anteil('de', 'at', $muc, $ibk, $ueberKufstein), true);
+
+// Basel: die Grenze liegt fast am Startpunkt.
+pruefe('Basel SBB - Freiburg: Grenze gleich hinter dem Start',
+    $anteil('ch', 'de', [47.5475, 7.5894], [47.9960, 7.8410], [
+        [47.5475, 7.5894], [47.5560, 7.5930], [47.5650, 7.5900],
+        [47.60, 7.62], [47.70, 7.65], [47.85, 7.75], [47.9960, 7.8410],
+    ]) < 0.10, true);
+
+// Ohne Polylinie bleibt es bei der Haelfte - raten waere schlechter.
+pruefe('ohne Streckenverlauf haelftig', $anteil('de', 'at', $muc, $ibk, []), 0.5);
+
+// Unbekanntes Laenderpaar ebenso.
+pruefe('unbekanntes Laenderpaar haelftig',
+    $anteil('de', 'pl', [52.5200, 13.4050], [52.4000, 16.9000], [
+        [52.5200, 13.4050], [52.45, 15.0], [52.4000, 16.9000],
+    ]), 0.5);
+
+echo PHP_EOL . "SwissTransport - Zuercher Nahverkehr ueber opendata.ch" . PHP_EOL;
+
+$ch = new SwissTransport($http, ['endpoint' => 'https://example.invalid']);
+$chRes = privat($ch, 'mapRoutesResponse',
+    ['ok' => true, 'status' => 200, 'error' => null, 'json' => fixture('ch_connections.json')], 3);
+$chFahrten = $chRes['data'];
+
+pruefe('drei Verbindungen uebersetzt', count($chFahrten), 3);
+
+// Verbindung 1 ist ein reines Tram - der Fall, den die OeBB-Quelle gar nicht
+// kennt und um den es hier geht.
+$tram = $chFahrten[1]['legs'][0];
+pruefe('Tram mit Linie und Richtung',
+    [$tram['mode'], $tram['category'], $tram['line'], $tram['direction']],
+    ['train', 'Tram', '8', "Z\u{00FC}rich, Hardturm"]);
+pruefe('Linienverkehr ohne Zugnummer', $tram['trainNumber'], '');
+pruefe('Fuellzeichen im Betreiber entfernt', $tram['operator'], 'VBZ F');
+pruefe('alle Zwischenhalte uebernommen', count($tram['stops']), 12);
+pruefe('Streckenverlauf aus den Halten', count($tram['geometry']), 12);
+
+// KOORDINATEN: x ist die Breite, y die Laenge. Vertauscht laege Zuerich in
+// Somalia - und die Entfernungs- und Preisschaetzung waere Unsinn.
+pruefe('Breite und Laenge nicht vertauscht',
+    [round((float) $tram['from']['lat'], 2), round((float) $tram['from']['lon'], 2)],
+    [47.37, 8.55]);
+
+// Verbindung 0 beginnt zu Fuss - eigener Abschnitt, kein Fahrzeug.
+$fuss = $chFahrten[0]['legs'][0];
+pruefe('Fussweg ist ein eigener Abschnitt',
+    [$fuss['mode'], $fuss['changesPlace']], ['walk', true]);
+pruefe('Fussweg-Dauer aus den Zeiten, nicht aus walk.duration', $fuss['durationMin'], 7);
+
+$sbahn = $chFahrten[0]['legs'][1];
+pruefe('S-Bahn heisst S12, nicht 12', [$sbahn['category'], $sbahn['name']], ['S', 'S12']);
+pruefe('Haltestellen-Kennung mit Praefix', $sbahn['from']['id'], 'ch:8503003');
+pruefe('Umstiege zaehlen nur Fahrzeuge, nicht Fusswege', $chFahrten[0]['changes'], 0);
+pruefe('Dauer der ganzen Verbindung', $chFahrten[0]['durationMin'], 14);
+pruefe('Land gesetzt', $chFahrten[0]['countries'], ['ch']);
+
+// Fehlerfall: die Schnittstelle drosselt bei Last mit HTTP 429.
+$chFehler = privat($ch, 'mapRoutesResponse',
+    ['ok' => false, 'status' => 429, 'error' => null, 'json' => null], 3);
+pruefe('Drosselung wird als Fehler gemeldet, nicht als leere Liste',
+    [$chFehler['ok'], str_contains((string) $chFehler['error'], '429')], [false, true]);
+
+// Eigene Kennung, damit die Liste Doppelte erkennt.
+pruefe('jede Verbindung bekommt eine eigene Kennung',
+    count(array_unique(array_column($chFahrten, 'id'))), 3);
+
+echo PHP_EOL . "OebbHafas - Streckenverlauf ausduennen" . PHP_EOL;
+
+// ECHTE DATEN: ICE 618 Muenchen - Hamburg-Altona, 2790 Stuetzpunkte und 22
+// Halte, aufgezeichnet bei der OeBB. Genau dieser Zug war der Anlass: auf
+// der Karte lag Heidelberg neben der gezeichneten Linie, obwohl der Halt
+// markiert war.
+$geoFix  = fixture('hafas_ice618_geometry.json');
+$geoPts  = array_map(static fn($p) => [(float) $p[0], (float) $p[1]], $geoFix['poly']);
+$geoHalt = array_map(static fn($s) => [(float) $s['lat'], (float) $s['lon']], $geoFix['stops']);
+
+$oebbGeo = new OebbHafas($http, ['endpoint' => 'https://example.invalid', 'auth' => [], 'client' => [], 'ver' => '1', 'lang' => 'deu']);
+
+/** Groesster Abstand eines Halts zur gezeichneten Linie, in km. */
+$abstand = static function (array $linie, array $halte) use ($oebbGeo): float {
+    $max = 0.0;
+    foreach ($halte as $h) {
+        $d = INF;
+        for ($i = 0, $n = count($linie) - 1; $i < $n; $i++) {
+            $d = min($d, privat($oebbGeo, 'pointLineDistance', $h, $linie[$i], $linie[$i + 1]));
+        }
+        $max = max($max, $d * 111.32);
+    }
+    return $max;
+};
+
+$ohneAnker = privat($oebbGeo, 'thin', $geoPts, 60);
+$mitAnker  = privat($oebbGeo, 'thin', $geoPts, 60, $geoHalt);
+
+pruefe('Budget eingehalten', [count($ohneAnker) <= 60, count($mitAnker) <= 60], [true, true]);
+pruefe('Anfang und Ende bleiben',
+    [$mitAnker[0], $mitAnker[count($mitAnker) - 1]],
+    [$geoPts[0], $geoPts[count($geoPts) - 1]]);
+
+// Der Kern: mit Halten als Stuetzpunkten liegt KEIN Halt mehr nennenswert
+// neben der Linie. Vorher (jeder n-te Punkt) waren es bis 5,7 km.
+pruefe('jeder Halt liegt auf der Linie (unter 100 m)', $abstand($mitAnker, $geoHalt) < 0.1, true);
+
+// Und Heidelberg im Besonderen - der gemeldete Fall.
+$hd = $geoHalt[6];
+pruefe('Heidelberg ist der siebte Halt', $geoFix['stops'][6]['name'], 'Heidelberg Hbf');
+pruefe('Heidelberg liegt auf der Linie', $abstand($mitAnker, [$hd]) < 0.05, true);
+
+// Zum Vergleich die alte Lage - belegt, dass der Test etwas misst.
+pruefe('ohne Stuetzpunkte lag Heidelberg weit daneben', $abstand($ohneAnker, [$hd]) > 1.0, true);
+
+// Kurze Verlaeufe bleiben unangetastet.
+pruefe('weniger Punkte als Budget: unveraendert',
+    privat($oebbGeo, 'thin', [[48.0, 11.0], [48.1, 11.1]], 60), [[48.0, 11.0], [48.1, 11.1]]);
+
+// Mehr Halte als Budget: Rueckfallebene, aber das Budget haelt.
+$vieleAnker = array_values(array_slice($geoPts, 0, 200));
+pruefe('mehr Stuetzpunkte als Budget sprengt es nicht',
+    count(privat($oebbGeo, 'thin', $geoPts, 60, $vieleAnker)) <= 60, true);
 
 // ---------------------------------------------------------------------
 echo "\nText - Fremdtexte als Klartext\n";

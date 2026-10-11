@@ -68,9 +68,22 @@ $config = [
         ],
 
         // --- Schweizer Fahrplan (transport.opendata.ch): offen, kein Key, keine Preise. ---
+        //
+        // Zwei Verwendungen aus derselben Quelle:
+        //   - Echtzeit eines bekannten Abschnitts (SwissOpenData), wenn HAFAS
+        //     fuer einen Schweizer Zug nur den Fahrplan kennt.
+        //   - Stadtfahrten (SwissTransport): Tram und Bus in Zuerich, Basel,
+        //     Bern und dem Rest der Schweiz. Die OeBB-Quelle kennt die nicht.
+        //
+        // Ein Gemeinschaftsprojekt ohne Vertrag; es drosselt bei Last mit
+        // HTTP 429. Deshalb nur fragen, wenn eine Reise wirklich dort liegt.
         'swiss' => [
-            'enabled'  => true,
-            'endpoint' => 'https://transport.opendata.ch/v1',
+            'enabled'    => true,
+            'endpoint'   => 'https://transport.opendata.ch/v1',
+            'user_agent' => 'train-maxxing (+https://github.com/)',
+            // Stadtfahrten getrennt abschaltbar: die Echtzeit kostet eine
+            // Abfrage je Abschnitt, die Suche eine je Treffer.
+            'citytrips'  => true,
         ],
 
         // --- DB: die einzige der drei Quellen, die echte Preise liefert. ---
