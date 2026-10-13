@@ -678,6 +678,15 @@ pruefe('Drosselung wird als Fehler gemeldet, nicht als leere Liste',
 pruefe('jede Verbindung bekommt eine eigene Kennung',
     count(array_unique(array_column($chFahrten, 'id'))), 3);
 
+echo PHP_EOL . "OebbHafas - Reisedauer ueber mehrere Tage" . PHP_EOL;
+
+// Ab 24 Stunden stellt HAFAS die Tage voran. Abgeschnitten stand
+// Muenchen-Sofia mit 10 statt 34 Stunden in der Liste.
+$oebbDur = new OebbHafas($http, ['endpoint' => 'https://example.invalid', 'auth' => [], 'client' => [], 'ver' => '1', 'lang' => 'deu']);
+pruefe('unter einem Tag', privat($oebbDur, 'hafasDuration', '043800'), 278);
+pruefe('mit Tagesziffern, aber null Tagen', privat($oebbDur, 'hafasDuration', '00043800'), 278);
+pruefe('ein Tag zehn Stunden', privat($oebbDur, 'hafasDuration', '01102700'), 2067);
+
 echo PHP_EOL . "OebbHafas - Streckenverlauf ausduennen" . PHP_EOL;
 
 // ECHTE DATEN: ICE 618 Muenchen - Hamburg-Altona, 2790 Stuetzpunkte und 22

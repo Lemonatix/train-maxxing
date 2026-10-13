@@ -21,6 +21,9 @@ const OCCUPANCY_LABELS = {
   4: 'ausgebucht',
 };
 
+/** Kurzform neben dem Pegel; die lange steht im Tooltip. */
+const OCCUPANCY_SHORT = { 1: 'wenig los', 2: 'mäßig voll', 3: 'sehr voll', 4: 'ausgebucht' };
+
 function occupancyOf(journey, travelClass) {
   let level = 0;
   for (const leg of journey.legs || []) {
@@ -49,6 +52,31 @@ const el = (tag, className, text) => {
   if (text != null) n.textContent = text;
   return n;
 };
+
+/**
+ * Kleine Strich-Icons für die Kennzeichen, 24er-Raster, Farbe aus
+ * `currentColor`. Feste Zeichenketten aus diesem Modul - nie Fremddaten,
+ * deshalb darf innerHTML hier ran.
+ */
+const ICONS = {
+  tag: '<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  seat: '<path d="M6 4v9a2 2 0 0 0 2 2h8"/><path d="M6 15l-1 5M16 15l2 5M9 11h7a2 2 0 0 1 2 2v2"/>',
+  direct: '<path d="M4 12h16M14 6l6 6-6 6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  warn: '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>',
+  walk: '<circle cx="13" cy="4" r="2"/><path d="m9 21 2-7 3 3v5M7 12l2-4 4 1 3 3"/>',
+  ticket: '<path d="M3 8a2 2 0 0 0 0 4v4h18v-4a2 2 0 0 1 0-4V4H3z"/>',
+  swap: '<path d="M7 7h11l-3-3M17 17H6l3 3"/>',
+};
+
+function icon(name) {
+  const i = el('span', 'badge__icon');
+  i.setAttribute('aria-hidden', 'true');
+  i.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" '
+    + `stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+  return i;
+}
 
 /**
  * Hin- und Rückfahrt zusammen.
@@ -318,6 +346,7 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   timePair(j.departure, j.departureReal);
   times.append(el('span', 'journey__arrow', '→'));
   timePair(j.arrival, j.arrivalReal);
+  appendDayShift(times, j.departure, j.arrivalReal || j.arrival, 'journey__day');
 
   const meta = el('div', 'journey__meta');
   meta.append(el('span', 'journey__duration', formatDuration(j.durationMin)));
@@ -377,8 +406,24 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   const badges = el('div', 'badges');
   // Gibt das Abzeichen zurück, damit der Aufrufer noch einen Titel
   // dranhängen kann. Die meisten brauchen ihn nicht.
-  const add = (text, cls) => {
-    const n = el('span', `badge ${cls}`, text);
+  //
+  // DREI ARTEN, drei Gewichte: Auszeichnungen ("schnellste") farbig mit
+  // Icon, Warnungen farbig mit Rand, Kennzahlen (Pünktlichkeit, Auslastung)
+  // ruhig umrandet - dort ist nur der Wert eingefärbt. Früher sahen alle
+  // gleich aus, und der Blick fand die Warnung nicht zwischen den Fakten.
+  const add = (text, cls, ico) => {
+    const n = el('span', `badge ${cls}`);
+    if (ico) n.append(icon(ico));
+    n.append(text);
+    badges.append(n);
+    return n;
+  };
+  const fact = (ico, value, text, tone) => {
+    const n = el('span', 'badge badge--fact');
+    n.dataset.tone = tone;
+    if (ico) n.append(icon(ico));
+    n.append(el('span', 'badge__value', value));
+    if (text) n.append(text);
     badges.append(n);
     return n;
   };
@@ -398,14 +443,14 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
       });
       badges.append(undo);
     } else {
-      add('umdisponiert', 'badge--rerouted');
+      add('umdisponiert', 'badge--rerouted', 'swap');
     }
   }
 
-  if (marks.cheapest === entry) add('günstigste', 'badge--price');
-  if (marks.fastest === entry) add('schnellste', 'badge--fast');
-  if (marks.comfiest === entry) add('bequemste', 'badge--comfort');
-  if (marks.fewestChanges === entry && j.changes === 0) add('umstiegsfrei', 'badge--direct');
+  if (marks.cheapest === entry) add('günstigste', 'badge--price', 'tag');
+  if (marks.fastest === entry) add('schnellste', 'badge--fast', 'bolt');
+  if (marks.comfiest === entry) add('bequemste', 'badge--comfort', 'seat');
+  if (marks.fewestChanges === entry && j.changes === 0) add('umstiegsfrei', 'badge--direct', 'direct');
 
   if (state.mode === 'nerd') {
     add(`Komfort ${entry.comfort.toFixed(1)}`, 'badge--score');
@@ -423,7 +468,7 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   // Verbindung schneller ist als erwartet.
   const walks = (j.legs || []).filter((l) => l.mode === 'walk' && l.changesPlace);
   if (walks.length > 0) {
-    add(walks.length === 1 ? 'mit Fußweg' : `${walks.length} Fußwege`, 'badge--walk');
+    add(walks.length === 1 ? 'mit Fußweg' : `${walks.length} Fußwege`, 'badge--walk', 'walk');
   }
 
   // AUSFALL ZUERST. Ein ausgefallener Zug stand in der Liste bisher gar
@@ -434,35 +479,45 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   if (ausfaelle.length > 0) {
     add(
       ausfaelle.length === 1 ? `${trainLabel(ausfaelle[0])} fällt aus` : `${ausfaelle.length} Züge fallen aus`,
-      'badge--cancelled'
+      'badge--cancelled', 'warn'
     );
   } else if (j.reachable === false) {
     // HAFAS rechnet jede Verbindung gegen die Echtzeitlage nach. Passt sie
     // nicht mehr - meist, weil eine Verspätung den Anschluss gekappt hat -,
     // steht das hier, bevor man sie bucht.
-    const b = add('laut Echtzeit nicht erreichbar', 'badge--cancelled');
+    const b = add('laut Echtzeit nicht erreichbar', 'badge--cancelled', 'warn');
     b.title = 'Nach der aktuellen Verspätungslage ist mindestens ein Anschluss dieser Verbindung nicht zu schaffen.';
   }
 
   // Verspätung, sofern die DB Echtzeitdaten geliefert hat.
   if (typeof j.delay === 'number' && j.delay > 0) {
-    add(`+${j.delay} min`, j.delay >= 5 ? 'badge--risky' : 'badge--tight');
+    add(`+${j.delay} min`, j.delay >= 5 ? 'badge--risky' : 'badge--tight', 'clock');
   } else if (j.delay === 0) {
-    add('pünktlich', 'badge--ontime');
+    add('pünktlich', 'badge--ontime', 'clock');
   }
 
   // Knappe Umstiege sind der häufigste Grund, warum eine Verbindung platzt.
   // Mit Echtzeit zählt die tatsächliche Lücke, nicht die im Fahrplan.
-  const live = j.minTransferLive;
-  if (typeof live === 'number' && live !== j.minTransferMin) {
-    add(
-      live < 0 ? `Anschluss weg (${live} min)` : `nur noch ${live} min Umstieg`,
-      live < 5 ? 'badge--risky' : 'badge--tight'
-    );
-  } else if (j.transferRisk === 'risky') {
-    add(`nur ${j.minTransferMin} min Umstieg`, 'badge--risky');
-  } else if (j.transferRisk === 'tight') {
-    add(`${j.minTransferMin} min Umstieg`, 'badge--tight');
+  //
+  // Gewarnt wird nur, wenn es wirklich knapp ist - dieselben Schwellen wie
+  // `transferRisk` im Backend (unter 5 riskant, unter 10 knapp). Früher
+  // reichte jede Abweichung vom Fahrplan: nachts stand dann „nur noch
+  // 120 min Umstieg" an einer Verbindung, an der zwei Minuten Verspätung
+  // nichts ändern. Und wird der Umstieg durch die Echtzeit länger, ist das
+  // keine Warnung, sondern Entwarnung.
+  const plan = j.minTransferMin;
+  const live = typeof j.minTransferLive === 'number' ? j.minTransferLive : null;
+  const gap = live ?? plan;
+  if (typeof gap === 'number') {
+    if (gap < 0) {
+      add(`Anschluss weg (${gap} min)`, 'badge--risky', 'warn');
+    } else if (gap < 10) {
+      const knapper = live !== null && typeof plan === 'number' && live < plan;
+      add(
+        knapper ? `nur noch ${gap} min Umstieg` : gap < 5 ? `nur ${gap} min Umstieg` : `${gap} min Umstieg`,
+        gap < 5 ? 'badge--risky' : 'badge--tight', 'warn'
+      );
+    }
   }
 
   // PÜNKTLICHKEIT AUF DIE KARTE. Die Statistik sammelt sich mit jeder
@@ -477,26 +532,35 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
     const schwächster = hist.reduce((a, b) => (a.rate ?? 1) <= (b.rate ?? 1) ? a : b);
     const quote = Math.round((schwächster.rate ?? 0) * 100);
     const eigen = hist.some((h) => h.source !== 'baseline');
-    const b = add(
-      `${quote} % pünktlich`,
-      quote >= 80 ? 'badge--ontime' : quote >= 60 ? 'badge--tight' : 'badge--risky'
-    );
+    const b = fact('clock', `${quote} %`, 'pünktlich', quote >= 80 ? 'good' : quote >= 60 ? 'warn' : 'bad');
     b.title = eigen
       ? `Aus eigenen Messungen: im Schnitt +${(schwächster.avg ?? 0).toFixed(1).replace('.', ',')} min.`
       : 'Näherung aus der Jahresstatistik des Betreibers — noch keine eigenen Messungen.';
-    if (!eigen) b.classList.add('badge--rule');
+    // Gestrichelt: geschätzt, nicht gemessen.
+    if (!eigen) b.classList.add('is-estimate');
   }
 
   // Auslastung: die höchste gemeldete Stufe über alle Abschnitte.
+  // Als Pegel aus vier Balken, wie man es von der DB kennt - das liest man
+  // schneller als "mittel ausgelastet".
   const occ = occupancyOf(j, state.travelClass);
-  if (occ) add(occ.label, `badge--occ${occ.level}`);
+  if (occ) {
+    const n = el('span', 'badge badge--fact badge--occ');
+    n.dataset.tone = occ.level <= 1 ? 'good' : occ.level === 2 ? 'warn' : 'bad';
+    const pegel = el('span', 'occ-meter');
+    pegel.setAttribute('aria-hidden', 'true');
+    for (let i = 1; i <= 4; i++) pegel.append(el('i', i <= occ.level ? 'is-on' : null));
+    n.append(pegel, OCCUPANCY_SHORT[occ.level] || occ.label);
+    n.title = `${state.travelClass === 1 ? '1.' : '2.'} Klasse: ${occ.label} (Prognose der DB)`;
+    badges.append(n);
+  }
 
   // Die DB markiert selbst, wo das Deutschlandticket gilt.
   const dTicketLegs = (j.legs || []).filter((l) => l.dTicket).length;
   if (dTicketLegs > 0) {
     add(
       dTicketLegs === 1 ? 'D-Ticket auf 1 Abschnitt' : `D-Ticket auf ${dTicketLegs} Abschnitten`,
-      'badge--dticket'
+      'badge--dticket', 'ticket'
     );
   }
 
@@ -1346,16 +1410,45 @@ function lateBy(plannedIso, actualIso) {
   return Math.round((b - a) / 60000);
 }
 
-/** Uhrzeit eines Abschnitts, bei Abweichung Plan durchgestrichen plus Ist. */
-function appendLegTime(line, plan, real) {
+/**
+ * Uhrzeit eines Abschnitts, bei Abweichung Plan durchgestrichen plus Ist.
+ * `base` ist die Abfahrt der ganzen Verbindung: liegt der Abschnitt an
+ * einem späteren Tag, steht „+1" dahinter.
+ */
+function appendLegTime(line, plan, real, base) {
   const p = formatTime(plan);
   const r = real ? formatTime(real) : null;
   if (!r || r === p) {
     line.append(el('span', 'leg__time', p));
-    return;
+  } else {
+    line.append(el('span', 'leg__time leg__time--planned', p));
+    line.append(el('span', 'leg__time leg__time--real', r));
   }
-  line.append(el('span', 'leg__time leg__time--planned', p));
-  line.append(el('span', 'leg__time leg__time--real', r));
+  appendDayShift(line, base, real || plan, 'leg__day');
+}
+
+/**
+ * Kalendertage zwischen zwei Zeitpunkten, in Ortszeit wie formatTime().
+ *
+ * MEHRTÄGIGE REISEN. München–Sofia fährt 08:12 ab und kommt am nächsten Tag
+ * 18:40 an. Ohne Tagesangabe las sich das als zehn Stunden - zusammen mit
+ * der früher abgeschnittenen Dauer sah die Verbindung aus wie ein Wunder.
+ */
+export function dayShift(base, iso) {
+  const a = new Date(base);
+  const b = new Date(iso);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 0;
+  const tag = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.round((tag(b) - tag(a)) / 86400000);
+}
+
+/** Hängt „+1", „+2" … an, wenn `iso` an einem späteren Tag liegt als `base`. */
+function appendDayShift(parent, base, iso, cls) {
+  const n = base && iso ? dayShift(base, iso) : 0;
+  if (n <= 0) return;
+  const d = el('span', cls, `+${n}`);
+  d.title = n === 1 ? 'am nächsten Tag' : `${n} Tage später`;
+  parent.append(d);
 }
 
 function renderLegs(journey, entry, state, actions) {
@@ -1431,7 +1524,7 @@ function renderLegs(journey, entry, state, actions) {
     }
 
     const line1 = el('div', 'leg__line');
-    appendLegTime(line1, leg.departure, leg.departureReal);
+    appendLegTime(line1, leg.departure, leg.departureReal, journey.departure);
     line1.append(el('span', 'leg__station', leg.from?.name || '?'));
     if (leg.from?.platform) line1.append(el('span', 'leg__platform', `Gl. ${leg.from.platform}`));
     row.append(line1);
@@ -1529,7 +1622,7 @@ function renderLegs(journey, entry, state, actions) {
     }
 
     const line2 = el('div', 'leg__line');
-    appendLegTime(line2, leg.arrival, leg.arrivalReal);
+    appendLegTime(line2, leg.arrival, leg.arrivalReal, journey.departure);
     line2.append(el('span', 'leg__station', leg.to?.name || '?'));
     if (leg.to?.platform) line2.append(el('span', 'leg__platform', `Gl. ${leg.to.platform}`));
     row.append(line2);

@@ -1760,13 +1760,26 @@ einfach von der Karte, und über der Karte steht der Hinweis.
 ### Auslastung, knappe Umstiege, Bestpreis, Historie
 
 **Auslastung** meldet die DB je Abschnitt und Klasse (Stufe 1 gering bis
-4 ausgebucht). Sie steht als Kennzeichen an der Verbindung und je Abschnitt im
+4 ausgebucht). Sie steht als Pegel aus vier Balken an der Verbindung („wenig
+los" bis „ausgebucht", die DB-Bezeichnung im Tooltip) und je Abschnitt im
 Detail — die Klasse richtet sich nach deiner Auswahl.
+
+**Die Kennzeichen haben drei Gewichte.** Auszeichnungen (günstigste,
+schnellste, bequemste, umstiegsfrei) sind farbig mit Icon; Warnungen (knapper
+Umstieg, Ausfall) farbig mit Rand; Kennzahlen (Pünktlichkeit, Auslastung)
+ruhig umrandet, nur der Wert trägt die Farbe. Eine geschätzte Pünktlichkeit
+(Jahresstatistik statt eigener Messung) ist gestrichelt umrandet.
 
 **Knappe Umstiege** rechnet das Tool selbst aus der Lücke zwischen Ankunft und
 Weiterfahrt, Fußwege eingerechnet. Unter 5 Minuten gilt als riskant (rot), unter
 10 als knapp (gelb). Bei drei bis fünf Umstiegen ist das meist der Punkt, an dem
 eine Verbindung in der Praxis platzt.
+
+Mit Echtzeit zählt die tatsächliche Lücke, aber **dieselben Schwellen**: „nur
+noch 7 min Umstieg" erscheint nur, wenn die Lücke unter 10 Minuten liegt und
+kürzer ist als geplant. Früher genügte jede Abweichung vom Fahrplan — nachts
+stand dann „nur noch 120 min Umstieg" an einer Verbindung, an der zwei Minuten
+Verspätung nichts ändern.
 
 **Taktverkehr wird dabei anders behandelt.** Die Minutenzahl allein sagt nämlich
 nichts darüber, was ein verpasster Anschluss *kostet*: beim ICE sind das Stunden,

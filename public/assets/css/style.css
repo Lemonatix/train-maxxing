@@ -2563,18 +2563,82 @@ details.live__msg .live__msg-text {
 
 /* --- Badges -------------------------------------------------------- */
 
-.badges { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.7rem; }
+.badges { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.75rem; }
 
+/* Pill statt Kästchen, Fließtext statt Monospace: die Kennzeichen sind
+   Wörter, keine Messwerte. Zahlen bleiben trotzdem tabellarisch. */
 .badge {
-  padding: 0.14rem 0.45rem;
-  border-radius: 3px;
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-family: var(--font-main);
+  font-size: 0.74rem;
   font-weight: 500;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   background: var(--surface-inset);
   color: var(--text-muted);
 }
+
+.badge__icon { display: inline-flex; flex: none; width: 0.95em; height: 0.95em; }
+.badge__icon svg { width: 100%; height: 100%; }
+
+/* Kennzahlen: ruhig umrandet, nur Wert und Icon tragen die Farbe. */
+.badge--fact {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-dim);
+  --tone: var(--text-muted);
+}
+.badge--fact[data-tone='good'] { --tone: var(--green); }
+.badge--fact[data-tone='warn'] { --tone: var(--amber); }
+.badge--fact[data-tone='bad']  { --tone: var(--rose); }
+.badge--fact .badge__icon,
+.badge--fact .badge__value { color: var(--tone); }
+.badge--fact .badge__value { font-weight: 600; }
+.badge--fact.is-estimate { border-style: dashed; }
+
+/* Auslastung als Pegel aus vier Balken. */
+.occ-meter {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 0.8em;
+}
+.occ-meter i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--border-strong);
+}
+.occ-meter i:nth-child(1) { height: 40%; }
+.occ-meter i:nth-child(2) { height: 60%; }
+.occ-meter i:nth-child(3) { height: 80%; }
+.occ-meter i:nth-child(4) { height: 100%; }
+.occ-meter i.is-on { background: var(--tone); }
+
+/* Warnungen: Rand in der Warnfarbe, damit sie zwischen den Fakten auffallen. */
+.badge--risky,
+.badge--tight { border-color: color-mix(in srgb, currentColor 35%, transparent); }
+.badge.badge--cancelled { border-color: var(--rose); }
+
+/* Ab dem zweiten Tag: "+1" an der Uhrzeit. */
+.journey__day,
+.leg__day {
+  align-self: flex-start;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-family: var(--font-main);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.leg__day { margin-left: -0.15rem; font-size: 0.62rem; }
 
 .badge--price { background: var(--green-soft); color: var(--green); }
 .badge--fast { background: var(--accent-soft); color: var(--accent); }
@@ -2619,10 +2683,6 @@ details.live__msg .live__msg-text {
 .badge--dticket { background: var(--db-red-soft); color: var(--db-red); }
 .badge--risky { background: var(--rose-soft); color: var(--rose); }
 .badge--tight { background: var(--amber-soft); color: var(--amber); }
-.badge--occ1 { background: var(--green-soft); color: var(--green); }
-.badge--occ2 { background: var(--amber-soft); color: var(--amber); }
-.badge--occ3 { background: var(--rose-soft); color: var(--rose); }
-.badge--occ4 { background: var(--rose-soft); color: var(--rose); font-weight: 700; }
 
 /* --- Bestpreise über den Tag ---------------------------------------- */
 
@@ -4235,7 +4295,7 @@ details.live__msg .live__msg-text {
 @media (max-width: 380px) {
   .journey__time { font-size: 1.05rem; }
   .journey__times { gap: 0.35rem; }
-  .badge { font-size: 0.64rem; }
+  .badge { font-size: 0.7rem; padding: 0.18rem 0.5rem; }
 }
 
 /* --- Sehr schmale Telefone ------------------------------------------

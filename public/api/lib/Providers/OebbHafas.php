@@ -1489,16 +1489,24 @@ final class OebbHafas
             . ':' . str_pad((string) ($abs % 60), 2, '0', STR_PAD_LEFT);
     }
 
-    /** "043800" -> 278 Minuten */
+    /**
+     * "043800" -> 278 Minuten, "01103000" -> 1 Tag 10:30 = 2070 Minuten.
+     *
+     * DIE TAGE ZÄHLEN MIT. Ab 24 Stunden stellt HAFAS zwei Ziffern für die
+     * Tage voran. Früher wurden sie abgeschnitten, und München–Sofia stand
+     * mit 10 statt 34 Stunden in der Liste.
+     */
     private function hafasDuration(string $dur): int
     {
+        $tage = 0;
         if (strlen($dur) === 8) {
-            $dur = substr($dur, 2);
+            $tage = (int) substr($dur, 0, 2);
+            $dur  = substr($dur, 2);
         }
         if (strlen($dur) !== 6) {
             return 0;
         }
-        return ((int) substr($dur, 0, 2)) * 60 + (int) substr($dur, 2, 2);
+        return $tage * 1440 + ((int) substr($dur, 0, 2)) * 60 + (int) substr($dur, 2, 2);
     }
 
     private function diffMinutes(?string $from, ?string $to): int
