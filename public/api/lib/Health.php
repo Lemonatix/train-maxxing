@@ -122,7 +122,7 @@ final class Health
         }
 
         $pfad = self::$dir . '/health.json';
-        $fh = @fopen($pfad, 'c+');
+        $fh = @fopen($pfad . '.lock', 'c');
         if ($fh === false) {
             self::$puffer = [];
             return;
@@ -130,8 +130,15 @@ final class Health
 
         // Unter Sperre lesen, zusammenführen, schreiben: zwei gleichzeitige
         // Anfragen dürfen sich nicht gegenseitig überschreiben.
+        //
+        // DIE SPERRE SITZT AUF EINER EIGENEN DATEI, geschrieben wird über
+        // Temp-Datei und rename(). Früher wurde health.json selbst gesperrt
+        // und an Ort und Stelle geleert und neu beschrieben - report() liest
+        // aber ohne Sperre und sah in dem Moment eine leere Datei. Die Sperre
+        // auf health.json selbst ginge mit rename() nicht: sie hinge am alten
+        // Inode, und der Nächste in der Warteschlange läse den alten Stand.
         if (flock($fh, LOCK_EX)) {
-            $roh = stream_get_contents($fh);
+            $roh = @file_get_contents($pfad);
             $daten = json_decode((string) $roh, true);
             $daten = is_array($daten) ? $daten : [];
 
@@ -150,9 +157,12 @@ final class Health
 
             $json = json_encode($daten, JSON_UNESCAPED_UNICODE);
             if ($json !== false) {
-                ftruncate($fh, 0);
-                rewind($fh);
-                fwrite($fh, $json);
+                $tmp = $pfad . '.' . bin2hex(random_bytes(4)) . '.tmp';
+                if (@file_put_contents($tmp, $json) !== false) {
+                    @rename($tmp, $pfad);
+                } else {
+                    @unlink($tmp);
+                }
             }
             flock($fh, LOCK_UN);
         }

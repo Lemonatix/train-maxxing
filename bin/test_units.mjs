@@ -630,6 +630,36 @@ console.log('\nAnschluss im Taktverkehr - die naechste Fahrt derselben Linie');
       .some((e) => e.group), true);
   pruefe('leere Liste bleibt leer',
     rank([], { sort: 'price', mode: 'normal', modelPrefs: {}, routePrefs: {}, speedWeight: 0 }), []);
+
+  // Mindestspanne: sechs Minuten wiegen nicht mehr so schwer wie 30 €.
+  // Ohne sie standen beide Verbindungen exakt gleich (je 0,4 Punkte).
+  const normal = (l) =>
+    rank(l, { sort: 'smart', mode: 'normal', modelPrefs: {}, routePrefs: {}, speedWeight: 0 }).map((e) => e.journey.id);
+  pruefe('6 Minuten schneller schlaegt nicht 30 € billiger',
+    normal([fahrt(1, '08:00', 240, 1, 69), fahrt(2, '08:10', 246, 1, 39)]), [2, 1]);
+  // Ohne Preis zaehlt die Mitte der echten Preise, nicht pauschal 0,5 -
+  // das waere mit Mindestspanne schlechter als beide echten Preise.
+  pruefe('ohne Preis landet zwischen guenstig und teuer',
+    normal([fahrt(1, '08:00', 240, 1, 55), fahrt(2, '08:00', 240, 1, null), fahrt(3, '08:00', 240, 1, 50)]),
+    [3, 2, 1]);
+}
+
+// ---------------------------------------------------------------------
+console.log('\nGeschaetzte Strecken - Tempo aus dem Streckenverlauf');
+{
+  const { autoRoutesOf } = await import('../public/assets/js/data/routes.js');
+  const abschnitt = (geometry) => ({
+    legs: [{
+      mode: 'train', durationMin: 60, geometry,
+      stops: [{ name: 'Nirgendwo Nord', lat: 47, lon: 10 }, { name: 'Nirgendwo Süd', lat: 47, lon: 11 }],
+    }],
+  });
+  const ohne = autoRoutesOf(abschnitt(undefined))[0]?.route;
+  const mit = autoRoutesOf(abschnitt([[47, 10], [47.5, 10.5], [47, 11]]))[0]?.route;
+
+  pruefe('ohne Verlauf: Luftlinie zwischen den Halten', ohne?.note.includes('Luftlinie'), true);
+  pruefe('mit Verlauf: Laenge entlang der Polylinie', mit?.note.includes('Streckenverlauf'), true);
+  pruefe('der Umweg macht den Zug schneller, nicht langsamer', mit?.speed > ohne?.speed, true);
 }
 
 // ---------------------------------------------------------------------

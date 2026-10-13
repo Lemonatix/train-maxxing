@@ -934,6 +934,12 @@ man sich für eine entschieden und schraubt nur an der Reihenfolge drumherum
 Preis, Dauer und Umstiege werden je auf 0–1 normiert und gewichtet
 (40 % / 40 % / 20 %). Kleinste Punktzahl gewinnt.
 
+Die Normierung hat eine **Mindestspanne**: 20 €, 45 Minuten, 2 Umstiege
+(`MIN_SPAN` in `scoring.js`). Liegen alle Treffer zwischen 240 und 246
+Minuten, zählen die sechs Minuten Unterschied nur als 6/45 — ohne die Grenze
+wären sie auf die volle Skala gespreizt worden und hätten so schwer gewogen
+wie 30 € Preisunterschied.
+
 **Nachtzüge** bekommen vorher die gesparte Hotelnacht gutgeschrieben. Unter
 „Nachtzüge" lässt sich einstellen, was sie einem wert ist (0–150 €); der
 Betrag wird vom Preis des Nachtzugs abgezogen, **bevor** normiert wird.
@@ -1032,8 +1038,11 @@ node bin/test_routes.mjs
 Der Knopf **„Schnelle Strecken bevorzugen"** setzt alle Regler auf einmal aus der
 Streckenhöchstgeschwindigkeit — 300 km/h gibt +3, eine Bergstrecke mit 90 km/h −2.
 
-**Was die Liste nicht abdeckt**, wird geschätzt: aus Luftlinie und Fahrzeit
-ergibt sich ein Durchschnittstempo, und der Regler *„Unbenannte Strecken nach
+**Was die Liste nicht abdeckt**, wird geschätzt: aus der Länge des
+Streckenverlaufs (mal 1,025 wie bei den Preisen; ohne Verlauf die Luftlinie
+von Halt zu Halt) und der Fahrzeit ergibt sich ein Durchschnittstempo — in den
+Alpen oder im Rheintal hätte die Luftlinie das Tempo künstlich gedrückt. Der
+Regler *„Unbenannte Strecken nach
 Tempo"* bestimmt, wie stark das zählt. Diese Einträge sind gestrichelt und mit
 `ø` gekennzeichnet, weil die Zahl etwas anderes bedeutet als bei den gepflegten
 Strecken — eine Reisegeschwindigkeit inklusive Halten, keine
@@ -1389,9 +1398,10 @@ ICE 4, ICE 3neo, Giruno, railjet und so weiter, jeweils von −5 (meiden) bis +5
 (bevorzugen). Die Bewertung greift, sobald das Fahrzeug bekannt ist. Dafür gibt
 es vier Wege, in dieser Reihenfolge:
 
-1. **Die Wagenreihung liefert die Baureihe** (BR 412 → ICE 4). Nur deutscher
-   Fernverkehr, nur am Reisetag, und nur wenn in `config.php` aktiviert — und
-   zurzeit gar nicht, siehe unten.
+1. **Die Wagenreihung liefert die Baureihe** (BR 412 → ICE 4) — von bahn.de
+   für deutschen Fernverkehr, mit Formation-Token auch von der SBB (Giruno,
+   FV-Dosto, Astoro …). Nur am Reisetag und nur wenn in `config.php`
+   aktiviert; siehe „Der direkte DB-Weg" und „Wagenreihung".
 2. **Derselbe Zug fuhr zuletzt mit dieser Baureihe.** Was die Wagenreihung je
    geliefert hat, merkt sich `Fleet.php` unter der Zugnummer.
 3. **Auf dieser Strecke verkehrt nur dieses Fahrzeug.** Zürich–München ist ein
@@ -1408,10 +1418,10 @@ nicht stabil genug, um daraus verlässlich auf eine Baureihe zu schließen.
 
 ### Woher das Fahrzeug sonst noch kommt
 
-Die Wagenreihung ist die harte Quelle — und sie fällt oft aus. Sie gilt nur für
-deutschen Fernverkehr, nur am Reisetag, und sie hängt an einem privaten Dienst.
-**Zum Stand 4. September 2026 antwortet dieser Dienst nicht mehr** (siehe unten).
-Ohne ihn blieb es bei der Gattung, obwohl auf manchen Strecken gar nichts
+Die Wagenreihung ist die harte Quelle — aber sie fehlt oft. Es gibt sie nur am
+Reisetag, nur für DB-Fernverkehr und (mit Token) SBB-Züge, und ihre Quelle hat
+schon mehrfach gewechselt (bahn.expert, dann bahn.de direkt — siehe unten). Für
+alles andere blieb es bei der Gattung, obwohl auf manchen Strecken gar nichts
 anderes fahren *kann*. Zwei Ergänzungen schließen die Lücke:
 
 **1. Strecken- und Gattungsregeln (`FLEET_RULES` in `data/trains.js`).** Wo der
@@ -1531,11 +1541,12 @@ Dazu die Reihenfolge: **`Fleet` füllt vor der Wagenreihung**, nicht danach.
 Was schon gelernt und keine zwei Wochen alt ist, wird gar nicht erst
 abgefragt.
 
-Wie die Abfrage selbst funktioniert:
+Wie die Abfrage über bahn.expert funktioniert — heute nur noch als
+Ausweichquelle, wählbar über `wagenreihung.source` (Standard: `bahnde`):
 
-Die Baureihe kommt jetzt aus der Wagenreihung — `ICE 4 (BR412)`, inklusive
-Wagenzahl je Klasse. Bezogen über **bahn.expert**, das dieselben Daten
-(Quelle `DB-risTransports`) über eine erreichbare Schnittstelle anbietet.
+Die Baureihe kommt aus der Wagenreihung — `ICE 4 (BR412)`, inklusive
+Wagenzahl je Klasse. **bahn.expert** bietet dieselben Daten (Quelle
+`DB-risTransports`) über eine eigene Schnittstelle an.
 
 Zwei Fallstricke, falls du daran arbeitest:
 
@@ -2550,7 +2561,7 @@ angewendet:
 | GA Night | CH-Anteil frei | nur 19–5 Uhr, 2. Klasse |
 | BahnCard 25 / 50 / 100 | 25 % / 50 % / ganz auf den DE-Anteil | Echtpreis von der DB |
 | Deutschlandticket | DE-Anteil frei | **nur Nahverkehr**, nicht ICE/IC/EC |
-| VORTEILScard | 45 % auf den AT-Anteil | |
+| VORTEILScard | 50 % auf den AT-Anteil | |
 | KlimaTicket | AT-Anteil frei | |
 
 *seven25* ist kein eigener Eintrag — es ist dasselbe Produkt wie GA Night, nur
@@ -2651,10 +2662,9 @@ Zeitfenster fürs GA Night —, die **Polylinie** die Länge. Also werden die
 Luftlinien zwischen den Halten so skaliert, dass ihre Summe der Polylinie
 entspricht.
 
-Ungenau bleibt es bei Abschnitten, die eine Grenze **ohne Zwischenhalt** queren —
-die werden hälftig geteilt, obwohl die Grenze selten in der Mitte liegt. Bei
-Fahrten aus der Schweiz fällt das kaum ins Gewicht, weil Basel, Buchs SG und
-Chiasso fast immer Halte sind.
+Abschnitte, die eine Grenze **ohne Zwischenhalt** queren, werden am
+tatsächlichen Übergang geteilt — siehe „Grenzquerung ohne Zwischenhalt". Nur
+ohne Polylinie (DB-Fahrpläne) bleibt es bei der Hälfte.
 
 Geschätzte Preise sind **nie verbindlich**. Maßgeblich ist der Ticketshop, und der
 Buchungslink hängt an jeder Verbindung.
@@ -2983,10 +2993,11 @@ Für den privaten Gebrauch ist das üblich und verbreitet — aber:
   SBB- bzw. ÖBB-Shop.
 - **Keine Echtpreise auf reinen CH/AT-Relationen** wie Zürich–Wien, weil die DB
   sie nicht vertreibt.
-- **Baureihen** nur über die Wagenreihung (deutscher Fernverkehr, Reisetag),
-  über gelernte Beobachtungen oder über Strecken- und Gattungsregeln. Für
-  SBB- und ÖBB-Fahrzeuge liefert die Wagenreihung nichts — dort helfen nur
-  die Regeln in `FLEET_RULES`.
+- **Baureihen** nur über die Wagenreihung (DB-Fernverkehr und, mit
+  Formation-Token, SBB — jeweils nur am Reisetag), über gelernte
+  Beobachtungen oder über Strecken- und Gattungsregeln. Für ÖBB-Fahrzeuge
+  liefert die Wagenreihung nichts — dort helfen nur die Regeln in
+  `FLEET_RULES`.
 - **Preise in Österreich sind ungeprüft.** Keine der beiden Quellen liefert dort
   einen Betrag; die Kurve ist von der deutschen abgeleitet.
 - **Nachtzüge:** Die gesparte Hotelnacht lässt sich unter „Nachtzüge"
@@ -2999,8 +3010,10 @@ Für den privaten Gebrauch ist das üblich und verbreitet — aber:
   Ohne Streckenverlauf (DB-Fahrpläne liefern keinen) bleibt es bei der Hälfte.
 - **Reservierungen und Zuschläge** sind in den Schätzungen nicht enthalten.
 - **Der Umstiegsplan zeigt keinen Laufweg.** Er sagt, wo die beiden Bahnsteige
-  liegen — nicht, wie man dazwischen läuft. Der Weg wurde einmal aus OSM
-  gerechnet und war zu oft falsch; siehe oben.
+  liegen, und zeigt Treppen, Rolltreppen und Aufzüge je Ebene — nicht, wie man
+  dazwischen läuft. Der Weg wurde einmal aus OSM gerechnet und war zu oft
+  falsch; siehe oben. Exakte Wege wie in der SBB-App gibt es nur mit
+  freigeschaltetem Zugang zur Journey-Maps-API und nur in der Schweiz.
 - **Der TLS-Trick kann jederzeit brechen.** Ändert Akamai die Erkennung, kommt
   wieder `OPS_BLOCKED` und das Tool fällt auf Schätzpreise zurück.
 - **Benachrichtigungen brauchen einen Cronjob.** Die Verfolgung läuft auf dem
@@ -3011,19 +3024,15 @@ Für den privaten Gebrauch ist das üblich und verbreitet — aber:
   aus der Abfahrtstafel an Ein- und Ausstieg, nicht aus einem Zuglauf — die
   Halte dazwischen sind um die gemeldete Verspätung verschoben, nicht
   einzeln gemessen.
-- **Die Umstiegskarte zeigt keinen Laufweg**, nur Bahnsteige, Treppen,
-  Rolltreppen und Aufzüge je Ebene. Exakte Wege wie in der SBB-App gibt es
-  nur mit freigeschaltetem Zugang zur Journey-Maps-API und nur in der
-  Schweiz.
 - **Schweizer Echtzeit** kommt als Rückfallebene über OJP (mit Schlüssel, über
   die Zugnummer) oder sonst über transport.opendata.ch — der drosselt
   (`HTTP 429`) und kennt nur Gattung, Minute und Richtung. Die Meldungen von
   OJP bleiben weg: sie hängen an jeder Abfahrt eines Bahnhofs, nicht nur an
   den betroffenen Zügen.
-- **SBB-Wagenreihung** gibt es nur für heute (der Formation Service kennt
-  morgen noch nichts) und ohne Lage am Bahnsteig in Metern: die Wagen stehen
-  maßstäblich zueinander, die Sektoren sind aus den Wagen darin abgeleitet.
-- **Wagenreihung** nur für deutschen Fernverkehr am Reisetag.
+- **Wagenreihung** nur am Reisetag und nur für DB-Fernverkehr und SBB-Züge.
+  Die SBB-Reihung (Formation Service, braucht Token) kennt morgen noch nichts
+  und hat keine Lage am Bahnsteig in Metern: die Wagen stehen maßstäblich
+  zueinander, die Sektoren sind aus den Wagen darin abgeleitet.
 - **Die MVG-Abfahrten reichen nur ab jetzt** bis einen Tag voraus; für eine
   Tafel nächste Woche gibt es in München nur HAFAS, also keine U-Bahn.
 - **U-Bahn und Tram in München stehen nach Fahrplan** auf der Karte, ohne

@@ -413,15 +413,32 @@ function km(aLat, aLon, bLat, bLon) {
 }
 
 /**
+ * Korrektur auf die Polylinienlänge, wie POLYLINE_CORRECTION in Fares.php:
+ * die Stützpunkte schneiden jede Kurve minimal ab, im Mittel bleiben 97,5 %
+ * der Tarifentfernung.
+ */
+const POLYLINE_CORRECTION = 1.025;
+
+/** Länge eines Streckenverlaufs [[lat, lon], …] in km, 0 ohne Verlauf. */
+function lineLength(points) {
+  if (!Array.isArray(points) || points.length < 2) return 0;
+  let sum = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    sum += km(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1]);
+  }
+  return sum;
+}
+
+/**
  * Abschnitte, die keine kuratierte Strecke abdeckt.
  *
  * Die Korridorliste kennt CH, DE und AT — und auch dort nicht jede Neben-
  * bahn. Damit die Bewertung nicht einfach aussetzt, sobald man den bekannten
  * Rahmen verlässt, wird für solche Abschnitte das Durchschnittstempo aus
- * Luftlinie und Fahrzeit geschätzt.
+ * Streckenlänge (Polylinie, sonst Luftlinie) und Fahrzeit geschätzt.
  *
  * Das ist bewusst eine Ergänzung, kein Ersatz: die Zahl ist eine
- * Reisegeschwindigkeit (Luftlinie, inklusive Halten), nicht die
+ * Reisegeschwindigkeit (inklusive Halten), nicht die
  * Streckenhöchstgeschwindigkeit der kuratierten Einträge. Deshalb bekommt sie
  * eine eigene Kennzeichnung und einen eigenen Regler, statt mit den
  * gepflegten Werten in einen Topf geworfen zu werden.
@@ -457,14 +474,22 @@ export function autoRoutesOf(journey, covered = []) {
     if (inCorridor >= 2) continue;
 
     const minutes = Math.max(1, leg.durationMin || 0);
+    // Bevorzugt die Länge entlang des Streckenverlaufs: in den Alpen oder im
+    // Rheintal liegt die Luftlinie zwischen den Halten weit unter dem, was
+    // der Zug tatsächlich fährt, und drückt das Tempo künstlich nach unten.
+    // Nur ohne Verlauf (DB-Fahrpläne liefern keinen) bleibt es bei der
     // Luftlinie über alle Halte, damit Bögen nicht als Abkürzung durchgehen.
-    let distance = 0;
-    for (let i = 0; i < stops.length - 1; i++) {
-      distance += km(stops[i].lat, stops[i].lon, stops[i + 1].lat, stops[i + 1].lon);
+    const track = lineLength(leg.geometry);
+    let distance = track * POLYLINE_CORRECTION;
+    if (track <= 0) {
+      for (let i = 0; i < stops.length - 1; i++) {
+        distance += km(stops[i].lat, stops[i].lon, stops[i + 1].lat, stops[i + 1].lon);
+      }
     }
     if (distance < 5) continue;
 
     const speed = Math.round((distance / minutes) * 60);
+    const basis = track > 0 ? 'Streckenverlauf' : 'Luftlinie';
     out.push({
       route: {
         id: 'auto:' + normalize(a.name) + '>' + normalize(b.name),
@@ -472,7 +497,7 @@ export function autoRoutesOf(journey, covered = []) {
         country: (a.country || '').toLowerCase(),
         speed,
         auto: true,
-        note: `Geschätzt aus ${Math.round(distance)} km Luftlinie in ${minutes} min.`,
+        note: `Geschätzt aus ${Math.round(distance)} km ${basis} in ${minutes} min.`,
       },
       share: Math.min(1, minutes / totalMin),
     });

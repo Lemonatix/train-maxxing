@@ -69,6 +69,9 @@ export function priceOf(journey) {
   return p.amount;
 }
 
+/** Kleinste Spanne je Kriterium bei der Normierung: Euro, Minuten, Umstiege. */
+const MIN_SPAN = { price: 20, duration: 45, changes: 2 };
+
 /**
  * Bewertet alle Verbindungen und gibt sie sortiert zurück.
  *
@@ -137,22 +140,29 @@ export function rank(journeys, opts) {
       : Math.max(0, e.price - Math.max(0, nightValue));
   }
 
-  const prices = enriched.map((e) => e.scorePrice).filter((p) => p != null);
-  const range = (vals) => {
-    if (vals.length === 0) return [0, 1];
+  // MINDESTSPANNE: Liegen alle Treffer dicht beieinander - 240 bis 246
+  // Minuten -, spreizte die reine Min-Max-Normierung sechs Minuten auf die
+  // volle Skala, und die wogen dann so schwer wie 30 € Preisunterschied.
+  // Unterhalb der Mindestspanne zählt ein Unterschied nur anteilig.
+  const range = (vals, minSpan) => {
+    if (vals.length === 0) return [0, minSpan];
     const lo = Math.min(...vals);
     const hi = Math.max(...vals);
-    return [lo, hi > lo ? hi : lo + 1];
+    return [lo, Math.max(hi, lo + minSpan)];
   };
 
-  const [pLo, pHi] = range(prices);
-  const [dLo, dHi] = range(enriched.map((e) => e.durationMin));
-  const [cLo, cHi] = range(enriched.map((e) => e.changes));
+  const prices = enriched.map((e) => e.scorePrice).filter((p) => p != null);
+  const [pLo, pHi] = range(prices, MIN_SPAN.price);
+  const [dLo, dHi] = range(enriched.map((e) => e.durationMin), MIN_SPAN.duration);
+  const [cLo, cHi] = range(enriched.map((e) => e.changes), MIN_SPAN.changes);
+
+  // Ohne Preis zählt die Mitte zwischen dem günstigsten und dem teuersten
+  // Treffer, damit die Verbindung weder bevorzugt noch bestraft wird. Wegen
+  // der Mindestspanne ist das nicht mehr automatisch 0,5.
+  const pMid = prices.length > 0 ? (Math.min(...prices) + Math.max(...prices)) / 2 : pLo;
 
   for (const e of enriched) {
-    // Ohne Preis nehmen wir den Mittelwert an, damit die Verbindung weder
-    // bevorzugt noch bestraft wird.
-    const pNorm = e.scorePrice == null ? 0.5 : (e.scorePrice - pLo) / (pHi - pLo);
+    const pNorm = ((e.scorePrice ?? pMid) - pLo) / (pHi - pLo);
     const dNorm = (e.durationMin - dLo) / (dHi - dLo);
     const cNorm = (e.changes - cLo) / (cHi - cLo);
 

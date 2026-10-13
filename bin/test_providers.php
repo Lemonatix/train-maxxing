@@ -720,8 +720,20 @@ $hd = $geoHalt[6];
 pruefe('Heidelberg ist der siebte Halt', $geoFix['stops'][6]['name'], 'Heidelberg Hbf');
 pruefe('Heidelberg liegt auf der Linie', $abstand($mitAnker, [$hd]) < 0.05, true);
 
-// Zum Vergleich die alte Lage - belegt, dass der Test etwas misst.
-pruefe('ohne Stuetzpunkte lag Heidelberg weit daneben', $abstand($ohneAnker, [$hd]) > 1.0, true);
+// Zum Vergleich die alte Lage - belegt, dass der Test etwas misst. Frueher
+// blieb jeder n-te Punkt stehen; das wird hier nachgebaut, denn thin() ohne
+// Anker vereinfacht inzwischen ebenfalls nach Douglas-Peucker und liegt
+// damit schon deutlich naeher (nachgemessen: 2,4 km gegen 0,5 km).
+$schritt = (count($geoPts) - 1) / 59;
+$gleichmaessig = [];
+for ($i = 0; $i < 60; $i++) {
+    $gleichmaessig[] = $geoPts[(int) round($i * $schritt)];
+}
+pruefe('jeder n-te Punkt: Heidelberg lag weit daneben', $abstand($gleichmaessig, [$hd]) > 1.0, true);
+
+// Und ohne Anker reicht auch Douglas-Peucker allein nicht - erst die Halte
+// als Stuetzpunkte legen Heidelberg auf die Linie.
+pruefe('ohne Stuetzpunkte liegt Heidelberg noch daneben', $abstand($ohneAnker, [$hd]) > 0.1, true);
 
 // Kurze Verlaeufe bleiben unangetastet.
 pruefe('weniger Punkte als Budget: unveraendert',

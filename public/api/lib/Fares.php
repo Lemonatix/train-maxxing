@@ -153,8 +153,10 @@ final class Fares
             'note' => 'Gilt nur im Nahverkehr, nicht in ICE, IC und EC.',
         ],
         'vorteilscard' => [
-            'country' => 'at', 'factor' => 0.55, 'label' => 'VORTEILScard',
-            'note' => '45 % auf dem österreichischen Streckenanteil.',
+            // 50 % auf allen Kaufwegen. Die 45 % am Schalter gab es nur bis
+            // zum Fahrplanwechsel im Dezember 2021.
+            'country' => 'at', 'factor' => 0.50, 'label' => 'VORTEILScard',
+            'note' => '50 % auf dem österreichischen Streckenanteil.',
         ],
         'klimaticket' => [
             'country' => 'at', 'factor' => 0.00, 'label' => 'KlimaTicket',
