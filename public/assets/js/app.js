@@ -140,8 +140,9 @@ document.addEventListener('click', (e) => {
   const d = summary?.parentElement;
   if (!(d instanceof HTMLDetailsElement) || d.open || summary !== d.querySelector(':scope > summary')) return;
   d.classList.add('is-opening');
-  // Länger als die Einblendung (420 ms in style.css) - sonst bräche sie ab.
-  setTimeout(() => d.classList.remove('is-opening'), 600);
+  // Länger als die längste Einblendung (600 ms beim Streckenverlauf, siehe
+  // --open-ms in style.css) - sonst bräche sie ab.
+  setTimeout(() => d.classList.remove('is-opening'), 900);
 }, true);
 
 document.addEventListener('DOMContentLoaded', () => {

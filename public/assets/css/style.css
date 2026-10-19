@@ -4897,46 +4897,67 @@ details.live__msg .live__msg-text {
    neu aufblinken. Deshalb hängen die Einblendungen an Klassen, die app.js
    kurz setzt (is-opening, is-entering), nicht an [open] allein.
    "Bewegung reduzieren" schaltet alles ab - siehe prefers-reduced-motion. */
-:root { --ease-out: cubic-bezier(0.22, 1, 0.36, 1); }
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Fürs Aufklappen: sanft anfahren, sanft bremsen. --ease-out legt fast die
+     ganze Höhe in den ersten Millisekunden zurück und kriecht dann aus - bei
+     einem 400 px hohen Streckenverlauf schoss der Bereich auf und hing nach. */
+  --ease-expand: cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* Aufgehen: der Streckenverlauf ist am höchsten und bekommt am meisten
+   Zeit. Zuklappen geht schneller - etwas wegzuräumen soll nicht warten.
+   Je Bereich gesetzt, nicht auf :root: die Werte vererben sich, und die
+   Zwischenhalte IM Streckenverlauf sollen nicht dessen 600 ms bekommen. */
+details { --open-ms: 480ms; --close-ms: 340ms; }
+details.journey__details { --open-ms: 600ms; --close-ms: 400ms; }
 
 /* Aufklappen: die Höhe gleitet, wo der Browser sie animieren kann (Chrome
    ab 131, Safari ab 18.4). Anderswo springt sie wie bisher, der Inhalt
    blendet trotzdem weich ein. Nicht für Aufklapper mit schwebendem Menü
-   (.live-filter) - das würde abgeschnitten. */
+   (.live-filter) - das würde abgeschnitten.
+
+   Die Dauer steht am ZIELZUSTAND: beim Aufgehen gilt die Regel für [open],
+   beim Zuklappen die ohne. */
 @supports (interpolate-size: allow-keywords) {
   :root { interpolate-size: allow-keywords; }
   :is(.journey__details, .fares, .xfer, .leg__stops, details.section, .live__msgs)::details-content {
     block-size: 0;
     overflow-y: clip;
-    transition: block-size 420ms var(--ease-out), content-visibility 420ms allow-discrete;
+    transition: block-size var(--close-ms) var(--ease-expand), content-visibility var(--close-ms) allow-discrete;
   }
   :is(.journey__details, .fares, .xfer, .leg__stops, details.section, .live__msgs)[open]::details-content {
     block-size: auto;
+    transition: block-size var(--open-ms) var(--ease-expand), content-visibility var(--open-ms) allow-discrete;
   }
 }
 
-/* NUR DECKKRAFT, KEIN VERSATZ. Der Inhalt rutschte früher zusätzlich 6 px
-   von oben herein - gleichzeitig mit der aufgehenden Höhe, aber in anderem
-   Tempo. Das sah aus, als wackle der Bereich beim Aufklappen. Die Bewegung
-   macht jetzt allein die Höhe; wo der Browser die nicht animiert, bleibt ein
-   ruhiges Einblenden. */
+/* NUR DECKKRAFT, KEIN VERSATZ - ein zusätzliches Hereinrutschen wirkte wie
+   Wackeln. Und ERST, WENN PLATZ DA IST: die Einblendung beginnt nach einem
+   Viertel der Aufgeh-Zeit und endet mit ihr. Vorher blendete der Inhalt
+   schon ein, solange der Bereich noch fast zu war, und erschien damit
+   gleichsam vor seinem eigenen Platz. Die Klasse setzt app.js beim Klick
+   und lässt sie 900 ms stehen - länger als die längste Folge (600 ms). */
 details.is-opening[open] > :not(summary) {
-  animation: tm-reveal 420ms var(--ease-out) both;
+  animation: tm-reveal calc(var(--open-ms) * 0.75) ease-out calc(var(--open-ms) * 0.25) both;
 }
 @keyframes tm-reveal {
   from { opacity: 0; }
 }
 
-/* Das Dreieck vor den Aufklappern dreht sich, statt umzuspringen. */
+/* Das Dreieck vor den Aufklappern dreht sich, statt umzuspringen - im
+   selben Takt wie die Höhe. */
 :is(.journey__details, details.section) > summary { list-style: none; }
 :is(.journey__details, details.section) > summary::-webkit-details-marker { display: none; }
 :is(.journey__details, details.section) > summary::before {
   content: '▸';
   display: inline-block;
   width: 1.1em;
-  transition: transform 360ms var(--ease-out);
+  transition: transform var(--close-ms) var(--ease-expand);
 }
-:is(.journey__details, details.section)[open] > summary::before { transform: rotate(90deg); }
+:is(.journey__details, details.section)[open] > summary::before {
+  transform: rotate(90deg);
+  transition-duration: var(--open-ms);
+}
 
 /* Tab-Wechsel: die neue Ansicht gleitet ein. */
 [role='tabpanel']:not([hidden]) { animation: tm-view 280ms var(--ease-out) both; }
