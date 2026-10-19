@@ -28,6 +28,7 @@ require $lib . '/Providers/OebbHafas.php';
 require $lib . '/Providers/DbVendo.php';
 require $lib . '/Providers/Mvg.php';
 require $lib . '/CityTrips.php';
+require $lib . '/Inbound.php';
 require $lib . '/Providers/Overpass.php';
 require $lib . '/Cache.php';
 require $lib . '/Providers/CoachSequence.php';
@@ -752,6 +753,50 @@ pruefe('weniger Punkte als Budget: unveraendert',
 $vieleAnker = array_values(array_slice($geoPts, 0, 200));
 pruefe('mehr Stuetzpunkte als Budget sprengt es nicht',
     count(privat($oebbGeo, 'thin', $geoPts, 60, $vieleAnker)) <= 60, true);
+
+// ---------------------------------------------------------------------
+echo "\nZubringer - mit welchem Zug kommt der Zug an, der hier beginnt\n";
+
+// Nach der Tafel von München Hbf am 19.10.2026, gekürzt.
+$e = static fn(string $cat, string $line, string $nr, string $zeit, string $gleis, string $richtung, ?string $ist = null) => [
+    'category' => $cat, 'line' => $line, 'trainNumber' => $nr, 'name' => "$line ($nr)",
+    'planned' => "2026-10-19T$zeit:00+02:00", 'real' => $ist ? "2026-10-19T$ist:00+02:00" : null,
+    'delay' => null, 'platform' => $gleis, 'direction' => $richtung, 'jid' => "j$nr",
+];
+$ab = [
+    $e('ICE', '', '800', '09:12', '16', 'Erfurt Hbf'),
+    $e('RE', 'RE80', '57026', '09:35', '16', 'Würzburg Hbf'),
+    $e('RE', 'RE89', '57126', '09:35', '16', 'Aalen Hbf'),
+    $e('RB', 'RB55', '77311', '09:26', '34', 'Bayrischzell'),
+    $e('RB', 'RB57', '86911', '09:26', '34', 'Tegernsee'),
+    $e('RE', 'RE5', '4711', '09:40', '10', 'Salzburg Hbf'),           // fährt durch
+    $e('U', 'U2', '200', '09:44', '3', 'Feldmoching'),
+];
+$an = [
+    $e('ICE', '', '599', '08:10', '16', 'Nürnberg Hbf'),
+    $e('RE', 'RE9', '57033', '09:23', '16', 'Ulm Hbf', '09:33'),
+    $e('RB', 'RB57', '86912', '08:57', '34', 'Tegernsee'),
+    $e('RB', 'RB55', '77312', '08:57', '34', 'Bayrischzell'),
+    $e('RE', 'RE5', '4711', '09:36', '10', 'München Ost'),            // fährt durch
+    $e('S', 'S2', '6201', '09:20', '3', 'Roth'),
+];
+$m = [];
+foreach (Inbound::match($ab, $an) as $l) {
+    $m[$l['departure']['trainNumber']] = $l;
+}
+pruefe('RE80 kommt als RE9 aus Ulm - andere Linie, gleiches Gleis',
+    [$m['57026']['inbound']['line'] ?? null, $m['57026']['inbound']['from'] ?? null], ['RE9', 'Ulm Hbf']);
+pruefe('der gekoppelte RE89 kommt mit demselben Zug', $m['57126']['inbound']['trainNumber'] ?? null, '57033');
+pruefe('RE9 erst 09:33 da: Abfahrt wohl nicht vor 09:38',
+    substr((string) ($m['57026']['expectedDeparture'] ?? ''), 11, 5), '09:38');
+pruefe('Flügelzug: jeder Teil mit seiner eigenen Linie',
+    [$m['77311']['inbound']['from'] ?? null, $m['86911']['inbound']['from'] ?? null], ['Bayrischzell', 'Tegernsee']);
+pruefe('ICE 800 übernimmt den ICE aus Nürnberg, nicht den späteren RE9',
+    $m['800']['inbound']['trainNumber'] ?? null, '599');
+pruefe('durchfahrender Zug hat keinen Zubringer', isset($m['4711']), false);
+pruefe('U-Bahn wird nicht der S-Bahn am gleichnamigen Gleis zugeordnet', isset($m['200']), false);
+pruefe('pünktlicher Zubringer: keine erwartete Verspätung',
+    array_key_exists('expectedDeparture', $m['800'] ?? []) ? $m['800']['expectedDeparture'] : 'fehlt', null);
 
 // ---------------------------------------------------------------------
 echo "\nText - Fremdtexte als Klartext\n";

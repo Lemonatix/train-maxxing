@@ -2323,6 +2323,96 @@ man in ein leeres Feld, stehen Favoriten und die zuletzt benutzten Orte
 schon in der Vorschlagsliste. Dieselben Favoriten gelten in der
 Abfahrtstafel. Alles liegt im Browser, nichts geht an den Server.
 
+### Zubringer: wann kommt der Zug, der hier erst beginnt?
+
+Ein Zug, der am Einstieg beginnt, hat vor der Abfahrt **keine Echtzeit** —
+nachgeprüft an einem RE1 ab München Hbf, HAFAS meldet bis zur Abfahrt nicht
+eine Ist-Zeit. „Pünktlich" hieße dort nur „keine Information". Die einzige
+frühe Auskunft ist der Zug, der gleich einfährt und als dieser wieder
+abfährt. Deshalb steht in der Live-Verfolgung und bei gemerkten Reisen:
+
+> Kommt vermutlich als RE9 aus Ulm Hbf · an 09:23 (+10) — Abfahrt wohl erst gegen 09:38
+
+**Geschätzt, nicht gemeldet.** Der einfahrende Zug hat eine andere Nummer und
+oft eine andere Linie: der RE80 nach Würzburg um 09:35 ab Gleis 16 kommt als
+RE9 aus Ulm, weil die Fahrzeuge rund um Augsburg zwischen RE9, RE80, RE89 und
+RB86/87 wechseln. Weder HAFAS noch die DB sagen, welches Fahrzeug welche
+Fahrt übernimmt. `lib/Inbound.php` schätzt es aus der **Belegung des Gleises**,
+mit Ab- und Ankunftstafel des Bahnhofs (`?action=inbound`):
+
+- Ankünfte, die hier enden (Nummer fehlt auf der Abfahrtstafel), stellen ein
+  Fahrzeug aufs Gleis; die nächste Abfahrt, die hier beginnt, nimmt es mit
+  und räumt das Gleis.
+- Regional- und Fernverkehr werden nicht gemischt, U-Bahn, Tram und Bus
+  bleiben draußen (in Nürnberg gibt es „Gleis 3" bei S- und U-Bahn).
+- Gekoppelte Züge zählen als Gruppe, und jeder Teil findet seine eigene
+  Linie: RB55 nach Bayrischzell kam als RB55 aus Bayrischzell, nicht als RB57.
+- Höchstens 90 Minuten dazwischen; ohne Gleisangabe nur über die gleiche
+  Linie, nur eindeutig und nur in 40 Minuten.
+- „Abfahrt wohl erst gegen …" mit fünf Minuten Wendezeit nach der Ankunft —
+  nur, wenn das später ist als geplant.
+
+Gefragt wird nur für Züge ohne Ist-Zeit am Einstieg, höchstens einmal je
+Minute; eine Antwort gilt für alle Abfahrten einer Viertelstunde am selben
+Bahnhof. Die Schätzung geht **nicht** in Benachrichtigungen — eine falsche
+Meldung wäre schlimmer als keine.
+
+### Reisen merken
+
+Ein **☆ Merken** an jeder Verbindung legt sie im Reiter **Reisen** ab — mit
+Zügen, Gleisen und Preis, so wie sie gefunden wurde (`trips.js`,
+`tripsView.js`). Die Fahrt für Freitag sucht man am Dienstag aus und muss sie
+am Freitag nicht wieder suchen. Am Reiter steht die Zahl der kommenden Reisen.
+
+- **Nach Tag gruppiert** („Heute", „Morgen", „Fr., 24. Okt."), vergangene
+  zugeklappt darunter. Nach einer Woche räumt die App sie weg.
+- **Echtzeit ohne Tipp** für Reisen der nächsten zwölf Stunden: der erste Zug
+  mit Verspätung oder „pünktlich", über dieselbe Abfrage wie die
+  Live-Verfolgung. Steht dort „Noch keine Echtzeit", hat die Quelle wirklich
+  keine — typisch für Züge, die am eigenen Bahnhof beginnen.
+- **Live verfolgen** direkt aus der Liste, ohne neue Suche.
+- **Neu suchen**: dieselbe Strecke zur selben Zeit, mit aktuellen Preisen und
+  Alternativen; die gemerkte Verbindung ist danach gewählt. Wiedererkannt
+  wird sie an Abfahrt und Zügen (`tripKey`), nicht an der `id` — die
+  bezeichnet bei manchen Quellen eine Antwort, nicht eine Fahrt.
+
+Gespeichert nur in diesem Browser, wie die Favoriten. Ohne Konto gibt es
+keinen Ort, an dem Telefon und Laptop sich treffen; für ein anderes Gerät
+hilft „Teilen" in der Verfolgung.
+
+### Vom eigenen Standort aus
+
+**◎ Standort** am Feld „Von" setzt die eigene Position als Start — ebenso der
+oberste Eintrag „◎ Mein Standort" in der Vorschlagsliste, sobald man ins
+leere Feld tippt. Ist das Ziel schon eingetragen, sucht die App gleich los.
+Hat die Seite die Standort-Erlaubnis bereits, füllt sie ein leeres „Von"
+beim Öffnen von selbst (ohne zu suchen); ohne Erlaubnis fragt sie erst, wenn
+man darauf tippt — eine Standortabfrage beim bloßen Öffnen wäre aufdringlich.
+
+**iPhone vom Home-Bildschirm:** Die Web-App hat keinen eigenen Schalter und
+kein „aA"-Menü. Ist der Standort dort einmal gesperrt, nennt die App die drei
+Stellen in den iOS-Einstellungen (Ortungsdienste an, „Safari-Websites" auf
+„Beim Verwenden der App", Safari → Standort → „Fragen") und dass die App
+danach im App-Umschalter beendet werden muss — ein Neuladen reicht nicht. Dafür braucht es keinen neuen
+Dienst: Adressen sind hier Kennungen mit Koordinaten (`A=2@O=…@X=…@Y=…@`,
+siehe `api/lib/Walks.php`), und beide Fahrpläne nehmen sie als Start. Den
+Fußweg zur Haltestelle — oder zu der, von der es am schnellsten weitergeht —
+rechnet der Fahrplan selbst. Nachgeprüft am Marienplatz (85 m zur S-Bahn) und
+am Zürcher Paradeplatz (Tram 3 oder 1 km zu Fuß zum HB).
+
+Drei Dinge mit Absicht:
+
+- **Der Standort verfällt beim Neuladen.** Der von gestern ist nicht der von
+  heute; statt still von dort zu suchen, bleibt das Feld leer.
+- **In der Adresszeile nur auf gut 100 m** und als „Startpunkt (ungefähr)".
+  Die Adresse wandert in Verlauf, Lesezeichen und geteilte Links; die
+  Haltestelle findet der Fahrplan auch so, die Hausnummer nicht mehr.
+- **Kein Favorit, kein Verlauf.** Wird eine Reise vom Standort aus gemerkt,
+  heißt der Start dort „Standort bei <erste Haltestelle>".
+
+Ist die Ortung ungenauer als ein halber Kilometer — eher Funkzelle als
+GPS —, sagt die App das, statt einen falschen Fußweg zu rechnen.
+
 ### Offline
 
 Die App ist installierbar (`manifest.webmanifest`) und läuft ohne Netz
@@ -2705,6 +2795,8 @@ public/
 │       ├── board.js              Abfahrtstafel
 │       ├── autocomplete.js       Vorschlagsliste mit Favoriten, Adressen
 │       ├── favorites.js          Lieblingsorte und Verlauf
+│       ├── trips.js              Gemerkte Reisen (Speicher)
+│       ├── tripsView.js          Reiter "Reisen"
 │       └── data/trains.js        Gattungen, Fahrzeugmodelle, Komfortwerte
 └── api/
     ├── index.php                 Router, führt Fahrplan und Preise zusammen
@@ -2754,6 +2846,7 @@ Alles per GET auf `api/`:
 | `?action=nextconnection&from=…&to=…&date=…&time=…` | Nächster Anschluss nach einem knappen Umstieg oder Ausfall (mit Echtzeit) |
 | `?action=localroute&fromLat=…&fromLon=…&toLat=…&toLon=…&date=…&time=…` | Ersatzweg im MVV über die MVG |
 | `?action=offers&ctx=…&class=…&discounts=…` | Alle DB-Tarife einer Verbindung (`ctx` = `dbRecon` der Verbindung) |
+| `?action=inbound&station=…&time=…` | Vermutliche Zubringer der Züge, die an diesem Bahnhof beginnen (aus der Gleisbelegung geschätzt) |
 | `?action=departures&station=…&type=dep\|arr&date=…&time=…` | Abfahrts- bzw. Ankunftstafel; `lat`/`lon` helfen, in München die MVG-Halte zu finden |
 | `?action=sequence&eva=…&cat=…&num=…&time=…` | Wagenreihung eines Zuges an einem Bahnhof: Sektoren, Wagen, Klassen |
 | `POST ?action=share` | Verfolgte Fahrt zum Teilen ablegen (JSON `{"journey": …}`), liefert `id` |

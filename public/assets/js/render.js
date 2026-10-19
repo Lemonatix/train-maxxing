@@ -628,6 +628,23 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
     });
     aktionen.append(back);
   }
+  // Merken: die Verbindung unter "Reisen" ablegen - für die Fahrt am
+  // Freitag, die man am Dienstag aussucht. Siehe trips.js.
+  if (liveCtl?.toggleSave) {
+    const gemerkt = liveCtl.isSaved(j);
+    const merk = el('button', 'live-btn save-btn' + (gemerkt ? ' is-on' : ''), gemerkt ? '★ Gemerkt' : '☆ Merken');
+    merk.type = 'button';
+    merk.setAttribute('aria-pressed', String(gemerkt));
+    merk.title = gemerkt ? 'Aus „Reisen" entfernen' : 'Unter „Reisen" merken — mit Zügen und Gleisen, am Reisetag direkt verfolgen.';
+    merk.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const jetzt = liveCtl.toggleSave(j);
+      merk.textContent = jetzt ? '★ Gemerkt' : '☆ Merken';
+      merk.classList.toggle('is-on', jetzt);
+      merk.setAttribute('aria-pressed', String(jetzt));
+    });
+    aktionen.append(merk);
+  }
   if (aktionen.childElementCount > 0) card.append(aktionen);
 
   // --- Detailbereich ---

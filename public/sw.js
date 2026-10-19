@@ -22,7 +22,7 @@
 
 // Bei jeder Änderung an dieser Datei hochzählen - dann räumt activate()
 // die alten Caches weg.
-const VERSION = 'omnirail-v4';
+const VERSION = 'omnirail-v6';
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 
@@ -40,11 +40,15 @@ const SHELL_FILES = [
   'assets/js/autocomplete.js',
   'assets/js/board.js',
   'assets/js/favorites.js',
+  'assets/js/inbound.js',
   'assets/js/live.js',
   'assets/js/map.js',
   'assets/js/mvgTicker.js',
+  'assets/js/prefetch.js',
   'assets/js/render.js',
   'assets/js/scoring.js',
+  'assets/js/trips.js',
+  'assets/js/tripsView.js',
   'assets/js/works.js',
   'assets/js/data/routes.js',
   'assets/js/data/trains.js',

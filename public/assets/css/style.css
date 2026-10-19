@@ -4557,3 +4557,81 @@ details.live__msg .live__msg-text {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* --- Vom eigenen Standort aus ------------------------------------- */
+.here-btn {
+  margin-left: auto;
+  padding: 0 0.3rem;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.here-btn:hover { text-decoration: underline; }
+.here-btn:disabled { color: var(--text-muted); cursor: progress; }
+.ac__item--here .ac__name { color: var(--accent); }
+
+/* --- Reisen merken ------------------------------------------------- */
+.save-btn.is-on { color: var(--amber); border-color: var(--amber); }
+
+.tab:has(.tab__count) { white-space: nowrap; }
+.tab__count {
+  margin-left: 0.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--surface-card, #fff);
+  font-size: 0.68rem;
+  font-weight: 600;
+  vertical-align: 0.1em;
+}
+
+.trips__day {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.trips__day:first-child { margin-top: 0; }
+.trips__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.trip {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.trip.is-past { opacity: 0.7; }
+.trip__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; }
+.trip__time { font-family: var(--font-mono); font-size: 0.95rem; font-weight: 500; }
+.trip__route { color: var(--text-dim); font-size: 0.85rem; }
+.trip__info { margin: 0.2rem 0 0; font-size: 0.78rem; color: var(--text-muted); }
+.trip__live { margin: 0.3rem 0 0; font-family: var(--font-mono); font-size: 0.76rem; }
+.trip__live.is-good { color: var(--green); }
+.trip__live.is-warn { color: var(--amber); }
+.trip__live.is-bad { color: var(--rose); }
+.trip__live.is-unknown { color: var(--text-muted); }
+.trip__actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+/* Entfernen als schmales ✕ rechts außen - drei beschriftete Knöpfe passen
+   in Telefonbreite nicht in eine Zeile, und Entfernen ist der seltenste. */
+.trip__remove { margin-left: auto; min-width: 2rem; padding-inline: 0.5rem; border-color: transparent; color: var(--text-muted); }
+.trip__remove:hover { color: var(--rose); border-color: var(--rose); }
+.trips__past { margin-top: 1rem; }
+.trips__past summary { cursor: pointer; font-size: 0.85rem; color: var(--text-dim); }
+.trips__past .trips__list { margin-top: 0.5rem; }
+.trips__empty, .trips__note { margin: 0.6rem 0 0; font-size: 0.8rem; color: var(--text-muted); }
+
+/* --- Zubringer am Startbahnhof (inbound.js) ------------------------
+   Kursiv und leise: eine Schätzung, keine Meldung der Bahn. Bernstein nur,
+   wenn der Zubringer die Abfahrt verschiebt. */
+.live__inbound, .trip__inbound {
+  margin: 0.3rem 0 0;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: var(--text-dim);
+}
+.live__inbound.is-late, .trip__inbound.is-late { color: var(--amber); }
+

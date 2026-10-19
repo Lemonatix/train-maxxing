@@ -9,7 +9,7 @@
 import { api } from './api.js';
 import { rank, highlights, setFxRates, spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
 import { renderResults, renderNotices, renderTripPair } from './render.js';
-import { RouteMap, setMapTheme, trainLabel, lineKey, nextOnLine } from './map.js';
+import { RouteMap, setMapTheme, trainLabel, lineKey, nextOnLine, geoErrorText } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
 import { pendingLoads } from './prefetch.js';
 import { ROUTES, ratingsBySpeed } from './data/routes.js';
@@ -19,6 +19,8 @@ import { LiveTracker } from './live.js';
 import { setupAutocomplete, renderFavoriteChips, isStation } from './autocomplete.js';
 import { places } from './favorites.js';
 import { initBoard } from './board.js';
+import { trips, arrivalOf, tripKey } from './trips.js';
+import { initTrips } from './tripsView.js';
 
 // v2: Zugnummern-Regeln wurden durch Modellbewertungen ersetzt.
 const STORAGE_KEY = 'train-maxxing:v2';
@@ -104,6 +106,8 @@ const state = {
   // Teilen-URL, damit sich nicht nur eine Suche, sondern auch ein
   // einzelner Zug verschicken lässt.
   trainJid: null,
+  // Kommt die Suche aus "Reisen → Neu suchen": diese Verbindung danach wählen.
+  pendingTrip: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -168,6 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Geteilte Suche direkt ausführen, damit der Empfänger nichts tun muss.
   if (shared) runSearch();
+  else prefillLocation();
 
   // Ein mitgeteilter Zuglauf hängt nicht an der Trefferliste - er braucht
   // nur seine jid und darf deshalb sofort aufgehen, parallel zur Suche.
@@ -212,16 +217,25 @@ function setupOffline() {
 // ======================================================================
 
 let board = null;
+let tripsView = null;
 
 /**
- * Zwei Tabs. Die Tafel wird erst beim ersten Öffnen aufgebaut - wer nur
- * Verbindungen sucht, lädt sie nie. Beim Zurückschalten muss die Karte
- * neu zeichnen: solange ihr Tab verborgen war, war sie null Pixel groß.
+ * Drei Tabs: Verbindungen, Abfahrtstafel, gemerkte Reisen. Tafel und Reisen
+ * werden erst beim ersten Öffnen aufgebaut - wer nur Verbindungen sucht,
+ * lädt sie nie. Beim Zurückschalten muss die Karte neu zeichnen: solange
+ * ihr Tab verborgen war, war sie null Pixel groß.
+ *
+ * Der Tab steht in der Adresse (#abfahrten, #reisen), damit er ein Neuladen
+ * übersteht und sich als Lesezeichen speichern lässt.
  */
+const TAB_HASH = { search: '', board: '#abfahrten', trips: '#reisen' };
+let showTab = () => {};
+
 function setupTabs() {
-  const tabs = { search: $('#tab-search'), board: $('#tab-board') };
-  const views = { search: $('#view-search'), board: $('#view-board') };
-  if (!tabs.search || !tabs.board) return;
+  const namen = Object.keys(TAB_HASH);
+  const tabs = Object.fromEntries(namen.map((n) => [n, $(`#tab-${n}`)]));
+  const views = Object.fromEntries(namen.map((n) => [n, $(`#view-${n}`)]));
+  if (namen.some((n) => !tabs[n] || !views[n])) return;
 
   const show = (name, { focus = false, remember = true } = {}) => {
     for (const [k, tab] of Object.entries(tabs)) {
@@ -236,29 +250,48 @@ function setupTabs() {
       board.activate();
     } else {
       board?.deactivate();
-      requestAnimationFrame(() => map?.render());
     }
+    if (name === 'trips') {
+      tripsView ??= initTrips(views.trips, {
+        track: (journey) => live.start(journey),
+        isTracking: (journey) => live.isTracking(journey),
+        search: searchTrip,
+      });
+      tripsView.activate();
+    } else {
+      tripsView?.deactivate();
+    }
+    if (name === 'search') requestAnimationFrame(() => map?.render());
     if (remember) {
-      const url = location.pathname + location.search + (name === 'board' ? '#abfahrten' : '');
-      history.replaceState(null, '', url);
+      history.replaceState(null, '', location.pathname + location.search + TAB_HASH[name]);
     }
     if (focus) tabs[name].focus();
   };
+  showTab = show;
 
-  tabs.search.addEventListener('click', () => show('search'));
-  tabs.board.addEventListener('click', () => show('board'));
+  for (const n of namen) tabs[n].addEventListener('click', () => show(n));
   // Pfeiltasten wechseln den Tab, wie bei einer Tab-Leiste üblich.
-  for (const tab of Object.values(tabs)) {
-    tab.addEventListener('keydown', (e) => {
+  for (const [i, n] of namen.entries()) {
+    tabs[n].addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       e.preventDefault();
-      show(tab === tabs.search ? 'board' : 'search', { focus: true });
+      const weiter = (i + (e.key === 'ArrowRight' ? 1 : namen.length - 1)) % namen.length;
+      show(namen[weiter], { focus: true });
     });
   }
-  window.addEventListener('hashchange', () => {
-    show(location.hash === '#abfahrten' ? 'board' : 'search', { remember: false });
-  });
-  if (location.hash === '#abfahrten') show('board', { remember: false });
+  const ausAdresse = () => namen.find((n) => TAB_HASH[n] && TAB_HASH[n] === location.hash) || 'search';
+  window.addEventListener('hashchange', () => show(ausAdresse(), { remember: false }));
+  if (ausAdresse() !== 'search') show(ausAdresse(), { remember: false });
+
+  // Zahl der kommenden Reisen am Tab.
+  const zaehler = $('#trips-count');
+  const zaehle = () => {
+    const n = trips.all().filter((t) => arrivalOf(t) >= Date.now()).length;
+    zaehler.textContent = String(n);
+    zaehler.hidden = n === 0;
+  };
+  trips.onChange(zaehle);
+  zaehle();
 }
 
 // ======================================================================
@@ -280,6 +313,10 @@ function loadSettings() {
     ]) {
       if (saved[key] !== undefined) state[key] = saved[key];
     }
+    // Ein Standort von gestern ist nicht der von heute. Statt still von dort
+    // zu suchen, bleibt das Feld leer - ein Tipp auf "◎ Standort" holt ihn neu.
+    if (state.from?.here) state.from = null;
+    if (state.to?.here) state.to = null;
 
     // Früher war die Voreinstellung 5 Minuten bzw. "egal" (null). Beides
     // einmalig auf den kürzestmöglichen Umstieg ziehen - wer bewusst
@@ -691,6 +728,8 @@ function drawTripTabs() {
     loadPlatforms,
     loadOffers,
     loadSequence,
+    isSaved: (journey) => trips.has(journey),
+    toggleSave: saveTrip,
   });
 }
 
@@ -786,7 +825,7 @@ function setupStationInputs() {
     state.from = loc;
     saveSettings();
     renderStars();
-  });
+  }, { here: useMyLocation });
   setupAutocomplete($('#to'), $('#to-list'), (loc) => {
     state.to = loc;
     saveSettings();
@@ -811,6 +850,8 @@ function setupStationInputs() {
       renderStars();
     },
   });
+
+  $('#from-here')?.addEventListener('click', useMyLocation);
 
   // Stern am Feld: den gewählten Bahnhof als Favorit merken.
   for (const field of ['from', 'to']) {
@@ -850,12 +891,154 @@ function setupStationInputs() {
 }
 
 /** Der Stern neben "Von"/"Nach": nur da, wo ein Bahnhof gewählt ist. */
+// ======================================================================
+// Vom eigenen Standort aus
+// ======================================================================
+
+/**
+ * Der eigene Standort als Ort der Suche.
+ *
+ * KEIN EIGENER DIENST NÖTIG: Adressen sind in dieser App Kennungen mit
+ * Koordinaten ("A=2@O=…@X=…@Y=…@", siehe api/lib/Walks.php), und beide
+ * Fahrpläne nehmen sie als Start. Der Fußweg zur nächsten Haltestelle -
+ * oder zu der, von der es am schnellsten weitergeht - rechnet der Fahrplan
+ * selbst. Nachgeprüft: am Marienplatz 85 m zur S-Bahn, am Zürcher
+ * Paradeplatz Tram 3 oder 1 km zu Fuß zum HB.
+ */
+function hereLocation(lat, lon, name = 'Mein Standort') {
+  return {
+    id: `A=2@O=${name}@X=${Math.round(lon * 1e6)}@Y=${Math.round(lat * 1e6)}@`,
+    // here: der Standort von JETZT - verfällt beim Neuladen.
+    // private: Koordinaten einer Person - in der Adresszeile nur gerundet.
+    // Eine gemerkte Reise behält private, verliert aber here: ihr Startpunkt
+    // ist ein fester Ort, kein "wo ich gerade bin".
+    name, kind: 'address', country: '', products: [], lat, lon, here: true, private: true,
+  };
+}
+
+/** Position holen: erst genau, und wenn das dauert, was das Telefon gerade weiß. */
+function currentPosition() {
+  const frage = (genau) => new Promise((ok, fehler) => navigator.geolocation.getCurrentPosition(ok, fehler, {
+    enableHighAccuracy: genau, timeout: genau ? 8000 : 15000, maximumAge: genau ? 30_000 : 300_000,
+  }));
+  return frage(true).catch((err) => (err?.code === 1 ? Promise.reject(err) : frage(false)));
+}
+
+async function useMyLocation({ suchen = true, leise = false } = {}) {
+  const btn = $('#from-here');
+  const status = $('#status');
+  const melde = (text, cls = 'status') => { status.className = cls; status.textContent = text; };
+  if (!('geolocation' in navigator) || !window.isSecureContext) {
+    melde('Der Standort geht nur über HTTPS und in einem Browser mit Standortfreigabe.', 'status status--error');
+    return;
+  }
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '◎ suche …';
+  try {
+    const pos = await currentPosition();
+    const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+    state.from = hereLocation(lat, lon);
+    $('#from').value = state.from.name;
+    saveSettings();
+    renderStars();
+    // Ab gut einem halben Kilometer ist es eher die Funkzelle als der Ort -
+    // der Fußweg zur Haltestelle stimmt dann nicht. Sagen, nicht schweigen.
+    if (accuracy > 500) {
+      melde(`Standort nur ungefähr bekannt (± ${Math.round(accuracy / 100) / 10} km) — `
+        + 'genauer wird es mit eingeschaltetem GPS oder der Haltestelle als Start.');
+    } else {
+      melde('');
+    }
+    // Ziel schon da? Dann gleich suchen - dafür hat man getippt.
+    if (!suchen) return;
+    if (state.to) runSearch();
+    else $('#to').focus();
+  } catch (err) {
+    if (leise) return;
+    melde(geoErrorText(err?.code ? err : { code: 2 }), 'status status--error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+/**
+ * "Von" beim Start mit dem Standort füllen - aber nur, wenn das Feld leer ist
+ * UND die Erlaubnis schon besteht. Dann fragt der Browser nicht, und niemand
+ * bekommt beim Öffnen der Seite ungefragt eine Standortabfrage vorgesetzt.
+ * Gesucht wird nicht: das Ziel von gestern steht womöglich noch im Feld.
+ */
+async function prefillLocation() {
+  if (state.from || $('#from').value.trim()) return;
+  try {
+    const p = await navigator.permissions?.query({ name: 'geolocation' });
+    if (p?.state === 'granted') await useMyLocation({ suchen: false, leise: true });
+  } catch { /* Browser kennt die Abfrage nicht - dann eben per Tipp */ }
+}
+
+// ======================================================================
+// Reisen merken
+// ======================================================================
+
+/** Stern an einer Verbindung - siehe trips.js. Gibt zurück, ob sie jetzt gemerkt ist. */
+function saveTrip(journey) {
+  // "Mein Standort" sagt in einer Woche nichts mehr. Benannt wird er nach der
+  // ersten Haltestelle; die Koordinaten bleiben, damit "Neu suchen" wieder
+  // von dort aus rechnet.
+  const benennen = (loc, leg) => (loc?.here
+    ? { ...loc, here: false, name: `Standort bei ${leg?.from?.name || leg?.to?.name || '?'}` } : loc);
+  const zuege = (journey.legs || []).filter((l) => l.mode !== 'walk');
+  return trips.toggle(journey, {
+    from: benennen(state.from, zuege[0]),
+    to: benennen(state.to, zuege[zuege.length - 1] && { from: zuege[zuege.length - 1].to }),
+    travelClass: state.travelClass,
+    discounts: state.discounts,
+  });
+}
+
+/** Lokales Datum und Uhrzeit eines Zeitpunkts, wie das Formular sie will. */
+function localDateTime(ms) {
+  const d = new Date(ms);
+  const zwei = (n) => String(n).padStart(2, '0');
+  return {
+    date: `${d.getFullYear()}-${zwei(d.getMonth() + 1)}-${zwei(d.getDate())}`,
+    time: `${zwei(d.getHours())}:${zwei(d.getMinutes())}`,
+  };
+}
+
+/**
+ * "Neu suchen" an einer gemerkten Reise: dieselbe Strecke zur selben Zeit,
+ * mit aktuellen Preisen und Alternativen. Die gemerkte Verbindung ist danach
+ * gewählt. Bei einer vergangenen Reise: dieselbe Strecke ab jetzt.
+ */
+function searchTrip(t) {
+  const j = t.journey;
+  const zuege = (j.legs || []).filter((l) => l.mode !== 'walk');
+  state.from = t.from || zuege[0]?.from || null;
+  state.to = t.to || zuege[zuege.length - 1]?.to || null;
+  const ab = Date.parse(j.departure);
+  const zukunft = Number.isFinite(ab) && ab > Date.now();
+  // Zwei Minuten früher, damit die gemerkte Verbindung sicher mit in der
+  // ersten Seite steht.
+  const wann = localDateTime(zukunft ? ab - 2 * 60_000 : Date.now());
+  state.date = wann.date;
+  state.time = wann.time;
+  state.arrival = false;
+  state.travelClass = t.travelClass || state.travelClass;
+  state.pendingTrip = zukunft ? t.key : null;
+  applyStateToForm();
+  saveSettings();
+  showTab('search');
+  runSearch();
+}
+
 function renderStars() {
   for (const field of ['from', 'to']) {
     const btn = $(`#${field}-star`);
     if (!btn) continue;
     const loc = state[field];
-    const passt = loc && $(`#${field}`).value.trim() === loc.name;
+    const passt = loc && !loc.here && $(`#${field}`).value.trim() === loc.name;
     btn.hidden = !passt;
     if (!passt) continue;
     const fav = places.isFavorite(loc);
@@ -1132,8 +1315,9 @@ async function runSearch() {
   }
   // Für die Vorschlagsliste: was gesucht wurde, steht beim nächsten Mal
   // unter "Zuletzt".
-  places.remember(state.from);
-  places.remember(state.to);
+  // Der eigene Standort gehört nicht in den Verlauf - morgen ist er woanders.
+  if (!state.from?.here) places.remember(state.from);
+  if (!state.to?.here) places.remember(state.to);
 
   if (!state.from || !state.to) {
     status.className = 'status status--error';
@@ -1252,7 +1436,13 @@ function rerank(opts) {
   });
 
   state.ranked = ranked;
-  const again = selected ? ranked.findIndex((e) => e.journey === selected) : -1;
+  let again = selected ? ranked.findIndex((e) => e.journey === selected) : -1;
+  // Kommt die Suche aus "Reisen → Neu suchen", die gemerkte Verbindung wählen.
+  if (state.pendingTrip) {
+    const i = ranked.findIndex((e) => tripKey(e.journey) === state.pendingTrip);
+    if (i >= 0) again = i;
+    state.pendingTrip = null;
+  }
   state.selectedIndex = again >= 0 ? again : 0;
   state.visible = Math.min(Math.max(state.visible, PAGE_SIZE), ranked.length);
   // Ist die Auswahl durch die Neusortierung nach hinten gerutscht, muss sie
@@ -1285,6 +1475,8 @@ function draw() {
     loadOffers,
     loadSequence,
     returnTrip,
+    isSaved: (journey) => trips.has(journey),
+    toggleSave: saveTrip,
   }, showEarlier);
   // Die Karte zeigt genau die Routen, die auch in der Liste stehen. Die
   // Indizes bleiben dabei gültig, weil von vorne geschnitten wird.
@@ -2555,11 +2747,20 @@ function todayISO() {
 function updateShareUrl() {
   if (!state.from || !state.to) return;
 
+  // DER EIGENE STANDORT NUR GROB: die Adresse wandert in Verlauf, Lesezeichen
+  // und geteilte Links. Auf drei Nachkommastellen (gut 100 m) findet der
+  // Fahrplan dieselbe Haltestelle, die Hausnummer verrät es nicht mehr.
+  // Und unter anderem Namen: wer den Link öffnet, steht nicht am selben Ort.
+  const fuerAdresse = (l) => (l.private
+    ? { ...hereLocation(+l.lat.toFixed(3), +l.lon.toFixed(3), 'Startpunkt (ungefähr)'), here: false } : l);
+  const von = fuerAdresse(state.from);
+  const nach = fuerAdresse(state.to);
+
   const p = new URLSearchParams();
-  p.set('von', state.from.id);
-  p.set('vonName', state.from.name);
-  p.set('nach', state.to.id);
-  p.set('nachName', state.to.name);
+  p.set('von', von.id);
+  p.set('vonName', von.name);
+  p.set('nach', nach.id);
+  p.set('nachName', nach.name);
   p.set('datum', state.date);
   p.set('zeit', state.time);
   if (state.arrival) p.set('an', '1');
@@ -2575,8 +2776,8 @@ function updateShareUrl() {
   // Koordinaten, damit auch eine geteilte Stadtfahrt als solche erkannt wird.
   const koord = (l) => (Number.isFinite(l?.lat) && Number.isFinite(l?.lon)
     ? `${l.lat.toFixed(5)},${l.lon.toFixed(5)}` : null);
-  if (koord(state.from)) p.set('vonKoord', koord(state.from));
-  if (koord(state.to)) p.set('nachKoord', koord(state.to));
+  if (koord(von)) p.set('vonKoord', koord(von));
+  if (koord(nach)) p.set('nachKoord', koord(nach));
 
   history.replaceState(null, '', '?' + p.toString() + location.hash);
 }

@@ -315,6 +315,10 @@ const IOS = typeof navigator !== 'undefined'
   && (/iPhone|iPad|iPod/.test(navigator.userAgent)
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 
+/** Vom Home-Bildschirm gestartet, nicht im Browser. */
+const STANDALONE = typeof window !== 'undefined'
+  && (navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)')?.matches === true);
+
 /**
  * Warum der Standort nicht kommt - mit dem Weg, es zu ändern.
  *
@@ -332,11 +336,22 @@ export function geoErrorText(err) {
       + (IOS ? ' und die App auf dem Home-Bildschirm neu anlegen.' : '.');
   }
   if (err.code === 1) {
-    return IOS
-      ? 'Standortzugriff ist blockiert. iPhone: Einstellungen → Datenschutz & Sicherheit → Ortungsdienste '
+    if (!IOS) {
+      return 'Standortzugriff wurde abgelehnt. Über das Schloss-Symbol in der Adresszeile lässt er sich wieder erlauben.';
+    }
+    // VOM HOME-BILDSCHIRM fehlt das "aA"-Menü, auf das der Safari-Weg
+    // verweist - die frühere Anleitung lief dort ins Leere. Die Web-App fragt
+    // erst wieder, wenn die systemweite Einstellung es zulässt UND sie neu
+    // gestartet wurde; ein bloßes Neuladen reicht nicht.
+    return STANDALONE
+      ? 'Standort ist für die App gesperrt. 1. Einstellungen → Datenschutz & Sicherheit → Ortungsdienste: an, '
+        + 'darin „Safari-Websites“ → „Beim Verwenden der App“ oder „Nächstes Mal fragen“. '
+        + '2. Einstellungen → Apps → Safari → Standort → „Fragen“. '
+        + '3. OmniRail im App-Umschalter wegwischen, neu öffnen und noch einmal tippen. '
+        + 'Fragt sie dann immer noch nicht: die Seite einmal in Safari öffnen und dort erlauben.'
+      : 'Standortzugriff ist blockiert. Einstellungen → Datenschutz & Sicherheit → Ortungsdienste '
         + '→ Safari-Websites → „Beim Verwenden der App“. In Safari zusätzlich „aA“ → Website-Einstellungen '
-        + '→ Standort → Erlauben. Danach neu laden.'
-      : 'Standortzugriff wurde abgelehnt. Über das Schloss-Symbol in der Adresszeile lässt er sich wieder erlauben.';
+        + '→ Standort → Erlauben. Danach neu laden.';
   }
   if (err.code === 2) {
     return IOS

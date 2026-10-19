@@ -112,6 +112,9 @@ export const api = {
 
   trainDetails: (jid, opts) => call('traindetails', { jid }, opts),
 
+  /** Vermutliche Zubringer der Züge, die an diesem Bahnhof beginnen - siehe inbound.js. */
+  inbound: (station, time, opts) => call('inbound', { station, time }, opts),
+
   /**
    * Zuglauf aus einer anderen Quelle als HAFAS: `{ db: journeyId }` für
    * Abschnitte mit DB-Kennung, oder `{ mvgFrom, mvgTo, line, dep, arr }`

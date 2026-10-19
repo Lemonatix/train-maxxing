@@ -59,6 +59,13 @@ export function setupAutocomplete(input, list, onPick, opts = {}) {
   };
 
   const pick = (loc) => {
+    // Kein Ort, sondern eine Handlung ("◎ Mein Standort"): die erledigt das
+    // Ausfüllen selbst, sobald die Position da ist.
+    if (loc._action) {
+      close();
+      loc._action();
+      return;
+    }
     input.value = loc.name;
     places.remember(loc);
     onPick(loc);
@@ -81,7 +88,13 @@ export function setupAutocomplete(input, list, onPick, opts = {}) {
       li.setAttribute('role', 'option');
       li.setAttribute('aria-selected', String(i === active));
 
-      li.append(node('span', 'ac__name', loc.name));
+      li.append(node('span', 'ac__name', loc._action ? `◎ ${loc.name}` : loc.name));
+      if (loc._action) {
+        li.classList.add('ac__item--here');
+        li.addEventListener('mousedown', (e) => { e.preventDefault(); pick(loc); });
+        list.append(li);
+        return;
+      }
 
       if (KIND_LABEL[loc.kind]) {
         li.classList.add('ac__item--place');
@@ -121,7 +134,9 @@ export function setupAutocomplete(input, list, onPick, opts = {}) {
   const showSaved = () => {
     const fav = places.favorites().filter(usable).map((loc) => ({ loc, group: 'Favoriten' }));
     const rec = places.recent().filter(usable).map((loc) => ({ loc, group: 'Zuletzt' }));
-    items = [...fav, ...rec];
+    // Der eigene Standort ganz oben, wo das Feld ihn anbietet (nur "Von").
+    const hier = opts.here ? [{ loc: { name: 'Mein Standort', _action: opts.here }, group: null }] : [];
+    items = [...hier, ...fav, ...rec];
     active = -1;
     draw();
   };

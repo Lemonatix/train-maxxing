@@ -90,6 +90,8 @@
             aria-controls="view-search" aria-selected="true">Verbindungen</button>
     <button type="button" role="tab" id="tab-board" class="tab"
             aria-controls="view-board" aria-selected="false" tabindex="-1">Abfahrten</button>
+    <button type="button" role="tab" id="tab-trips" class="tab"
+            aria-controls="view-trips" aria-selected="false" tabindex="-1">Reisen <span id="trips-count" class="tab__count" hidden></span></button>
   </nav>
 
   <div id="view-search" role="tabpanel" aria-labelledby="tab-search">
@@ -100,6 +102,10 @@
       <div class="field field--grow">
         <div class="field__head">
           <label for="from">Von</label>
+          <!-- Vom eigenen Standort los: der Fahrplan rechnet den Fußweg zur
+               nächsten Haltestelle selbst. Siehe useMyLocation() in app.js. -->
+          <button type="button" id="from-here" class="here-btn" title="Vom aktuellen Standort aus suchen"
+                  aria-label="Vom aktuellen Standort aus suchen">◎ Standort</button>
           <button type="button" id="from-star" class="fav-star" hidden>☆</button>
         </div>
         <input type="text" id="from" autocomplete="off" placeholder="z.B. Zürich HB"
@@ -370,6 +376,9 @@
 
   <!-- Abfahrtstafel. HAFAS für jeden Bahnhof in CH/DE/AT, in München dazu
        die MVG (U-Bahn, Tram, Bus). Siehe board.js. -->
+  <!-- Gemerkte Reisen - siehe trips.js und tripsView.js. -->
+  <section id="view-trips" class="trips panel" role="tabpanel" aria-labelledby="tab-trips" hidden></section>
+
   <section id="view-board" class="board" role="tabpanel" aria-labelledby="tab-board" hidden>
     <form id="board-form" class="panel board__form" autocomplete="off">
       <div class="field">

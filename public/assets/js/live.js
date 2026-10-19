@@ -26,6 +26,7 @@
  */
 
 import { api } from './api.js';
+import { wantsInbound, inboundFor, inboundText } from './inbound.js';
 // sameTrain war benutzt, aber nie importiert — siehe trainPosition().
 import { geometryOf, trainLabel, sameTrain, snapToLine, geoErrorText } from './map.js';
 import { spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
@@ -172,6 +173,8 @@ export class LiveTracker {
     this.messages = [];      // MVG-Meldungen zu den benutzten Linien
     this.updatedAt = null;
     this.error = null;
+    /** Zubringer je Abschnitt: Schlüssel -> {at, link} - siehe inboundLine(). */
+    this.inbound = new Map();
     this.loading = false;
     this.gps = false;
     this.position = null;    // {lat, lon, acc}
@@ -1768,6 +1771,33 @@ ${url.href}`);
     return box;
   }
 
+  /**
+   * Die Zeile "Kommt vermutlich als RE 9 aus Ulm …" - nur für Züge, die am
+   * Einstieg beginnen und dort noch keine Echtzeit haben (inbound.js).
+   *
+   * Geholt wird im Hintergrund, höchstens einmal je Minute; ist die Antwort
+   * da, zeichnet das Panel neu.
+   */
+  inboundLine(entry) {
+    const { leg, data } = entry;
+    if (!wantsInbound(leg, data)) return null;
+    const key = `${leg.from.id}|${leg.trainNumber || leg.line}|${leg.departure}`;
+    const e = this.inbound.get(key);
+    if (!e || (Date.now() - e.at > 60_000 && !e.loading)) {
+      this.inbound.set(key, { at: Date.now(), link: e?.link ?? null, loading: true });
+      inboundFor(leg).then((link) => {
+        this.inbound.set(key, { at: Date.now(), link, loading: false });
+        if (this.journey) this.render();
+      });
+    }
+    const link = e?.link;
+    if (!link) return null;
+    const t = inboundText(link);
+    const p = el('p', 'live__inbound' + (t.late ? ' is-late' : ''), t.text);
+    p.title = t.title;
+    return p;
+  }
+
   renderLeg(entry) {
     const { leg, data, jid } = entry;
     const box = el('section', 'live__leg');
@@ -1806,6 +1836,9 @@ ${url.href}`);
     }
     head.append(badge);
     box.append(head);
+
+    const zubringer = this.inboundLine(entry);
+    if (zubringer) box.append(zubringer);
 
     // Ohne nachgeladenen Zuglauf die Halte aus der Suche - die tragen zwar
     // seltener Ist-Zeiten, sagen aber immerhin, wo es langgeht.

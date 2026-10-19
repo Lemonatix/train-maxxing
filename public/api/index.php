@@ -142,6 +142,7 @@ require __DIR__ . '/lib/Providers/SwissFormation.php';
 require __DIR__ . '/lib/Providers/DbApi.php';
 require __DIR__ . '/lib/RailGeometry.php';
 require __DIR__ . '/lib/CityTrips.php';
+require __DIR__ . '/lib/Inbound.php';
 
 $config = require __DIR__ . '/config.php';
 
@@ -209,6 +210,9 @@ const RATE_COST = [
     'nextconnection' => 4,
     'offers'         => 4,
     'departures'     => 2,
+    // Zwei Tafeln (Ab- und Ankunft), aber kurz gecacht und je Bahnhof und
+    // Viertelstunde geteilt - die Live-Verfolgung fragt jede Minute.
+    'inbound'        => 2,
     'sequence'       => 2,
     // Teuer mit Absicht: jeder Aufruf legt eine Datei an.
     'share'          => 10,
@@ -287,6 +291,9 @@ try {
         case 'departures':
             handleDepartures($http, $config, $cache);
             break;
+        case 'inbound':
+            handleInbound($http, $config, $cache);
+            break;
         case 'sequence':
             handleSequence($http, $config, $cache);
             break;
@@ -324,7 +331,7 @@ try {
             handlePushTick($http, $config, $cache);
             break;
         default:
-            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, localroute, offers, departures, sequence, share, shared, fxrate, platforms, works, disruptions, walkroute, pushkey, pushsubscribe, pushunsubscribe, pushtick', 400);
+            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, localroute, offers, departures, sequence, share, shared, fxrate, platforms, works, disruptions, walkroute, pushkey, pushsubscribe, pushunsubscribe, pushtick, inbound', 400);
     }
 } catch (Throwable $e) {
     // Details bleiben im Log, der Client bekommt nur eine generische Meldung.
@@ -1010,6 +1017,63 @@ function handleOffers(Http $http, array $config, Cache $cache): void
 
     $cache->set($key, $res['data']);
     ok($res['data'] + ['cached' => false]);
+}
+
+/**
+ * Mit welchem Zug kommen die Züge an, die an diesem Bahnhof beginnen?
+ *
+ *   ?action=inbound&station=8000261&time=2026-10-19T09:35:00+02:00
+ *
+ * Liefert für alle Abfahrten rund um `time`, die hier beginnen, den
+ * vermutlichen Zubringer - geschätzt aus Ab- und Ankunftstafel, siehe
+ * lib/Inbound.php. Eine Antwort für alle Abfahrten der Stunde: die
+ * Live-Verfolgung, die gemerkten Reisen und mehrere Züge am selben Bahnhof
+ * teilen sich so dieselbe Abfrage.
+ */
+function handleInbound(Http $http, array $config, Cache $cache): void
+{
+    $station = trim((string) ($_GET['station'] ?? ''));
+    $t = strtotime((string) ($_GET['time'] ?? ''));
+    if (!preg_match('/^\d{7}$/', $station) || $t === false) {
+        fail('Parameter "station" (7 Ziffern) und "time" sind erforderlich.', 400);
+    }
+    // Auf die Viertelstunde, damit benachbarte Abfragen denselben Eintrag treffen.
+    $t = intdiv($t, 900) * 900;
+    $key = "inbound:$station:$t";
+    $cached = $cache->get($key, 60);
+    if ($cached !== null) {
+        ok(['links' => $cached, 'cached' => true]);
+    }
+
+    $zone = new DateTimeZone('Europe/Berlin');
+    $at = static fn(int $ts): array => [
+        (new DateTimeImmutable('@' . $ts))->setTimezone($zone)->format('Y-m-d'),
+        (new DateTimeImmutable('@' . $ts))->setTimezone($zone)->format('H:i'),
+    ];
+    $oebb = new OebbHafas($http, $config['providers']['oebb']);
+    // Beide Tafeln weit genug: eine Ankunft gilt nur dann als "endet hier",
+    // wenn ihre Nummer auf der Abfahrtstafel fehlt - die muss deshalb auch
+    // die Zeit kurz nach jeder Ankunft abdecken, und umgekehrt.
+    [$dDat, $dZeit] = $at($t - 7200);
+    [$aDat, $aZeit] = $at($t - 7200);
+    $ab = $oebb->stationBoard($station, $dDat, $dZeit, false, 210, 200);
+    $an = $oebb->stationBoard($station, $aDat, $aZeit, true, 210, 200);
+    if (!$ab['ok'] || !$an['ok']) {
+        // Beiwerk: ohne Tafel eben keine Angabe, kein Fehler im Panel.
+        ok(['links' => [], 'error' => $ab['error'] ?? $an['error']]);
+    }
+
+    // Nur die Abfahrten um die gefragte Zeit zurückgeben - die übrigen
+    // dienten nur dem Abgleich.
+    $links = array_values(array_filter(
+        Inbound::match($ab['data'], $an['data']),
+        static function (array $l) use ($t): bool {
+            $d = strtotime((string) $l['departure']['planned']);
+            return $d !== false && $d >= $t - 1800 && $d <= $t + 5400;
+        }
+    ));
+    $cache->set($key, $links);
+    ok(['links' => $links, 'cached' => false]);
 }
 
 /**

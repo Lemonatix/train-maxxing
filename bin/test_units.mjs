@@ -723,5 +723,53 @@ console.log('\nNachladen - jede Abfrage genau einmal');
 }
 
 // ---------------------------------------------------------------------
+console.log('\nReisen merken - dieselbe Fahrt wiedererkennen');
+{
+  const { tripKey } = await import('../public/assets/js/trips.js');
+  const fahrt = (abfahrt, zuege, fuss = false) => ({
+    departure: abfahrt,
+    legs: [
+      ...(fuss ? [{ mode: 'walk' }] : []),
+      ...zuege.map(([category, trainNumber]) => ({ mode: 'train', category, trainNumber })),
+    ],
+  });
+  const a = fahrt('2026-10-24T09:05:00+02:00', [['ICE', '724'], ['RE', '4057']]);
+  pruefe('gleiche Abfahrt und Züge: dieselbe Reise, auch aus einer neuen Suche',
+    tripKey(a) === tripKey(structuredClone(a)), true);
+  pruefe('Fußweg am Anfang ändert nichts - er kommt je nach Quelle mal mit, mal nicht',
+    tripKey(a) === tripKey(fahrt('2026-10-24T09:05:00+02:00', [['ICE', '724'], ['RE', '4057']], true)), true);
+  pruefe('anderer Anschluss: andere Reise',
+    tripKey(a) === tripKey(fahrt('2026-10-24T09:05:00+02:00', [['ICE', '724'], ['RE', '4059']])), false);
+  pruefe('gleiche Züge an einem anderen Tag: andere Reise',
+    tripKey(a) === tripKey(fahrt('2026-10-25T09:05:00+02:00', [['ICE', '724'], ['RE', '4057']])), false);
+}
+
+// ---------------------------------------------------------------------
+console.log('\nZubringer - der Satz zum einfahrenden Zug');
+{
+  const { inboundText, wantsInbound } = await import('../public/assets/js/inbound.js');
+  const iso = (minuten) => new Date(Date.now() + minuten * 60_000).toISOString();
+  const link = (an, ist, erwartet, delay) => ({
+    inbound: { category: 'RE', line: 'RE9', trainNumber: '57033', from: 'Ulm Hbf', planned: iso(an), real: ist == null ? null : iso(ist), delay },
+    expectedDeparture: erwartet == null ? null : iso(erwartet), confidence: 'platform',
+  });
+  pruefe('kommt noch, ohne Echtzeit: Fahrplanzeit, so gekennzeichnet',
+    /Kommt vermutlich als RE9 aus Ulm Hbf · an \d\d:\d\d nach Fahrplan$/.test(inboundText(link(10)).text), true);
+  const spaet = inboundText(link(10, 20, 25, 10));
+  pruefe('verspätet: Verspätung und spätere Abfahrt, als Warnung',
+    [/\(\+10\)/.test(spaet.text), /Abfahrt wohl erst gegen/.test(spaet.text), spaet.late], [true, true, true]);
+  pruefe('schon eingefahren: steht vermutlich schon da',
+    /^Steht vermutlich schon da/.test(inboundText(link(-8, -6)).text), true);
+  const leg = { mode: 'train', from: { id: '8000261', name: 'München Hbf' }, departure: iso(30) };
+  pruefe('gefragt wird nur ohne Ist-Zeit am Einstieg', [
+    wantsInbound(leg),
+    wantsInbound({ ...leg, departureReal: iso(32) }),
+    wantsInbound(leg, { stops: [{ id: '8000261', departureReal: iso(31) }] }),
+    wantsInbound({ ...leg, departure: iso(-10) }),
+    wantsInbound({ ...leg, from: { id: 'mvg:de:09162:6', name: 'Hbf' } }),
+  ], [true, false, false, false, false]);
+}
+
+// ---------------------------------------------------------------------
 console.log(`\n${gesamt - fehlgeschlagen} von ${gesamt} bestanden.`);
 process.exit(fehlgeschlagen === 0 ? 0 : 1);
