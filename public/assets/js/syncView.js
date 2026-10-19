@@ -52,7 +52,7 @@ export function createSyncPanel() {
       await sync.connect(code);
       angebot = null;
       eingabe = '';
-      if (sync.status().state === 'ok') melde('Verbunden — die Reisen beider Geräte sind zusammengeführt.');
+      if (sync.status().state === 'ok') melde('Verbunden — Reisen und Lieblingsorte beider Geräte sind zusammengeführt, Abos und Lieblingszüge übernommen.');
       else render();
     } catch (err) {
       melde(err.message, true);
@@ -71,8 +71,8 @@ export function createSyncPanel() {
   function renderAus() {
     box.append(el('h3', 'sync__title', 'Auf mehreren Geräten'));
     box.append(el('p', 'sync__text',
-      'Gemerkte Reisen liegen bisher nur in diesem Browser. Mit einem Sync-Code gleichen Handy und Laptop '
-      + 'sie ab — ohne Konto. Verschlüsselt: der Server kann sie nicht lesen.'));
+      'Gemerkte Reisen, Lieblingsorte, Abos und Lieblingszüge liegen bisher nur in diesem Browser. Mit einem '
+      + 'Sync-Code gleichen Handy und Laptop sie ab — ohne Konto. Verschlüsselt: der Server kann sie nicht lesen.'));
 
     const reihe = el('div', 'sync__row');
     reihe.append(button('Sync-Code erstellen', async () => {
@@ -112,8 +112,9 @@ export function createSyncPanel() {
     box.append(el('h3', 'sync__title', 'Mit diesem Sync-Code verbinden?'));
     box.append(el('code', 'sync__code-text', formatCode(angebot)));
     box.append(el('p', 'sync__text',
-      'Deine gemerkten Reisen werden mit allen Geräten zusammengeführt, die diesen Code nutzen — und sind dort '
-      + 'sichtbar. Verbinde nur Codes, die von dir selbst stammen.'));
+      'Deine gemerkten Reisen und Lieblingsorte werden mit allen Geräten zusammengeführt, die diesen Code '
+      + 'nutzen, und sind dort sichtbar. Bei Abos und Lieblingszügen gilt die zuletzt geänderte Fassung. '
+      + 'Verbinde nur Codes, die von dir selbst stammen.'));
     const reihe = el('div', 'sync__row');
     reihe.append(button('Verbinden', () => verbinden(angebot), 'is-on'));
     reihe.append(button('Abbrechen', () => { angebot = null; render(); }));
@@ -167,7 +168,7 @@ export function createSyncPanel() {
       'Auf dem anderen Gerät unter „Reisen" eingeben. In der App vom iPhone-Home-Bildschirm bitte '
       + 'eintippen: ein Link öffnet Safari, und Safari hat einen eigenen Speicher.'));
     det.append(el('p', 'sync__hint',
-      'Wer den Code hat, sieht deine gemerkten Reisen. Nicht öffentlich teilen.'));
+      'Wer den Code hat, sieht deine gemerkten Reisen, Lieblingsorte und Abos. Nicht öffentlich teilen.'));
     box.append(det);
 
     const knoepfe = el('div', 'sync__row');
@@ -181,7 +182,7 @@ export function createSyncPanel() {
       trennenFragen = false;
       codeOffen = false;
       sync.disconnect();
-      melde('Getrennt. Die Reisen bleiben hier und auf den anderen Geräten.');
+      melde('Getrennt. Reisen, Lieblingsorte und Einstellungen bleiben hier und auf den anderen Geräten.');
     }, trennenFragen ? 'sync__danger' : ''));
     box.append(knoepfe);
   }

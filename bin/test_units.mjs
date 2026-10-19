@@ -886,6 +886,47 @@ console.log('\nReisen abgleichen - zusammenführen und verschlüsseln');
   let fremd = 'gelesen';
   try { await decryptState(k2.key, block); } catch { fremd = 'abgelehnt'; }
   pruefe('mit einem anderen Code nicht zu öffnen', fremd, 'abgelehnt');
+
+  // ---- Lieblingsorte, Abos und Lieblingszüge im selben Block --------
+  const { mergeFavorites, favoritesSignature } = await import('../public/assets/js/favorites.js');
+  const { mergePrefs, mergeAll, signatureAll } = await import('../public/assets/js/sync.js');
+  const ort = (id, gemerkt) => ({ id, name: id, savedAt: tag(gemerkt) });
+  const ids = (st) => st.items.map((f) => f.id).sort();
+
+  pruefe('Favoriten: beide Seiten zusammen',
+    ids(mergeFavorites({ items: [ort('A', -2)], removed: {} }, { items: [ort('B', -1)], removed: {} })), ['A', 'B']);
+  pruefe('Favorit auf dem anderen Gerät abgewählt: auch hier weg',
+    ids(mergeFavorites({ items: [ort('A', -2), ort('B', -2)], removed: {} }, { items: [ort('B', -2)], removed: { A: tag(-1) } })), ['B']);
+  pruefe('abgewählt und danach wieder gewählt: bleibt',
+    ids(mergeFavorites({ items: [ort('A', 0)], removed: {} }, { items: [], removed: { A: tag(-1) } })), ['A']);
+  pruefe('Favorit von vor dem Abgleich (ohne Zeitstempel) zählt mit',
+    ids(mergeFavorites({ items: [{ id: 'alt', name: 'alt' }], removed: {} }, { items: [], removed: {} })), ['alt']);
+  const fa = { items: [ort('A', -2)], removed: { C: tag(-1) } };
+  const fb = { items: [ort('B', -1)], removed: {} };
+  pruefe('Favoriten: beide Richtungen, dasselbe Ergebnis',
+    favoritesSignature(mergeFavorites(fa, fb)) === favoritesSignature(mergeFavorites(fb, fa)), true);
+
+  const abo = (discounts, modelPrefs, at) => ({ discounts, modelPrefs, at: at == null ? null : tag(at) });
+  pruefe('Einstellungen: die zuletzt geänderte gewinnt, als Ganzes',
+    mergePrefs(abo(['bc50', 'halbtax'], {}, -2), abo(['bc25'], { ice4: 3 }, -1)).discounts, ['bc25']);
+  pruefe('frisches Gerät (leer, nie geändert) überschreibt die Abos des anderen nicht',
+    mergePrefs(abo([], {}, null), abo(['bc50'], {}, null)).discounts, ['bc50']);
+  const pa = abo(['ga'], {}, null);
+  const pb = abo(['bc50'], { ice4: 2 }, null);
+  pruefe('Einstellungen: beide Richtungen, dieselbe Fassung (kein Hin und Her)',
+    JSON.stringify(mergePrefs(pa, pb)) === JSON.stringify(mergePrefs(pb, pa)), true);
+  pruefe('ohne Einstellungen auf einer Seite: die andere bleibt',
+    [mergePrefs(null, pa)?.discounts, mergePrefs(pa, null)?.discounts], [['ga'], ['ga']]);
+
+  const voll = { ...x, favorites: fa, prefs: pb };
+  const blockNeu = await encryptState(k1.key, voll);
+  const zurueckNeu = await decryptState(k1.key, blockNeu);
+  pruefe('verschlüsselt und zurück: Reisen, Favoriten und Einstellungen',
+    signatureAll(zurueckNeu) === signatureAll(voll), true);
+  pruefe('alter Block ohne Favoriten und Einstellungen: lesbar, Reisen da',
+    [tripsSignature(zurueck) === tripsSignature(x), zurueck.favorites.items.length, zurueck.prefs], [true, 0, null]);
+  pruefe('alles zusammengeführt mit sich selbst: gleicher Fingerabdruck',
+    signatureAll(mergeAll(voll, voll)) === signatureAll(voll), true);
 }
 
 // ---------------------------------------------------------------------

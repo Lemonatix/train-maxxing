@@ -1,5 +1,6 @@
 /**
- * Gemerkte Reisen auf mehreren Geräten - mit einem Sync-Code statt Konto.
+ * Gemerkte Reisen, Lieblingsorte, Abos und Lieblingszüge auf mehreren
+ * Geräten - mit einem Sync-Code statt Konto.
  *
  * DER CODE ist das Einzige, was die Geräte teilen: 20 Zeichen, rund 100 Bit
  * Zufall. Aus ihm leitet jedes Gerät zwei Dinge ab (HKDF):
@@ -15,10 +16,24 @@
  * kommt dessen Stand zurück und die Runde beginnt von vorn.
  *
  * WANN: beim Start, beim Zurückkehren in die App, wenn wieder Netz da ist,
- * und kurz nach jeder Änderung an den Reisen.
+ * und kurz nach jeder Änderung.
+ *
+ * DREI TEILE, zwei Regeln:
+ *   - Reisen und Lieblingsorte sind Listen. Zusammengeführt wird, was beide
+ *     Seiten haben; was eine Seite nach dem Merken gelöscht hat, ist weg.
+ *   - Abos und Lieblingszüge sind Einstellungen. Dort gewinnt die zuletzt
+ *     geänderte Fassung als Ganzes (mergePrefs) - zwei Abo-Listen zu
+ *     vereinigen wäre falsch: wer die BahnCard kündigt, will sie auf allen
+ *     Geräten los sein.
+ *
+ * FORMAT: Die Reisen stehen weiter oben im Block (trips, removed), wo
+ * Version 1 sie erwartet; Lieblingsorte und Einstellungen kommen als eigene
+ * Felder dazu. Ein noch nicht neu geladenes Gerät verliert so keine Reisen -
+ * es lässt nur die neuen Felder weg, bis es neu lädt.
  */
 import { api } from './api.js';
 import { trips, mergeTrips, tripsSignature } from './trips.js';
+import { places, mergeFavorites, favoritesSignature } from './favorites.js';
 
 const KEY = 'train-maxxing:sync';
 /** Ohne I, L, O, U: nichts, was man beim Abtippen verwechselt. */
@@ -100,7 +115,13 @@ async function through(bytes, stream) {
  * ein Zehntel so groß; ältere Browser ohne CompressionStream schicken roh.
  */
 export async function encryptState(key, state) {
-  let plain = enc.encode(JSON.stringify({ v: 1, trips: state.trips, removed: state.removed }));
+  let plain = enc.encode(JSON.stringify({
+    v: 2,
+    trips: state.trips,
+    removed: state.removed,
+    ...(state.favorites ? { favorites: state.favorites } : {}),
+    ...(state.prefs ? { prefs: state.prefs } : {}),
+  }));
   let format = 0;
   if (typeof CompressionStream === 'function') {
     plain = await through(plain, new CompressionStream('gzip'));
@@ -127,7 +148,86 @@ export async function decryptState(key, data) {
     plain = await through(plain, new DecompressionStream('gzip'));
   }
   const v = JSON.parse(dec.decode(plain));
-  return { trips: Array.isArray(v.trips) ? v.trips : [], removed: v.removed && typeof v.removed === 'object' ? v.removed : {} };
+  const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : null);
+  return {
+    trips: Array.isArray(v.trips) ? v.trips : [],
+    removed: obj(v.removed) || {},
+    favorites: {
+      items: Array.isArray(v.favorites?.items) ? v.favorites.items : [],
+      removed: obj(v.favorites?.removed) || {},
+    },
+    prefs: obj(v.prefs),
+  };
+}
+
+// --- Einstellungen ---------------------------------------------------------
+
+/** Abos und Lieblingszüge, ohne Zeitstempel - für den Vergleich. */
+const prefsInhalt = (p) => JSON.stringify([
+  [...(p?.discounts || [])].sort(),
+  Object.entries(p?.modelPrefs || {}).filter(([, v]) => v).sort(([a], [b]) => a.localeCompare(b)),
+]);
+const leer = (p) => !(p?.discounts?.length) && !Object.values(p?.modelPrefs || {}).some(Boolean);
+
+/**
+ * Welche Fassung der Einstellungen gilt: die zuletzt geänderte (`at`).
+ *
+ * SYMMETRISCH, damit zwei Geräte zum selben Ergebnis kommen und nicht
+ * abwechselnd ihre eigene Fassung hochladen. Bei gleichem Zeitstempel - vor
+ * allem "nie geändert seit dem Einbau des Abgleichs" (null) - gewinnt die
+ * nicht leere, sonst entscheidet der Inhalt. So überschreibt ein frisch
+ * verbundenes Gerät mit leeren Voreinstellungen nicht die Abos des anderen.
+ */
+export function mergePrefs(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  const ta = Date.parse(a.at || 0) || 0;
+  const tb = Date.parse(b.at || 0) || 0;
+  if (ta !== tb) return ta > tb ? a : b;
+  if (leer(a) !== leer(b)) return leer(a) ? b : a;
+  return prefsInhalt(a) >= prefsInhalt(b) ? a : b;
+}
+
+export function prefsSignature(p) {
+  return p ? `${p.at || ''}|${prefsInhalt(p)}` : '';
+}
+
+/**
+ * Die Einstellungen gehören app.js - es meldet sie hier an (sync.usePrefs).
+ * Ohne Anmeldung reicht der Abgleich die Fassung vom Server unverändert
+ * weiter, statt sie zu verwerfen.
+ */
+let prefsSource = null;
+
+// --- Alle Teile zusammen ---------------------------------------------------
+
+function snapshotAll() {
+  const t = trips.snapshot();
+  return { trips: t.trips, removed: t.removed, favorites: places.snapshot(), prefs: prefsSource?.snapshot() ?? null };
+}
+
+/** @returns {{trips, removed, favorites, prefs}} */
+export function mergeAll(lokal, fern) {
+  const t = mergeTrips(lokal, fern);
+  return {
+    trips: t.trips,
+    removed: t.removed,
+    favorites: mergeFavorites(lokal.favorites, fern.favorites),
+    prefs: mergePrefs(lokal.prefs, fern.prefs),
+  };
+}
+
+export function signatureAll(st) {
+  return JSON.stringify([tripsSignature(st), favoritesSignature(st.favorites), prefsSignature(st.prefs)]);
+}
+
+/** Nur übernehmen, was sich wirklich geändert hat - jede Übernahme zeichnet neu. */
+function adoptAll(merged, lokal) {
+  if (tripsSignature(merged) !== tripsSignature(lokal)) trips.adopt(merged);
+  if (favoritesSignature(merged.favorites) !== favoritesSignature(lokal.favorites)) places.adopt(merged.favorites);
+  if (prefsSource && merged.prefs && prefsSignature(merged.prefs) !== prefsSignature(lokal.prefs)) {
+    prefsSource.adopt(merged.prefs);
+  }
 }
 
 // --- Zustand --------------------------------------------------------------
@@ -170,15 +270,17 @@ async function runOnce() {
   const { id, key } = await keysOf(cfg.code);
   let remote = await api.syncGet(id);
   for (let runde = 0; runde < 4; runde++) {
-    const fern = remote.data ? await decryptState(key, remote.data) : { trips: [], removed: {} };
-    const lokal = trips.snapshot();
-    const merged = mergeTrips(lokal, fern);
-    const sig = tripsSignature(merged);
-    if (sig !== tripsSignature(lokal)) {
+    const fern = remote.data
+      ? await decryptState(key, remote.data)
+      : { trips: [], removed: {}, favorites: { items: [], removed: {} }, prefs: null };
+    const lokal = snapshotAll();
+    const merged = mergeAll(lokal, fern);
+    const sig = signatureAll(merged);
+    if (sig !== signatureAll(lokal)) {
       adopting = true;
-      try { trips.adopt(merged); } finally { adopting = false; }
+      try { adoptAll(merged, lokal); } finally { adopting = false; }
     }
-    if (remote.data && sig === tripsSignature(fern)) {
+    if (remote.data && sig === signatureAll(fern)) {
       save({ ...load(), rev: remote.rev, at: new Date().toISOString() });
       return;
     }
@@ -263,9 +365,19 @@ export const sync = {
     return () => listeners.delete(fn);
   },
 
+  /**
+   * Abos und Lieblingszüge anmelden - sie liegen im Zustand von app.js.
+   * @param {{snapshot: () => object, adopt: (p: object) => void, onChange: (fn: () => void) => void}} src
+   */
+  usePrefs(src) {
+    prefsSource = src;
+    src.onChange(() => { if (!adopting) schedule(DEBOUNCE_MS); });
+  },
+
   /** Einmal beim Start: Auslöser einhängen und den ersten Abgleich anstoßen. */
   start() {
     trips.onChange(() => { if (!adopting) schedule(DEBOUNCE_MS); });
+    places.onChange(() => { if (!adopting) schedule(DEBOUNCE_MS); });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && Date.now() - lastRun > RESUME_MIN_MS) schedule(0);
     });

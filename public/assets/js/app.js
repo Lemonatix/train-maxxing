@@ -192,7 +192,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Verfolgung Neuladen und neue Suchen.
   if (!openSharedFahrt()) restoreTracked();
   setupOffline();
-  // Gemerkte Reisen mit den anderen Geräten abgleichen, falls verbunden.
+  // Gemerkte Reisen, Lieblingsorte, Abos und Lieblingszüge mit den anderen
+  // Geräten abgleichen, falls verbunden.
+  sync.usePrefs({ snapshot: prefsSnapshot, adopt: adoptPrefs, onChange: (fn) => prefsListeners.add(fn) });
   sync.start();
 
   // Geteilte Suche direkt ausführen, damit der Empfänger nichts tun muss.
@@ -414,6 +416,60 @@ function loadSettings() {
     }
   } catch {
     // Defekter oder gesperrter Storage darf das Tool nicht blockieren.
+  }
+}
+
+// ======================================================================
+// Abos und Lieblingszüge im Abgleich (sync.js)
+// ======================================================================
+
+/**
+ * Wann Abos oder Lieblingszüge zuletzt von Hand geändert wurden. Beim
+ * Abgleich gewinnt die neuere Fassung (mergePrefs in sync.js) - deshalb
+ * zählt nur eine echte Änderung, nicht das Übernehmen vom anderen Gerät
+ * und nicht ein geteilter Link mit ?abos=…, der nur für diese Suche gilt.
+ */
+const PREFS_AT_KEY = 'train-maxxing:prefs-at';
+const prefsListeners = new Set();
+let prefsAdopting = false;
+
+function prefsChanged() {
+  if (prefsAdopting) return;
+  try { localStorage.setItem(PREFS_AT_KEY, new Date().toISOString()); } catch { /* dann ohne Zeit */ }
+  for (const fn of prefsListeners) fn();
+}
+
+function prefsSnapshot() {
+  let at = null;
+  try { at = localStorage.getItem(PREFS_AT_KEY); } catch { /* bleibt null */ }
+  return { discounts: [...state.discounts], modelPrefs: { ...state.modelPrefs }, at };
+}
+
+/** Die Fassung vom anderen Gerät übernehmen - samt Häkchen und Reglern. */
+function adoptPrefs(p) {
+  prefsAdopting = true;
+  try {
+    state.discounts = Array.isArray(p.discounts) ? [...p.discounts] : [];
+    state.modelPrefs = p.modelPrefs && typeof p.modelPrefs === 'object' ? { ...p.modelPrefs } : {};
+    try {
+      if (p.at) localStorage.setItem(PREFS_AT_KEY, p.at);
+    } catch { /* dann ohne Zeit */ }
+    for (const cb of document.querySelectorAll('#abos input[type="checkbox"]')) {
+      cb.checked = state.discounts.includes(cb.value);
+    }
+    // Die Regler gibt es erst, wenn der Nerd-Modus einmal offen war. Über
+    // `input`, damit die Zahl daneben mitzieht; die Neubewertung bündelt
+    // rerankSoon().
+    for (const m of TRAIN_MODELS) {
+      const regler = document.querySelector('#model-' + m.id);
+      if (!regler) continue;
+      regler.value = String(state.modelPrefs[m.id] ?? 0);
+      regler.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    saveSettings();
+    if (state.lastPayload) rerankSoon();
+  } finally {
+    prefsAdopting = false;
   }
 }
 
@@ -1189,6 +1245,7 @@ async function loadCatalogue() {
         cb.addEventListener('change', () => {
           state.discounts = [...document.querySelectorAll('#abos input:checked')].map((i) => i.value);
           saveSettings();
+          prefsChanged();
         });
 
         const span = document.createElement('span');
@@ -2922,6 +2979,7 @@ function setupModels() {
         if (v === 0) delete state.modelPrefs[m.id];
         else state.modelPrefs[m.id] = v;
         rerankSoon();
+        prefsChanged();
       });
 
       const ctl = document.createElement('div');

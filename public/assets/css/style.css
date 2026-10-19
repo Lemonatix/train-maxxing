@@ -4915,11 +4915,16 @@ details.live__msg .live__msg-text {
   }
 }
 
+/* NUR DECKKRAFT, KEIN VERSATZ. Der Inhalt rutschte früher zusätzlich 6 px
+   von oben herein - gleichzeitig mit der aufgehenden Höhe, aber in anderem
+   Tempo. Das sah aus, als wackle der Bereich beim Aufklappen. Die Bewegung
+   macht jetzt allein die Höhe; wo der Browser die nicht animiert, bleibt ein
+   ruhiges Einblenden. */
 details.is-opening[open] > :not(summary) {
   animation: tm-reveal 420ms var(--ease-out) both;
 }
 @keyframes tm-reveal {
-  from { opacity: 0; transform: translateY(-6px); }
+  from { opacity: 0; }
 }
 
 /* Das Dreieck vor den Aufklappern dreht sich, statt umzuspringen. */

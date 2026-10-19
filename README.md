@@ -2533,8 +2533,10 @@ Unten im Reiter **Reisen** erzeugt **Sync-Code erstellen** einen Code wie
 `K7QM-2XPA-9DTE-R4HB-6WNC` (20 Zeichen, rund 100 Bit Zufall). Auf dem anderen
 Gerät tippt man ihn unter „Reisen" ein oder öffnet den geteilten Link
 (`#sync=…`); der fragt vor dem Verbinden nach. Danach gleichen die Geräte ihre
-Reisen ab: beim Start, beim Zurückkehren in die App, wenn wieder Netz da ist,
-und kurz nach jedem Merken oder Löschen (`sync.js`, `syncView.js`).
+**Reisen, Lieblingsorte (★), Abos und Lieblingszüge** ab: beim Start, beim
+Zurückkehren in die App, wenn wieder Netz da ist, und kurz nach jeder Änderung
+(`sync.js`, `syncView.js`). Nur die zuletzt benutzten Orte bleiben auf dem
+Gerät — sie sind dessen Gedächtnisstütze, kein Wunsch des Nutzers.
 
 - **Der Server kann die Reisen nicht lesen.** Aus dem Code leitet der Browser
   per HKDF eine Kennung und einen Schlüssel ab; hoch geht nur die Kennung und
@@ -2545,7 +2547,19 @@ und kurz nach jedem Merken oder Löschen (`sync.js`, `syncView.js`).
   Seiten, außer denen, die nach dem Merken gelöscht wurden. Löschungen merkt
   sich jedes Gerät 60 Tage lang. Jeder Block hat eine Versionsnummer —
   schreiben zwei Geräte gleichzeitig, bekommt das zweite den neuen Stand
-  zurück und führt noch einmal zusammen.
+  zurück und führt noch einmal zusammen. **Lieblingsorte** genauso
+  (`mergeFavorites`): ein auf dem Handy abgewählter Ort verschwindet auch
+  am Laptop, statt beim nächsten Abgleich zurückzukommen.
+- **Abos und Lieblingszüge: die zuletzt geänderte Fassung gilt**, als Ganzes
+  (`mergePrefs`). Zwei Abo-Listen zu vereinigen wäre falsch — wer die BahnCard
+  kündigt, will sie überall los sein. Gezählt wird nur eine Änderung von Hand
+  (`prefsChanged()` in `app.js`), nicht ein geteilter Link mit `?abos=…`.
+  Haben beide Seiten nie etwas geändert, gewinnt die nicht leere — ein frisch
+  verbundenes Gerät löscht so nicht die Abos des anderen.
+- **Format:** Die Reisen stehen im Block, wo Version 1 sie erwartet;
+  Lieblingsorte und Einstellungen sind zusätzliche Felder. Ein noch nicht neu
+  geladenes Gerät verliert dadurch keine Reisen — es lässt nur die neuen
+  Felder weg, bis es neu lädt.
 - **QR-Code** auf Wunsch („QR-Code zeigen"): der Link als QR-Code, mit der
   Handykamera zu scannen (`qr.js`, eigener kleiner Encoder, nichts von
   fremden Servern).
@@ -2554,8 +2568,8 @@ und kurz nach jedem Merken oder Löschen (`sync.js`, `syncView.js`).
 - **Trennen** lässt die Reisen auf allen Geräten stehen. Ein Block, den ein
   halbes Jahr niemand angefasst hat, wird gelöscht.
 
-Wer den Code hat, sieht die Reisen — er gehört nicht in einen öffentlichen
-Chat.
+Wer den Code hat, sieht die Reisen, Lieblingsorte und Abos — er gehört nicht
+in einen öffentlichen Chat.
 
 ### Vom eigenen Standort aus
 
@@ -2993,7 +3007,7 @@ public/
 │       ├── favorites.js          Lieblingsorte und Verlauf
 │       ├── trips.js              Gemerkte Reisen (Speicher)
 │       ├── tripsView.js          Reiter "Reisen"
-│       ├── sync.js               Reisen über Geräte abgleichen (Sync-Code, verschlüsselt)
+│       ├── sync.js               Reisen, Favoriten, Abos über Geräte abgleichen (Sync-Code, verschlüsselt)
 │       ├── syncView.js           Kasten "Auf mehreren Geräten"
 │       ├── qr.js                 QR-Code als SVG (Sync-Link)
 │       ├── data/stations.js      Große Bahnhöfe für Sofort-Vorschläge (bin/build_stations.php)
