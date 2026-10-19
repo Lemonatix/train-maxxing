@@ -771,5 +771,47 @@ console.log('\nZubringer - der Satz zum einfahrenden Zug');
 }
 
 // ---------------------------------------------------------------------
+console.log('\nReisen abgleichen - zusammenführen und verschlüsseln');
+{
+  const { mergeTrips, tripsSignature } = await import('../public/assets/js/trips.js');
+  const { normalizeCode, formatCode, newCode, keysOf, encryptState, decryptState } = await import('../public/assets/js/sync.js');
+  const tag = (d) => new Date(Date.now() + d * 86400_000).toISOString();
+  const reise = (key, gemerkt, ankunftTage = 3) => ({
+    key, savedAt: tag(gemerkt), journey: { departure: tag(ankunftTage), arrival: tag(ankunftTage), legs: [{ mode: 'train' }] },
+  });
+  const keys = (st) => st.trips.map((t) => t.key).sort();
+
+  pruefe('beide Seiten zusammen: nichts geht verloren',
+    keys(mergeTrips({ trips: [reise('a', -2)], removed: {} }, { trips: [reise('b', -1)], removed: {} })), ['a', 'b']);
+  pruefe('auf dem anderen Gerät gelöscht: auch hier weg',
+    keys(mergeTrips({ trips: [reise('a', -2), reise('b', -1)], removed: {} }, { trips: [reise('b', -1)], removed: { a: tag(-1) } })), ['b']);
+  pruefe('gelöscht und danach wieder gemerkt: bleibt',
+    keys(mergeTrips({ trips: [reise('a', 0)], removed: {} }, { trips: [], removed: { a: tag(-1) } })), ['a']);
+  pruefe('längst vergangene Reise kommt nicht zurück (sonst Pingpong mit dem Aufräumen)',
+    keys(mergeTrips({ trips: [], removed: {} }, { trips: [reise('alt', -20, -10)], removed: {} })), []);
+  const x = { trips: [reise('a', -2), reise('b', -1)], removed: { c: tag(-1) } };
+  pruefe('zusammengeführt mit sich selbst: gleicher Fingerabdruck',
+    tripsSignature(mergeTrips(x, x)) === tripsSignature(x), true);
+
+  pruefe('Code: abgetippt mit Kleinbuchstaben, Leerzeichen und O statt 0',
+    normalizeCode('k7qm 2xpa-9dte-r4hb-6wno'), 'K7QM2XPA9DTER4HB6WN0');
+  pruefe('Code: zu kurz ist keiner', normalizeCode('K7QM-2XPA'), null);
+  const code = newCode();
+  pruefe('neuer Code: 20 Zeichen, in Viererblöcken lesbar',
+    [code.length, formatCode(code).split('-').length, normalizeCode(formatCode(code)) === code], [20, 5, true]);
+
+  const k1 = await keysOf(code);
+  const k2 = await keysOf(newCode());
+  const block = await encryptState(k1.key, x);
+  const zurueck = await decryptState(k1.key, block);
+  pruefe('verschlüsselt und zurück: derselbe Stand', tripsSignature(zurueck) === tripsSignature(x), true);
+  pruefe('Kennung: 64 Hex-Zeichen, je Code verschieden', [/^[0-9a-f]{64}$/.test(k1.id), k1.id !== k2.id], [true, true]);
+  pruefe('im Block steht nichts Lesbares', /savedAt|journey/.test(atob(block.replace(/-/g, '+').replace(/_/g, '/'))), false);
+  let fremd = 'gelesen';
+  try { await decryptState(k2.key, block); } catch { fremd = 'abgelehnt'; }
+  pruefe('mit einem anderen Code nicht zu öffnen', fremd, 'abgelehnt');
+}
+
+// ---------------------------------------------------------------------
 console.log(`\n${gesamt - fehlgeschlagen} von ${gesamt} bestanden.`);
 process.exit(fehlgeschlagen === 0 ? 0 : 1);

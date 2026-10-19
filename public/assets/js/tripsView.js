@@ -11,6 +11,8 @@ import { LiveTracker } from './live.js';
 import { trainLabel } from './map.js';
 import { formatPrice } from './scoring.js';
 import { wantsInbound, inboundFor, inboundText } from './inbound.js';
+import { renderJourneyLegs } from './render.js';
+import { createSyncPanel } from './syncView.js';
 
 /** Nur für bald abfahrende Reisen lohnt die Echtzeit - und sie kostet je Reise eine Abfrage. */
 const LIVE_WINDOW_MS = 12 * 3600_000;
@@ -47,9 +49,15 @@ function dayLabel(iso) {
  *   track(journey)    Live-Verfolgung starten
  *   isTracking(j)     läuft sie für diese Reise?
  *   search(trip)      dieselbe Strecke neu suchen (zur Abfahrtszeit)
+ *   state             App-Zustand (Modus, Klasse) für den Streckenverlauf
+ *   loadPlatforms, loadSequence  wie in der Trefferliste: Lageplan, Wagenreihung
  */
 export function initTrips(root, actions) {
   const live = new Map(); // key -> {at, delay, cancelled, error}
+  const offen = new Set(); // Reisen mit aufgeklapptem Streckenverlauf
+  // Einmal gebaut und bei jedem Zeichnen wieder angehängt: Eingabefeld und
+  // Zustand des Kastens sollen die Echtzeit-Aktualisierung überleben.
+  const syncPanel = createSyncPanel();
   let aktiv = false;
 
   trips.onChange(() => { if (aktiv) render(); });
@@ -122,6 +130,22 @@ export function initTrips(root, actions) {
       }
     }
 
+    // Streckenverlauf wie in der Trefferliste: Züge, Gleise, Zwischenhalte.
+    const det = el('details', 'journey__details trip__details');
+    det.open = offen.has(t.key);
+    det.append(el('summary', null, 'Streckenverlauf'));
+    det.addEventListener('toggle', () => {
+      if (det.open) {
+        offen.add(t.key);
+        if (det.children.length === 1) det.append(renderJourneyLegs(j, actions.state, actions));
+      } else {
+        offen.delete(t.key);
+      }
+    });
+    // Erst beim Aufklappen bauen - die Liste wird bei jeder Echtzeit neu gezeichnet.
+    if (det.open) det.append(renderJourneyLegs(j, actions.state, actions));
+    li.append(det);
+
     const knoepfe = el('div', 'trip__actions');
     if (!vorbei) {
       const verfolgt = actions.isTracking(j);
@@ -180,8 +204,7 @@ export function initTrips(root, actions) {
       out.push(det);
     }
 
-    out.push(el('p', 'trips__note', 'Gespeichert nur in diesem Browser. Für ein anderes Gerät: '
-      + 'Reise verfolgen und „Teilen".'));
+    out.push(syncPanel.el);
     root.replaceChildren(...out);
   }
 
@@ -189,5 +212,10 @@ export function initTrips(root, actions) {
     activate() { aktiv = true; render(); },
     deactivate() { aktiv = false; },
     render,
+    /** Ein Link mit Sync-Code wurde geöffnet. */
+    offerSync(code) {
+      syncPanel.offer(code);
+      syncPanel.el.scrollIntoView({ block: 'center' });
+    },
   };
 }

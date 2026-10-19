@@ -6,18 +6,22 @@
  * ab: mit Zügen, Gleisen und Preis, so wie sie gefunden wurde. Am Reisetag
  * lässt sie sich direkt verfolgen, ohne neue Suche.
  *
- * NUR IN DIESEM BROWSER, wie die Favoriten (favorites.js). Ohne Konto gibt
- * es keinen Ort, an dem dasselbe Telefon und derselbe Laptop sich treffen
- * könnten - wer eine Reise auf einem anderen Gerät braucht, schickt sie sich
- * über "Teilen".
+ * IN DIESEM BROWSER, wie die Favoriten (favorites.js) - und auf Wunsch über
+ * einen Sync-Code auf weiteren Geräten, ohne Konto (sync.js). Damit eine
+ * gelöschte Reise beim Abgleich nicht vom anderen Gerät zurückkommt, merkt
+ * sich die Liste auch, was gelöscht wurde und wann.
  *
- * Gespeichert wird die Verbindung ohne Streckenverlauf (der macht sie zehnmal
- * größer und kommt bei der Verfolgung ohnehin neu). Vergangene Reisen bleiben
+ * Gespeichert wird die Verbindung mit Halten, aber ohne die Linie für die
+ * Karte (die macht sie zehnmal größer und kommt bei der Verfolgung ohnehin neu). Vergangene Reisen bleiben
  * eine Woche sichtbar - für Fahrgastrechte und Spesenabrechnung -, dann
  * räumt die App sie weg.
  */
 
 const KEY = 'train-maxxing:trips';
+/** Gelöschte Reisen: key -> Zeitpunkt. Nur für den Abgleich. */
+const REMOVED_KEY = 'train-maxxing:trips-removed';
+/** So lange zählt eine Löschung - länger liegt kein Gerät ungeglichen herum. */
+const REMOVED_KEEP_MS = 60 * 86400_000;
 const MAX_TRIPS = 40;
 /** So lange nach der Ankunft steht eine Reise noch unter "Vergangen". */
 const KEEP_AFTER_MS = 7 * 86400_000;
@@ -62,6 +66,62 @@ function read() {
   } catch {
     return [];
   }
+}
+
+function readRemoved() {
+  try {
+    const v = JSON.parse(localStorage.getItem(REMOVED_KEY) || '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeRemoved(map) {
+  const grenze = Date.now() - REMOVED_KEEP_MS;
+  const frisch = Object.fromEntries(Object.entries(map).filter(([, t]) => Date.parse(t) > grenze));
+  try { localStorage.setItem(REMOVED_KEY, JSON.stringify(frisch)); } catch { /* dann nicht */ }
+}
+
+function forget(key) {
+  writeRemoved({ ...readRemoved(), [key]: new Date().toISOString() });
+}
+
+/**
+ * Zwei Stände zusammenführen: alle Reisen beider Seiten, außer denen, die
+ * NACH dem Merken gelöscht wurden. Wer eine Reise löscht und später wieder
+ * merkt, hat sie danach wieder - das neuere Merken gewinnt.
+ *
+ * @param {{trips: object[], removed: Object<string,string>}} a
+ * @param {{trips: object[], removed: Object<string,string>}} b
+ */
+export function mergeTrips(a, b) {
+  const removed = { ...(a.removed || {}) };
+  for (const [k, t] of Object.entries(b.removed || {})) {
+    if (!removed[k] || Date.parse(t) > Date.parse(removed[k])) removed[k] = t;
+  }
+  const byKey = new Map();
+  for (const t of [...(a.trips || []), ...(b.trips || [])]) {
+    if (!t?.key || !t.journey?.legs?.length) continue;
+    const alt = byKey.get(t.key);
+    if (!alt || Date.parse(t.savedAt || 0) > Date.parse(alt.savedAt || 0)) byKey.set(t.key, t);
+  }
+  // Abgelaufene gleich weglassen: sonst brächte der Abgleich zurück, was
+  // all() eben aufgeräumt hat, und beide Seiten schaukelten sich hoch.
+  const jetzt = Date.now();
+  const list = [...byKey.values()]
+    .filter((t) => arrivalOf(t) + KEEP_AFTER_MS > jetzt)
+    .filter((t) => !removed[t.key] || Date.parse(t.savedAt || 0) > Date.parse(removed[t.key]))
+    .sort((x, y) => Date.parse(x.savedAt || 0) - Date.parse(y.savedAt || 0))
+    .slice(-MAX_TRIPS);
+  return { trips: list, removed };
+}
+
+/** Kurzer Fingerabdruck eines Stands: welche Reisen, welche Löschungen. */
+export function tripsSignature(state) {
+  const t = (state.trips || []).map((x) => `${x.key}@${x.savedAt}`).sort();
+  const r = Object.entries(state.removed || {}).map(([k, v]) => `${k}@${v}`).sort();
+  return JSON.stringify([t, r]);
 }
 
 function write(list) {
@@ -109,6 +169,7 @@ export const trips = {
     const i = list.findIndex((t) => t.key === k);
     if (i >= 0) {
       list.splice(i, 1);
+      forget(k);
       write(list);
       return false;
     }
@@ -127,7 +188,19 @@ export const trips = {
   },
 
   remove(key) {
+    forget(key);
     write(read().filter((t) => t.key !== key));
+  },
+
+  /** Der ganze Stand, für den Abgleich (sync.js). */
+  snapshot() {
+    return { trips: read(), removed: readRemoved() };
+  },
+
+  /** Einen zusammengeführten Stand übernehmen. */
+  adopt(state) {
+    writeRemoved(state.removed || {});
+    write(state.trips || []);
   },
 
   onChange(fn) {
@@ -139,6 +212,6 @@ export const trips = {
 // Andere Tabs desselben Browsers mitziehen.
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
-    if (e.key === KEY) for (const fn of listeners) fn();
+    if (e.key === KEY || e.key === REMOVED_KEY) for (const fn of listeners) fn();
   });
 }

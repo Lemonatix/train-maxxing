@@ -143,6 +143,7 @@ require __DIR__ . '/lib/Providers/DbApi.php';
 require __DIR__ . '/lib/RailGeometry.php';
 require __DIR__ . '/lib/CityTrips.php';
 require __DIR__ . '/lib/Inbound.php';
+require __DIR__ . '/lib/TripSync.php';
 
 $config = require __DIR__ . '/config.php';
 
@@ -225,6 +226,8 @@ const RATE_COST = [
     'pushunsubscribe' => 1,
     // Geschützt über den Schlüssel; der Cronjob darf nie ausgesperrt werden.
     'pushtick'       => 0,
+    // Gemerkte Reisen abgleichen: nur eine Datei lesen oder schreiben.
+    'sync'           => 1,
 ];
 
 /** Voreinstellung für alles, was nicht in der Tabelle steht. */
@@ -330,8 +333,11 @@ try {
         case 'pushtick':
             handlePushTick($http, $config, $cache);
             break;
+        case 'sync':
+            handleSync($config);
+            break;
         default:
-            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, localroute, offers, departures, sequence, share, shared, fxrate, platforms, works, disruptions, walkroute, pushkey, pushsubscribe, pushunsubscribe, pushtick, inbound', 400);
+            fail('Unbekannte Aktion. Erlaubt: health, catalogue, locations, journeys, livetrains, traindetails, bestprices, nextconnection, localroute, offers, departures, sequence, share, shared, fxrate, platforms, works, disruptions, walkroute, pushkey, pushsubscribe, pushunsubscribe, pushtick, inbound, sync', 400);
     }
 } catch (Throwable $e) {
     // Details bleiben im Log, der Client bekommt nur eine generische Meldung.
@@ -2379,6 +2385,50 @@ function handlePushSubscribe(Http $http, array $config): void
         'confirmed' => $bestaetigt,
         'running'   => $zuletzt !== null && time() - $zuletzt < 3 * max(60, (int) ($config['push']['interval'] ?? 60)),
     ]);
+}
+
+/**
+ * Gemerkte Reisen zwischen Geräten abgleichen - siehe TripSync.php.
+ *
+ * GET  ?action=sync&id=…                    -> {rev, data}
+ * POST ?action=sync  {id, base, data}       -> {rev} oder {conflict, rev, data}
+ *
+ * `data` ist im Browser verschlüsselt; hier wird nur Form und Größe geprüft.
+ */
+function handleSync(array $config): void
+{
+    $store = new TripSync((string) $config['cache_dir']);
+    if (!$store->isAvailable()) {
+        fail('Abgleich ist auf diesem Server nicht möglich (Cache nicht beschreibbar).', 503);
+    }
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+        $id = (string) ($_GET['id'] ?? '');
+        if (!TripSync::validId($id)) {
+            fail('Ungültige Sync-Kennung.', 400);
+        }
+        ok($store->get($id));
+    }
+
+    $raw = (string) file_get_contents('php://input', false, null, 0, TripSync::MAX_BYTES + 1001);
+    if ($raw === '' || strlen($raw) > TripSync::MAX_BYTES + 1000) {
+        fail('Zu viele Reisen für den Abgleich.', 413);
+    }
+    $body = json_decode($raw, true);
+    $id = (string) ($body['id'] ?? '');
+    $data = $body['data'] ?? null;
+    if (!TripSync::validId($id) || !is_int($body['base'] ?? null) || !is_string($data)
+        || !preg_match('/^[A-Za-z0-9_-]{16,}$/', $data)) {
+        fail('Ungültige Sync-Anfrage.', 400);
+    }
+    if (random_int(1, 200) === 1) {
+        $store->gc();
+    }
+    try {
+        $r = $store->put($id, $body['base'], $data);
+    } catch (RuntimeException) {
+        fail('Abgleich gerade nicht möglich. Bitte später erneut versuchen.', 503);
+    }
+    ok($r['ok'] ? ['rev' => $r['rev']] : ['conflict' => true, 'rev' => $r['rev'], 'data' => $r['data']]);
 }
 
 function handlePushUnsubscribe(array $config): void

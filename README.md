@@ -2370,15 +2370,43 @@ am Freitag nicht wieder suchen. Am Reiter steht die Zahl der kommenden Reisen.
   mit Verspätung oder „pünktlich", über dieselbe Abfrage wie die
   Live-Verfolgung. Steht dort „Noch keine Echtzeit", hat die Quelle wirklich
   keine — typisch für Züge, die am eigenen Bahnhof beginnen.
+- **Streckenverlauf** zum Aufklappen, wie in der Trefferliste: Züge, Gleise,
+  Umstiegsplan, Wagenreihung und Zwischenhalte.
 - **Live verfolgen** direkt aus der Liste, ohne neue Suche.
 - **Neu suchen**: dieselbe Strecke zur selben Zeit, mit aktuellen Preisen und
   Alternativen; die gemerkte Verbindung ist danach gewählt. Wiedererkannt
   wird sie an Abfahrt und Zügen (`tripKey`), nicht an der `id` — die
   bezeichnet bei manchen Quellen eine Antwort, nicht eine Fahrt.
 
-Gespeichert nur in diesem Browser, wie die Favoriten. Ohne Konto gibt es
-keinen Ort, an dem Telefon und Laptop sich treffen; für ein anderes Gerät
-hilft „Teilen" in der Verfolgung.
+Gespeichert in diesem Browser, wie die Favoriten — und auf Wunsch auf
+weiteren Geräten:
+
+#### Auf mehreren Geräten: Sync-Code statt Konto
+
+Unten im Reiter **Reisen** erzeugt **Sync-Code erstellen** einen Code wie
+`K7QM-2XPA-9DTE-R4HB-6WNC` (20 Zeichen, rund 100 Bit Zufall). Auf dem anderen
+Gerät tippt man ihn unter „Reisen" ein oder öffnet den geteilten Link
+(`#sync=…`); der fragt vor dem Verbinden nach. Danach gleichen die Geräte ihre
+Reisen ab: beim Start, beim Zurückkehren in die App, wenn wieder Netz da ist,
+und kurz nach jedem Merken oder Löschen (`sync.js`, `syncView.js`).
+
+- **Der Server kann die Reisen nicht lesen.** Aus dem Code leitet der Browser
+  per HKDF eine Kennung und einen Schlüssel ab; hoch geht nur die Kennung und
+  der mit AES-GCM verschlüsselte, vorher gepackte Block (`api/lib/TripSync.php`
+  legt ihn unter `cache/sync/` ab). Zwei Reisen mit allen Halten sind rund
+  5 kB.
+- **Zusammenführen statt Überschreiben** (`mergeTrips`): alle Reisen beider
+  Seiten, außer denen, die nach dem Merken gelöscht wurden. Löschungen merkt
+  sich jedes Gerät 60 Tage lang. Jeder Block hat eine Versionsnummer —
+  schreiben zwei Geräte gleichzeitig, bekommt das zweite den neuen Stand
+  zurück und führt noch einmal zusammen.
+- **iPhone-App vom Home-Bildschirm:** den Code dort eintippen. Ein Link öffnet
+  Safari, und Safari hat einen eigenen Speicher.
+- **Trennen** lässt die Reisen auf allen Geräten stehen. Ein Block, den ein
+  halbes Jahr niemand angefasst hat, wird gelöscht.
+
+Wer den Code hat, sieht die Reisen — er gehört nicht in einen öffentlichen
+Chat.
 
 ### Vom eigenen Standort aus
 
@@ -2797,6 +2825,8 @@ public/
 │       ├── favorites.js          Lieblingsorte und Verlauf
 │       ├── trips.js              Gemerkte Reisen (Speicher)
 │       ├── tripsView.js          Reiter "Reisen"
+│       ├── sync.js               Reisen über Geräte abgleichen (Sync-Code, verschlüsselt)
+│       ├── syncView.js           Kasten "Auf mehreren Geräten"
 │       └── data/trains.js        Gattungen, Fahrzeugmodelle, Komfortwerte
 └── api/
     ├── index.php                 Router, führt Fahrplan und Preise zusammen
@@ -2818,6 +2848,7 @@ public/
         ├── Walks.php             Adressen als Start/Ziel, Fußwege, Fußweg-Router
         ├── WebPush.php           Web Push von Hand: VAPID-Signatur, aes128gcm
         ├── PushWatch.php         Server-Verfolgung: was wann gemeldet wird
+        ├── TripSync.php          Verschlüsselte Reisen-Blöcke für den Abgleich
         ├── MvgRail.php           U-Bahn/Tram-Positionen München aus dem Fahrplan
         └── Providers/
             ├── OebbHafas.php     Fahrplan, Zuggattungen, Ländercodes, Geometrie, Tafel
@@ -2849,6 +2880,7 @@ Alles per GET auf `api/`:
 | `?action=inbound&station=…&time=…` | Vermutliche Zubringer der Züge, die an diesem Bahnhof beginnen (aus der Gleisbelegung geschätzt) |
 | `?action=departures&station=…&type=dep\|arr&date=…&time=…` | Abfahrts- bzw. Ankunftstafel; `lat`/`lon` helfen, in München die MVG-Halte zu finden |
 | `?action=sequence&eva=…&cat=…&num=…&time=…` | Wagenreihung eines Zuges an einem Bahnhof: Sektoren, Wagen, Klassen |
+| `?action=sync&id=…` / `POST ?action=sync` | Verschlüsselten Reisen-Block lesen bzw. schreiben (`{"id", "base", "data"}`; bei veralteter `base` kommt `conflict` mit dem aktuellen Stand) |
 | `POST ?action=share` | Verfolgte Fahrt zum Teilen ablegen (JSON `{"journey": …}`), liefert `id` |
 | `?action=shared&id=…` | Geteilte Fahrt abholen |
 | `?action=fxrate` | EZB-Tageskurse, für den Gegenwert in Franken |

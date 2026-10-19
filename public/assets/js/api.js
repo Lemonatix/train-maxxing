@@ -54,8 +54,8 @@ async function call(action, params = {}, { signal } = {}) {
 const coord = (v) => (typeof v === 'number' && Number.isFinite(v) ? v.toFixed(5) : '');
 
 /**
- * POST ans Backend - bisher nur fürs Teilen einer Fahrt, deren Verbindung
- * zu groß für eine Adresse ist.
+ * POST ans Backend: Teilen einer Fahrt, Push-Anmeldung, Abgleich der Reisen -
+ * alles, was zu groß für eine Adresse ist.
  */
 async function post(action, body) {
   const url = new URL(BASE);
@@ -91,6 +91,10 @@ export const api = {
   pushKey: (opts) => call('pushkey', {}, opts),
   pushSubscribe: (body) => post('pushsubscribe', body),
   pushUnsubscribe: (endpoint) => post('pushunsubscribe', { endpoint }),
+
+  /** Gemerkte Reisen abgleichen - `data` ist verschlüsselt, siehe sync.js. */
+  syncGet: (id) => call('sync', { id }),
+  syncPut: (id, base, data) => post('sync', { id, base, data }),
 
   /**
    * Fußweg zwischen zwei Punkten, auf der Straße: `{ geometry, distance,

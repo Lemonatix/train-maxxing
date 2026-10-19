@@ -3376,25 +3376,92 @@ details.live__msg .live__msg-text {
 .leg__comfort { color: var(--purple); }
 .leg__series { color: var(--accent); }
 
-.leg__stops { display: flex; flex-wrap: wrap; gap: 0.25rem; padding-left: 0.3rem; }
+/* Zwischenhalte: zugeklappt eine Zeile, aufgeklappt senkrecht zwischen
+   Ein- und Ausstieg - eine gepunktete Linie mit einem Punkt je Halt. */
+.leg__stops { padding-left: 0.3rem; }
 
-.leg__stop {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.25rem;
-  padding: 0.08rem 0.35rem;
-  border-radius: 3px;
-  background: var(--surface-inset);
+.leg__stops-sum {
+  display: inline-block;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition);
+}
+
+.leg__stops-sum:hover { color: var(--accent); }
+.leg__stops-sum::-webkit-details-marker { display: none; }
+.leg__stops-sum::before { content: '▸ '; }
+.leg__stops[open] > .leg__stops-sum::before { content: '▾ '; }
+
+.stops {
+  list-style: none;
+  margin: 0.3rem 0 0.15rem 0.2rem;
+  padding: 0 0 0 0.85rem;
+  border-left: 2px dotted var(--text-muted);
+}
+
+.stop {
+  position: relative;
+  display: grid;
+  grid-template-columns: 3.6rem 1fr;
+  column-gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.12rem 0;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+/* Punkt auf der Linie */
+.stop::before {
+  content: '';
+  position: absolute;
+  left: calc(-0.85rem - 5px);
+  top: 0.55em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--surface-solid);
+  border: 2px solid var(--text-muted);
+  box-sizing: border-box;
+}
+
+.stop__time {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.stop__delay { margin-left: 0.2rem; font-size: 0.68rem; color: var(--green, var(--accent)); }
+.stop__delay.is-warn { color: var(--amber, var(--accent)); }
+.stop__delay.is-bad { color: var(--rose); }
+
+.stop__name { min-width: 0; overflow-wrap: anywhere; }
+
+.stop__meta {
+  grid-column: 2;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
   color: var(--text-muted);
 }
 
-/* Uhrzeit vor dem Namen, damit die Halte zeitlich lesbar bleiben. */
-.leg__stop-time {
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-  opacity: 0.75;
+.stop__meta--bad { color: var(--rose); }
+
+.stop.is-cancelled .stop__name { text-decoration: line-through; opacity: 0.6; }
+.stop.is-cancelled::before { border-color: var(--rose); }
+
+/* Grenzübertritt: kleines Länderkürzel am ersten Halt im neuen Land. */
+.stop__border {
+  margin-left: 0.35rem;
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  background: var(--purple-soft);
+  color: var(--purple);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  vertical-align: 1px;
 }
 
 .leg__stops-count {
@@ -4273,7 +4340,6 @@ details.live__msg .live__msg-text {
   .chip { font-size: 0.72rem; padding: 0.15rem 0.4rem; }
 
   .legs { padding-left: 0.7rem; }
-  .leg__stops { gap: 0.2rem; }
 
   .shops__link { flex: 1 1 auto; justify-content: center; min-height: 44px; }
 
@@ -4635,3 +4701,44 @@ details.live__msg .live__msg-text {
 }
 .live__inbound.is-late, .trip__inbound.is-late { color: var(--amber); }
 
+
+/* --- Reisen auf mehreren Geräten (syncView.js) ---------------------- */
+
+.sync {
+  margin-top: 1.2rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.sync.is-offer { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
+.sync__title { margin: 0; font-size: 0.85rem; font-weight: 500; color: var(--text-dim); }
+.sync__text, .sync__hint { margin: 0.35rem 0 0; font-size: 0.78rem; line-height: 1.45; color: var(--text-muted); }
+.sync__row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.5rem; }
+.sync__row .live-btn { margin-top: 0; }
+.sync__input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.sync__input::placeholder { text-transform: none; letter-spacing: 0; }
+.sync__status { margin: 0.35rem 0 0; font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); }
+.sync__status.is-ok { color: var(--green); }
+.sync__status.is-bad, .sync__msg.is-bad { color: var(--rose); }
+.sync__details { margin-top: 0.5rem; }
+.sync__details summary { cursor: pointer; font-size: 0.8rem; color: var(--text-dim); }
+.sync__code-text {
+  display: inline-block;
+  margin-top: 0.45rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-xs);
+  background: var(--surface-inset);
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+.sync__msg { margin: 0.45rem 0 0; font-size: 0.78rem; color: var(--green); }
+.sync__danger { border-color: var(--rose); color: var(--rose); }

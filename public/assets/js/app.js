@@ -21,6 +21,7 @@ import { places } from './favorites.js';
 import { initBoard } from './board.js';
 import { trips, arrivalOf, tripKey } from './trips.js';
 import { initTrips } from './tripsView.js';
+import { sync } from './sync.js';
 
 // v2: Zugnummern-Regeln wurden durch Modellbewertungen ersetzt.
 const STORAGE_KEY = 'train-maxxing:v2';
@@ -169,6 +170,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Verfolgung Neuladen und neue Suchen.
   if (!openSharedFahrt()) restoreTracked();
   setupOffline();
+  // Gemerkte Reisen mit den anderen Geräten abgleichen, falls verbunden.
+  sync.start();
 
   // Geteilte Suche direkt ausführen, damit der Empfänger nichts tun muss.
   if (shared) runSearch();
@@ -256,6 +259,9 @@ function setupTabs() {
         track: (journey) => live.start(journey),
         isTracking: (journey) => live.isTracking(journey),
         search: searchTrip,
+        state,
+        loadPlatforms,
+        loadSequence,
       });
       tripsView.activate();
     } else {
@@ -280,8 +286,21 @@ function setupTabs() {
     });
   }
   const ausAdresse = () => namen.find((n) => TAB_HASH[n] && TAB_HASH[n] === location.hash) || 'search';
-  window.addEventListener('hashchange', () => show(ausAdresse(), { remember: false }));
-  if (ausAdresse() !== 'search') show(ausAdresse(), { remember: false });
+  // Ein Link mit Sync-Code (#sync=…, siehe sync.js): Reisen-Tab öffnen und
+  // das Verbinden ANBIETEN, nicht still ausführen. Der Code verschwindet
+  // sofort aus der Adresse, damit er nicht im Verlauf oder in Lesezeichen landet.
+  const syncAusAdresse = () => {
+    const m = location.hash.match(/^#sync=([0-9A-Za-z-]+)$/);
+    if (!m) return false;
+    history.replaceState(null, '', location.pathname + location.search + TAB_HASH.trips);
+    show('trips', { remember: false });
+    tripsView?.offerSync(m[1]);
+    return true;
+  };
+  window.addEventListener('hashchange', () => {
+    if (!syncAusAdresse()) show(ausAdresse(), { remember: false });
+  });
+  if (!syncAusAdresse() && ausAdresse() !== 'search') show(ausAdresse(), { remember: false });
 
   // Zahl der kommenden Reisen am Tab.
   const zaehler = $('#trips-count');

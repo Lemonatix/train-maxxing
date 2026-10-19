@@ -8,7 +8,7 @@
 
 import { typeOf } from './data/trains.js';
 import { trainLabel, RouteMap, walkText } from './map.js';
-import { formatDuration, formatTime, formatPrice, priceOrigin, counterValue, fxInfo } from './scoring.js';
+import { formatDuration, formatTime, formatPrice, priceOrigin, counterValue, fxInfo, comfortOf } from './scoring.js';
 
 /**
  * Höchste gemeldete Auslastung einer Verbindung, für die gewählte Klasse.
@@ -1468,6 +1468,90 @@ function appendDayShift(parent, base, iso, cls) {
   parent.append(d);
 }
 
+/**
+ * Welche Haltlisten aufgeklappt sind. Am Abschnitt selbst lässt sich das
+ * nicht merken: die Reisen-Ansicht liest ihre Verbindungen bei jedem Zeichnen
+ * frisch aus dem Speicher, und die Live-Aktualisierung zeichnet neu.
+ */
+const offeneHalte = new Set();
+const halteKey = (leg) => `${leg.category || ''}${leg.trainNumber || leg.line || ''}|${leg.departure || ''}`;
+
+/**
+ * Zwischenhalte eines Abschnitts, zugeklappt als "12 Zwischenhalte",
+ * aufgeklappt untereinander zwischen Ein- und Ausstieg - mit Uhrzeit und,
+ * wo bekannt, Verspätung.
+ *
+ * Im Nerd-Mode zusätzlich Gleis, Haltezeit und der Grenzübertritt. Die
+ * Zeiten stehen nicht zur Zierde: zeitlich begrenzte Abos wie das GA Night
+ * gelten je Teilstück, ein ECE ab München 17:03 ist in der Schweiz also
+ * trotzdem im Fenster.
+ */
+function renderStops(leg, state) {
+  const stops = leg.stops || [];
+  if (stops.length <= 2) return null;
+  const mid = stops.slice(1, -1);
+  const nerd = state.mode === 'nerd';
+
+  const box = el('details', 'leg__stops');
+  const key = halteKey(leg);
+  box.open = offeneHalte.has(key);
+  box.addEventListener('toggle', () => {
+    if (box.open) offeneHalte.add(key);
+    else offeneHalte.delete(key);
+  });
+  box.append(el('summary', 'leg__stops-sum', `${mid.length} Zwischenhalt${mid.length === 1 ? '' : 'e'}`));
+
+  const list = el('ol', 'stops');
+  let land = stops[0]?.country || leg.from?.country || '';
+  for (const s of mid) {
+    const li = el('li', 'stop');
+    if (s.cancelled) li.classList.add('is-cancelled');
+
+    // Ankunft zählt: dann ist man dort. Am Startpunkt eines Flügelzugs
+    // gibt es nur die Abfahrt.
+    const plan = s.arrival || s.departure;
+    const real = s.arrival ? s.arrivalReal : s.departureReal;
+    const zeit = el('span', 'stop__time', formatTime(plan));
+    const spaet = lateBy(plan, real);
+    if (spaet != null && spaet !== 0) {
+      zeit.append(el('span', 'stop__delay' + (spaet >= 5 ? ' is-bad' : spaet > 0 ? ' is-warn' : ''),
+        spaet > 0 ? `+${spaet}` : `${spaet}`));
+    }
+    li.append(zeit);
+    const name = el('span', 'stop__name', s.name || '?');
+    // Grenzübertritt sichtbar machen: daran hängen Tarife und Abos.
+    if (s.country && land && s.country !== land) {
+      const b = el('span', 'stop__border', s.country.toUpperCase());
+      b.title = `Ab hier ${s.country.toUpperCase()}`;
+      name.append(b);
+    }
+    if (s.country) land = s.country;
+    li.append(name);
+
+    if (nerd) {
+      const meta = [];
+      const halt = s.arrival && s.departure ? lateBy(s.arrival, s.departure) : null;
+      if (halt != null && halt >= 2) meta.push(`${halt} min Halt`);
+      if (s.platform) meta.push(`Gl. ${s.platform}`);
+      if (meta.length) li.append(el('span', 'stop__meta', meta.join(' · ')));
+    }
+    if (s.cancelled) li.append(el('span', 'stop__meta stop__meta--bad', 'Halt entfällt'));
+
+    list.append(li);
+  }
+  box.append(list);
+  return box;
+}
+
+/**
+ * Streckenverlauf einer Verbindung außerhalb der Trefferliste, etwa in der
+ * Reisen-Ansicht. Ohne Rangliste fehlt der Komfort je Abschnitt - der ist
+ * schnell neu gerechnet.
+ */
+export function renderJourneyLegs(journey, state, actions) {
+  return renderLegs(journey, { comfortPerLeg: comfortOf(journey, state.modelPrefs).perLeg }, state, actions);
+}
+
 function renderLegs(journey, entry, state, actions) {
   const wrap = el('div', 'legs');
 
@@ -1614,29 +1698,8 @@ function renderLegs(journey, entry, state, actions) {
       row.append(el('div', 'leg__remark', note));
     }
 
-    // Zwischenhalte: im Nerd-Mode alle mit Uhrzeit, sonst nur die Anzahl.
-    // Die Zeiten stehen hier nicht zur Zierde: zeitlich begrenzte Abos wie das
-    // GA Night gelten je Teilstück, ein ECE ab München 17:03 ist in der
-    // Schweiz also trotzdem im Fenster.
-    const stops = leg.stops || [];
-    if (stops.length > 2) {
-      const mid = stops.slice(1, -1);
-      if (state.mode === 'nerd') {
-        const list = el('div', 'leg__stops');
-        for (const s of mid) {
-          const item = el('span', 'leg__stop');
-          const time = formatTime(s.arrival || s.departure);
-          if (time !== '--:--') item.append(el('span', 'leg__stop-time', time));
-          item.append(el('span', 'leg__stop-name', s.name));
-          if (s.country) item.dataset.country = s.country;
-          item.title = `${time} · ${(s.country || '').toUpperCase()}`;
-          list.append(item);
-        }
-        row.append(list);
-      } else {
-        row.append(el('div', 'leg__stops-count', `${mid.length} Zwischenhalte`));
-      }
-    }
+    const halte = renderStops(leg, state);
+    if (halte) row.append(halte);
 
     const line2 = el('div', 'leg__line');
     appendLegTime(line2, leg.arrival, leg.arrivalReal, journey.departure);
