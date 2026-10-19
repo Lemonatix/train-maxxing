@@ -820,13 +820,13 @@ console.log('\nZubringer - der Satz zum einfahrenden Zug');
     expectedDeparture: erwartet == null ? null : iso(erwartet), confidence: 'platform',
   });
   pruefe('kommt noch, ohne Echtzeit: Fahrplanzeit, so gekennzeichnet',
-    /Kommt vermutlich als RE9 aus Ulm Hbf · an \d\d:\d\d nach Fahrplan$/.test(inboundText(link(10)).text), true);
+    /Kommt vermutlich als RE9 aus Ulm Hbf um \d\d:\d\d nach Fahrplan$/.test(inboundText(link(10)).text), true);
   const spaet = inboundText(link(10, 20, 25, 10));
   pruefe('verspätet: Verspätung und spätere Abfahrt, als Warnung',
     [/\(\+10\)/.test(spaet.text), /Abfahrt wohl erst gegen/.test(spaet.text), spaet.late], [true, true, true]);
   const bald = { ...link(10, 12, null, 2), departure: { planned: iso(20) } };
   pruefe('kurz vor der Abfahrt da: ab wann man einsteigen kann',
-    /^Einsteigen vermutlich ab ca\. \d\d:\d\d · kommt als RE9 aus Ulm Hbf, an \d\d:\d\d \(\+2\)$/.test(inboundText(bald).board), true);
+    /^Einsteigen vermutlich ab ca\. \d\d:\d\d · kommt als RE9 aus Ulm Hbf um \d\d:\d\d \(\+2\)$/.test(inboundText(bald).board), true);
   const frueh = { ...link(10, 10, null, 0), departure: { planned: iso(70) } };
   pruefe('eine Stunde vorher da: keine Einsteige-Zeit versprechen, nur "am Gleis"',
     /^Zug vermutlich ab ca\. \d\d:\d\d am Gleis/.test(inboundText(frueh).board), true);

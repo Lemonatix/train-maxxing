@@ -2463,7 +2463,7 @@ eine Ist-Zeit. „Pünktlich" hieße dort nur „keine Information". Die einzige
 frühe Auskunft ist der Zug, der gleich einfährt und als dieser wieder
 abfährt. Deshalb steht in der Live-Verfolgung und bei gemerkten Reisen:
 
-> Kommt vermutlich als RE9 aus Ulm Hbf · an 09:23 (+10) — Abfahrt wohl erst gegen 09:38
+> Kommt vermutlich als RE9 aus Ulm Hbf um 09:23 (+10) — Abfahrt wohl erst gegen 09:38
 
 **Geschätzt, nicht gemeldet.** Der einfahrende Zug hat eine andere Nummer und
 oft eine andere Linie: der RE80 nach Würzburg um 09:35 ab Gleis 16 kommt als
@@ -2495,7 +2495,7 @@ Benachrichtigungen — eine falsche Meldung wäre schlimmer als keine.
 **Auf der Trefferkarte**, für Abfahrten der nächsten vier Stunden, steht die
 kurze Fassung — gerade im Regionalverkehr die Frage am Bahnsteig:
 
-> Einsteigen vermutlich ab ca. 12:23 · kommt als RE89 aus Aalen Hbf, an 12:21 (+1)
+> Einsteigen vermutlich ab ca. 12:23 · kommt als RE89 aus Aalen Hbf um 12:21 (+1)
 
 Zwei Minuten nach der Ankunft, damit die Fahrgäste aussteigen können. Ist der
 Zug mehr als zwanzig Minuten vor der Abfahrt da, verspricht die Zeile keine

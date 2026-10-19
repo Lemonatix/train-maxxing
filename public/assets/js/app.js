@@ -125,14 +125,20 @@ let live = null;
  *
  * Die Trefferliste wird bei jeder Auswahl und jedem Regler neu gebaut, und
  * ein offener Bereich entsteht dabei schon offen. Hinge die Einblendung an
- * [open] allein, blinkte er jedes Mal neu auf. `toggle` dagegen feuert nur
- * beim echten Auf- und Zuklappen. Es steigt nicht auf, deshalb die
- * Capture-Phase: so steht die Klasse schon, bevor der Bereich selbst seinen
- * Inhalt baut (renderCard baut erst beim Aufklappen).
+ * [open] allein, blinkte er jedes Mal neu auf.
+ *
+ * BEIM KLICK, NICHT BEI `toggle`. Früher setzte der `toggle`-Handler die
+ * Klasse - aber `toggle` kommt erst einen Frame NACH dem Aufgehen (gemessen:
+ * offen nach 13 ms, Klasse nach 29 ms). Dazwischen stand der Inhalt einmal
+ * voll da, sprang dann auf unsichtbar und blendete ein: es flackerte. Der
+ * Klick auf die Überschrift kommt VOR dem Aufgehen; die Capture-Phase davor
+ * auch vor dem Handler, der den Inhalt erst baut (renderCard). Enter und
+ * Leertaste auf der Überschrift lösen ebenfalls einen Klick aus.
  */
-document.addEventListener('toggle', (e) => {
-  const d = e.target;
-  if (!(d instanceof HTMLDetailsElement) || !d.open) return;
+document.addEventListener('click', (e) => {
+  const summary = e.target.closest?.('summary');
+  const d = summary?.parentElement;
+  if (!(d instanceof HTMLDetailsElement) || d.open || summary !== d.querySelector(':scope > summary')) return;
   d.classList.add('is-opening');
   // Länger als die Einblendung (420 ms in style.css) - sonst bräche sie ab.
   setTimeout(() => d.classList.remove('is-opening'), 600);

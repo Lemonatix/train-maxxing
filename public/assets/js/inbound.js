@@ -103,8 +103,8 @@ export function inboundText(link) {
   const schonDa = Date.parse(an) <= Date.now();
   const verspaetung = z.delay > 0 ? ` (+${z.delay})` : '';
   let text = schonDa
-    ? `Steht vermutlich schon da — kam als ${name} aus ${z.from}, ${hhmm(an)}`
-    : `Kommt vermutlich als ${name} aus ${z.from} · an ${hhmm(z.planned)}${verspaetung}`;
+    ? `Steht vermutlich schon da — kam als ${name} aus ${z.from} um ${hhmm(an)}`
+    : `Kommt vermutlich als ${name} aus ${z.from} um ${hhmm(z.planned)}${verspaetung}`;
   if (!schonDa && !z.real) text += ' nach Fahrplan';
   if (link.expectedDeparture) text += ` — Abfahrt wohl erst gegen ${hhmm(link.expectedDeparture)}`;
 
@@ -120,7 +120,7 @@ export function inboundText(link) {
   } else {
     board = (lange ? `Zug vermutlich ab ca. ${hhmm(new Date(bereitAb).toISOString())} am Gleis`
       : `Einsteigen vermutlich ab ca. ${hhmm(new Date(bereitAb).toISOString())}`)
-      + ` · kommt als ${herkunft}, an ${hhmm(an)}${verspaetung}${z.real ? '' : ' (Fahrplan)'}`;
+      + ` · kommt als ${herkunft} um ${hhmm(an)}${verspaetung}${z.real ? '' : ' (Fahrplan)'}`;
   }
   if (link.expectedDeparture) board += ` · Abfahrt wohl erst ${hhmm(link.expectedDeparture)}`;
   return {
