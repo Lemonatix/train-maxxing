@@ -319,6 +319,10 @@ function renderGroupHead(group) {
 function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   const j = entry.journey;
   const card = el('article', 'journey');
+  // Die Position in der Rangliste: select() in app.js schaltet daran die
+  // Auswahl um, ohne die Liste neu zu bauen. Die Kinder der Liste taugen
+  // dafür nicht - im Nerd-Modus stehen Gruppenköpfe dazwischen.
+  card.dataset.index = String(index);
   if (index === 0) card.classList.add('journey--best');
   if (index === state.selectedIndex) card.classList.add('is-selected');
 
@@ -703,11 +707,26 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   // Der Zustand "aufgeklappt" hängt an der Verbindung, nicht am Element: die
   // Liste wird neu gezeichnet, sobald Ersatzverbindungen oder Tarife
   // nachgeladen sind, und klappte dabei alles wieder zu - mitten im Lesen.
+  //
+  // ERST BEIM AUFKLAPPEN GEBAUT. Jeder Klick in der Liste zeichnet sie neu,
+  // und der Streckenverlauf ist der größte Teil davon: Halte, Umstiegspläne,
+  // Wagenreihung - gemessen 1300 Elemente für sechs Verbindungen, fast alle
+  // in zugeklappten Bereichen, die niemand ansah. Auf schwächeren Telefonen
+  // hing so jeder Regler und jede Auswahl spürbar nach.
   const details = el('details', 'journey__details');
-  details.open = Boolean(j._detailsOpen);
-  details.addEventListener('toggle', () => { j._detailsOpen = details.open; });
   details.append(el('summary', null, 'Streckenverlauf und Details'));
-  details.append(renderLegs(j, entry, state, liveCtl));
+  let gebaut = false;
+  const bauen = () => {
+    if (gebaut) return;
+    gebaut = true;
+    details.append(renderLegs(j, entry, state, liveCtl));
+  };
+  details.open = Boolean(j._detailsOpen);
+  if (details.open) bauen();
+  details.addEventListener('toggle', () => {
+    j._detailsOpen = details.open;
+    if (details.open) bauen();
+  });
   card.append(details);
 
   // --- Alle Tarife der DB ---

@@ -261,7 +261,7 @@ Das Frontend hat keine JavaScript-Abhängigkeiten. Alle API-Pfade sind relativ
 (`api/…`), es funktioniert also in jedem Unterordner ohne Konfiguration.
 
 **Gestaltung:** Glasmorphismus-Grundgerüst wie auf mika-riesterer.de
-(Panels mit `backdrop-filter`, dünne Ränder, Sky/Purple/Emerald als
+(halbtransparente Panels, dünne Ränder, Sky/Purple/Emerald als
 Akzente, Outfit + JetBrains Mono), kombiniert mit der Informationsarchitektur des
 DB-Navigators — große Zeitangaben in Tabellenziffern, farbcodierte
 Zuggattungs-Chips, Zeitachse im Detailbereich, Verkehrsrot als Signalfarbe für
@@ -774,13 +774,26 @@ die gerade Linie.
 
 ### Leistung auf schwacher Hardware
 
-Vier Posten, die auf einem älteren Laptop ohne GPU-Beschleunigung spürbar sind
-und deshalb entschärft wurden:
+Posten, die auf einem älteren Laptop ohne GPU-Beschleunigung oder auf
+Android-Telefonen spürbar sind und deshalb entschärft wurden:
 
-- **`backdrop-filter` nur noch auf `.panel` und `.map`.** Vorher lag er auf
-  zehn Selektoren, davon acht mit inzwischen deckendem Hintergrund — der Blur
-  war dort unsichtbar und kostete trotzdem je eine Compositing-Ebene, bei
-  `.journey` sogar eine **pro Ergebniskarte**.
+- **Kein `backdrop-filter` mehr.** Erst lag er auf zehn Selektoren, davon acht
+  mit deckendem Hintergrund (je eine Compositing-Ebene, bei `.journey` eine
+  **pro Ergebniskarte**). Zuletzt blieb er auf `.panel` und `.map` — und das
+  Suchformular ist ein über 1000 px hohes `.panel` mit allen Reglern darin.
+  Jede Reglerbewegung und jedes Häkchen ließ den Browser die ganze
+  weichgezeichnete Fläche neu rechnen; auf Apple-Geräten unauffällig, auf
+  vielen Android-Telefonen hing jede Eingabe nach. Hinter den Panels liegen
+  nur zwei weiche Radialverläufe, weichgezeichnet sehen sie genauso aus.
+- **Der Streckenverlauf einer Verbindung entsteht erst beim Aufklappen.** Jede
+  Auswahl, Sortierung und Neubewertung baute die Trefferliste neu, samt Halten,
+  Umstiegsplänen und Wagenreihung in den zugeklappten Bereichen: 1300 Elemente
+  für sechs Verbindungen. Jetzt sind es rund 300.
+- **Eine Verbindung antippen schaltet nur die Hervorhebung um**, statt die
+  Liste neu zu bauen (`select()` in `app.js`): gemessen 0,3 statt 25 ms.
+- **Die Regler bewerten gebündelt neu** (`rerankSoon()`): die Zahl daneben
+  folgt sofort, die Liste 150 ms nach dem letzten Schritt. Vorher bewertete
+  jeder Zwischenschritt beim Ziehen die Liste neu und baute sie auf.
 - **Der Hintergrundverlauf liegt auf `body::before`**, nicht mehr per
   `background-attachment: fixed` auf dem `body` selbst. Fixierte Hintergründe
   erzwingen bei jedem Scrollschritt ein Neuzeichnen des ganzen Sichtbereichs;
@@ -801,7 +814,8 @@ transparente Fläche je nach Untergrund einen anderen Kontrast. Beim `<select>`
 kam dazu, dass das aufgeklappte Menü vom System gezeichnet wird — es erbt die
 Textfarbe, malt den Hintergrund aber selbst, was im dunklen Theme fast weißen
 Text auf hellem Menü ergab. Transparenz bleibt deshalb den rein dekorativen
-Containern vorbehalten: `.panel`, `.map`, `.notice`.
+Containern vorbehalten: `.panel`, `.map`, `.notice` — ohne Weichzeichner,
+siehe oben.
 
 **Zurück-Link anpassen:** Oben links führt ein Knopf zurück zur Hauptseite. Das
 Ziel steht in `index.html` und zeigt standardmäßig auf `/`:

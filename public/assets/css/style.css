@@ -73,7 +73,6 @@
   --radius: 12px;
   --radius-sm: 8px;
   --radius-xs: 4px;
-  --blur: blur(12px);
   --glow-accent: 0 6px 22px rgba(2, 132, 199, 0.18);
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
@@ -350,16 +349,17 @@ body::before {
 
 /* --- Panels -------------------------------------------------------- */
 
-/* backdrop-filter nur noch hier und auf .map: das sind die einzigen beiden
-   Flächen, die wirklich halbtransparent sind. Auf allen anderen lag seit der
-   Umstellung auf deckende Flächen ein unsichtbarer Blur — jeder davon kostet
-   eine eigene Compositing-Ebene, bei .journey sogar eine pro Ergebniskarte.
-   Auf älteren Rechnern ohne GPU-Beschleunigung war das der teuerste Posten
-   der Seite. */
+/* KEIN backdrop-filter mehr, auch hier nicht. Hinter den Panels liegen nur
+   die beiden weichen Radialverläufe von body::before - weichgezeichnet sehen
+   sie genauso aus wie ohne. Gekostet hat der Blur dagegen viel: das
+   Suchformular ist über 1000 px hoch und enthält alle Regler, und jede
+   Reglerbewegung, jedes Häkchen zwang den Browser, die ganze
+   weichgezeichnete Fläche neu zu rechnen. Apple-GPUs stecken das weg, viele
+   Android-Telefone und Rechner ohne starke Grafik nicht - dort hing jede
+   Eingabe nach. Vorher war er schon von allen deckenden Flächen entfernt
+   worden (eine Compositing-Ebene je Ergebniskarte). */
 .panel {
   background: var(--surface);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.25rem;
@@ -1164,8 +1164,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .map {
   padding: 0.5rem;
   background: var(--surface);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);

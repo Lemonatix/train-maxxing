@@ -703,8 +703,7 @@ function setupNightValue() {
   regler.addEventListener('input', (e) => {
     state.nightValue = Number(e.target.value) || 0;
     zeigen();
-    saveSettings();
-    if (state.lastPayload) rerank();
+    rerankSoon();
   });
 }
 
@@ -1506,6 +1505,26 @@ function rerank(opts) {
 
   renderNotices($('#notices'), payload.notices, payload.priceSource);
   draw();
+}
+
+/**
+ * Neu bewerten, aber gebündelt: für die Regler.
+ *
+ * Ein Regler feuert beim Ziehen bei jedem Schritt ein `input`, und jedes
+ * davon bewertete die Liste neu und baute sie komplett auf - auf einem
+ * Mittelklasse-Telefon über 100 ms je Schritt, der Regler hing hinterher.
+ * Die Zahl neben dem Regler folgt weiter sofort; die Liste kommt, sobald
+ * man kurz innehält. Gespeichert wird dabei gleich mit.
+ */
+const RERANK_DELAY_MS = 150;
+let rerankTimer = null;
+function rerankSoon() {
+  clearTimeout(rerankTimer);
+  rerankTimer = setTimeout(() => {
+    rerankTimer = null;
+    saveSettings();
+    if (state.lastPayload) rerank();
+  }, RERANK_DELAY_MS);
 }
 
 /** Liste und Karte zeichnen. Beide teilen sich die Auswahl. */
@@ -2608,14 +2627,24 @@ function select(index) {
       Math.ceil((index + 1) / PAGE_SIZE) * PAGE_SIZE,
       state.ranked.length
     );
+    draw();
+  } else {
+    // NUR DIE AUSWAHL UMSCHALTEN. An der Karte einer Verbindung hängt von
+    // der Auswahl nur die Hervorhebung - die ganze Liste dafür neu zu bauen,
+    // kostete auf schwächeren Telefonen bei jedem Antippen spürbar Zeit.
+    for (const c of $('#results-list').querySelectorAll('.journey[data-index]')) {
+      c.classList.toggle('is-selected', Number(c.dataset.index) === index);
+    }
+    map.setData(state.ranked.slice(0, state.visible), state.selectedIndex, select);
+    loadWalks(state.ranked[index]?.journey);
+    drawTripTabs();
   }
-  draw();
 
   // Auf die gewählte Route zoomen. Der Ausschnitt über allen Treffern zeigt
   // sie als eine Linie unter vielen; gewählt hat man sie, um sie anzusehen.
   map.focusJourney(index);
 
-  const card = $('#results-list').children[index];
+  const card = $('#results-list').querySelector(`.journey[data-index="${index}"]`);
   if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
@@ -2692,8 +2721,7 @@ function setupRoutes() {
         show(v);
         if (v === 0) delete state.routePrefs[r.id];
         else state.routePrefs[r.id] = v;
-        saveSettings();
-        if (state.lastPayload) rerank();
+        rerankSoon();
       });
 
       sliders.set(r.id, { slider, show });
@@ -2740,8 +2768,7 @@ function setupRoutes() {
     weight.addEventListener('input', (e) => {
       state.speedWeight = Number(e.target.value);
       showWeight(state.speedWeight);
-      saveSettings();
-      if (state.lastPayload) rerank();
+      rerankSoon();
     });
   }
 }
@@ -2818,8 +2845,7 @@ function setupModels() {
         show(v);
         if (v === 0) delete state.modelPrefs[m.id];
         else state.modelPrefs[m.id] = v;
-        saveSettings();
-        if (state.lastPayload) rerank();
+        rerankSoon();
       });
 
       const ctl = document.createElement('div');
