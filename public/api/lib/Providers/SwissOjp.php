@@ -60,7 +60,7 @@ final class SwissOjp
   <OJPRequest>
     <siri:ServiceRequest>
       <siri:RequestTimestamp>{$jetzt}</siri:RequestTimestamp>
-      <siri:RequestorRef>OmniRail</siri:RequestorRef>
+      <siri:RequestorRef>train-maxxing</siri:RequestorRef>
       <OJPStopEventRequest>
         <siri:RequestTimestamp>{$jetzt}</siri:RequestTimestamp>
         <Location>

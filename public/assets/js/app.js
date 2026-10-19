@@ -22,6 +22,7 @@ import { initBoard } from './board.js';
 import { trips, arrivalOf, tripKey } from './trips.js';
 import { initTrips } from './tripsView.js';
 import { sync } from './sync.js';
+import { IN_APP, siteUrl } from './site.js';
 
 // v2: Zugnummern-Regeln wurden durch Modellbewertungen ersetzt.
 const STORAGE_KEY = 'train-maxxing:v2';
@@ -225,7 +226,10 @@ document.addEventListener('DOMContentLoaded', () => {
  * über HTTPS (oder localhost); sonst läuft die App wie bisher ohne.
  */
 function setupOffline() {
-  if ('serviceWorker' in navigator && window.isSecureContext) {
+  // In der App liegen die Dateien ohnehin im Gerät - und die Antworten der
+  // API kommen von einer anderen Adresse, die der Service Worker gar nicht
+  // abfängt. Er brächte dort nichts.
+  if (!IN_APP && 'serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register('sw.js').catch(() => {
       // Ohne Service Worker geht alles außer dem Offline-Betrieb.
     });
@@ -233,7 +237,7 @@ function setupOffline() {
   const banner = $('#offline');
   let ausCache = false;
   const update = () => { if (banner) banner.hidden = navigator.onLine && !ausCache; };
-  window.addEventListener('omnirail:net', (e) => {
+  window.addEventListener('train-maxxing:net', (e) => {
     ausCache = Boolean(e.detail?.fromCache);
     update();
   });
@@ -966,6 +970,12 @@ function applyTheme(theme, { persist }) {
     btn.title = nextLabel;
     btn.setAttribute('aria-pressed', String(t === 'dark'));
   }
+
+  // In der Android-App: Symbole der Statusleiste passend zum Design - hell
+  // auf dunklem Grund, dunkel auf hellem. "DARK" heißt bei Capacitor
+  // "dunkler Hintergrund". Im Browser gibt es window.Capacitor nicht.
+  window.Capacitor?.Plugins?.SystemBars?.setStyle?.({ style: t === 'dark' ? 'DARK' : 'LIGHT' })
+    ?.catch?.(() => {});
 
   setMapTheme(t);
   if (map) map.applyTheme();
@@ -3107,7 +3117,8 @@ function setupShare() {
   if (!btn) return;
   btn.addEventListener('click', async () => {
     updateShareUrl();
-    const url = location.href;
+    // In der App zeigt der Link auf die Website, nicht auf "localhost".
+    const url = IN_APP ? siteUrl(location.search + location.hash) : location.href;
     const label = btn.textContent;
     try {
       // Auf dem Telefon das native Teilen-Menü, sonst Zwischenablage.

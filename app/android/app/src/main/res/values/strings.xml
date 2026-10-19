@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">train-maxxing</string>
+    <string name="title_activity_main">train-maxxing</string>
+    <string name="package_name">de.mikariesterer.trainmaxxing</string>
+    <string name="custom_url_scheme">de.mikariesterer.trainmaxxing</string>
+</resources>

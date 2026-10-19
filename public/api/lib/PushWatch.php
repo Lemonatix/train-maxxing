@@ -273,7 +273,7 @@ final class PushWatch
         $add = static function (string $key, int $level, string $title, string $body, bool $reminder) use (&$out): void {
             $out[] = ['key' => $key, 'level' => $level, 'title' => $title, 'body' => $body,
                 // Eine Sorte ersetzt die vorige auf dem Sperrbildschirm.
-                'tag' => 'omnirail-' . explode('|', $key)[0] . (str_contains($key, '|') ? '-' . explode('|', $key)[1] : ''),
+                'tag' => 'train-maxxing-' . explode('|', $key)[0] . (str_contains($key, '|') ? '-' . explode('|', $key)[1] : ''),
                 'reminder' => $reminder];
         };
 

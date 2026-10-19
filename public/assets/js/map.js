@@ -385,7 +385,7 @@ export function geoErrorText(err) {
       ? 'Standort ist für die App gesperrt. 1. Einstellungen → Datenschutz & Sicherheit → Ortungsdienste: an, '
         + 'darin „Safari-Websites“ → „Beim Verwenden der App“ oder „Nächstes Mal fragen“. '
         + '2. Einstellungen → Apps → Safari → Standort → „Fragen“. '
-        + '3. OmniRail im App-Umschalter wegwischen, neu öffnen und noch einmal tippen. '
+        + '3. train-maxxing im App-Umschalter wegwischen, neu öffnen und noch einmal tippen. '
         + 'Fragt sie dann immer noch nicht: die Seite einmal in Safari öffnen und dort erlauben.'
       : 'Standortzugriff ist blockiert. Einstellungen → Datenschutz & Sicherheit → Ortungsdienste '
         + '→ Safari-Websites → „Beim Verwenden der App“. In Safari zusätzlich „aA“ → Website-Einstellungen '

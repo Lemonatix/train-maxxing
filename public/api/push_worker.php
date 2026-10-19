@@ -17,7 +17,7 @@ if (PHP_SAPI !== 'cli' && isset($_SERVER['REQUEST_METHOD'])) {
     http_response_code(403);
     exit;
 }
-define('OMNIRAIL_PUSH_CLI', true);
+define('TRAIN_MAXXING_PUSH_CLI', true);
 $_GET = ['action' => 'pushtick'];
 $_SERVER['REQUEST_METHOD'] = 'GET';
 $_SERVER['REMOTE_ADDR'] = 'cron';

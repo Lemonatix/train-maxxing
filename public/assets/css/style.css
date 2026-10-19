@@ -4978,3 +4978,18 @@ details.is-opening[open] > :not(summary) {
 /* Panels, die auftauchen: Live-Verfolgung, angetippter Zug. */
 .live:not([hidden]),
 .train-panel:not([hidden]) { animation: tm-rise 320ms var(--ease-out) both; }
+
+/* In der Android-App (app/, siehe site.js) führt "Zurück zur Hauptseite"
+   ins Leere - die Hauptseite ist die Website, nicht die App. */
+.in-app .back { display: none; }
+
+/* In der App reicht die Seite bis unter Status- und Gestenleiste
+   (viewport-fit=cover, gesetzt von app/scripts/prepare-www.mjs) - so liegt
+   dort der Hintergrund des gewählten Designs statt eines festen Streifens.
+   Der Inhalt hält Abstand. */
+.in-app body {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}

@@ -2437,7 +2437,7 @@ function handlePushSubscribe(Http $http, array $config): void
             'title' => 'Benachrichtigungen sind an',
             'body'  => ($strecke !== '' ? $strecke . ': ' : '')
                 . 'Umstiege kündige ich vorher an, dazu Verspätungen, Gleiswechsel und Ausfälle - auch bei gesperrtem Bildschirm.',
-            'tag'   => 'omnirail-start-bestaetigung',
+            'tag'   => 'train-maxxing-start-bestaetigung',
             'url'   => './',
         ], 300);
         $bestaetigt = $r['ok'];
@@ -2513,7 +2513,7 @@ function handlePushUnsubscribe(array $config): void
 function handlePushTick(Http $http, array $config, Cache $cache): void
 {
     $key = (string) ($config['push']['tick_key'] ?? '');
-    $vonCron = defined('OMNIRAIL_PUSH_CLI');
+    $vonCron = defined('TRAIN_MAXXING_PUSH_CLI');
     if (!$vonCron && ($key === '' || !hash_equals($key, (string) ($_GET['key'] ?? '')))) {
         fail('Nicht erlaubt.', 403);
     }

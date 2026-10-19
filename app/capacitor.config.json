@@ -1,0 +1,8 @@
+{
+  "appId": "de.mikariesterer.trainmaxxing",
+  "appName": "train-maxxing",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#0a0e17"
+  }
+}

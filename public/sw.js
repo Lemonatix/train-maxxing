@@ -22,7 +22,7 @@
 
 // Bei jeder Änderung an dieser Datei hochzählen - dann räumt activate()
 // die alten Caches weg.
-const VERSION = 'omnirail-v11';
+const VERSION = 'train-maxxing-v12';
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 
@@ -149,9 +149,9 @@ async function trim(cache) {
 self.addEventListener('push', (event) => {
   let d = {};
   try { d = event.data ? event.data.json() : {}; } catch { d = { body: event.data?.text() }; }
-  event.waitUntil(self.registration.showNotification(d.title || 'OmniRail', {
+  event.waitUntil(self.registration.showNotification(d.title || 'train-maxxing', {
     body: d.body || '',
-    tag: d.tag || 'omnirail',
+    tag: d.tag || 'train-maxxing',
     renotify: true,
     icon: '/assets/pictures/MMR_v2.png?v=2',
     badge: '/assets/pictures/MMR_v2.png?v=2',

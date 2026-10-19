@@ -159,6 +159,13 @@ sind davon nicht betroffen.
 
 ---
 
+## Android-App
+
+Im Ordner `app/` liegt train-maxxing als Android-App (Capacitor): dieselbe
+Oberfläche, die Daten von der Website. Bauen, signieren und auf der Website
+zum Herunterladen anbieten: siehe [`app/README.md`](app/README.md). Fürs
+iPhone bleibt die Web-App über „Zum Home-Bildschirm".
+
 ## Installation
 
 1. **Hochladen.** Den kompletten Inhalt von `public/` in dein Webverzeichnis
@@ -2425,10 +2432,10 @@ bisher, solange sie offen ist, und sagt das im Panel.
    ```
 2. **Cronjob** in der Verwaltung des Hosters, jede Minute:
    ```
-   * * * * *  php /pfad/zum/webspace/OmniRail/public/api/push_worker.php
+   * * * * *  php /pfad/zum/webspace/train-maxxing/public/api/push_worker.php
    ```
    Kann der Cron nur URLs aufrufen:
-   `https://…/OmniRail/public/api/index.php?action=pushtick&key=<tick_key>`.
+   `https://…/train-maxxing/public/api/index.php?action=pushtick&key=<tick_key>`.
    Geht beim Hoster nur ein Fünf-Minuten-Takt, `'interval' => 300` setzen —
    dann kommen Erinnerungen entsprechend früher statt zu spät.
 3. `check.php` zeigt, ob der Cronjob läuft und wie viele Fahrten angemeldet

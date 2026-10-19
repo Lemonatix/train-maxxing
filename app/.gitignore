@@ -1,0 +1,8 @@
+# Abhängigkeiten und die aus public/ erzeugte Oberfläche (scripts/prepare-www.mjs)
+node_modules/
+www/
+
+# Signierschlüssel - NIE ins Repository. Siehe README.md, "Veröffentlichen".
+*.jks
+*.keystore
+android/keystore.properties

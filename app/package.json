@@ -1,0 +1,22 @@
+{
+  "name": "train-maxxing-app",
+  "private": true,
+  "description": "train-maxxing als Android-App - dieselbe Oberfläche wie public/, die Daten von der Website.",
+  "trainMaxxing": {
+    "site": "https://mika-riesterer.de/train-maxxing/public/"
+  },
+  "scripts": {
+    "www": "node scripts/prepare-www.mjs",
+    "sync": "npm run www && cap sync android",
+    "apk": "npm run sync && cd android && ./gradlew assembleDebug",
+    "apk:release": "npm run sync && cd android && ./gradlew assembleRelease",
+    "open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2"
+  }
+}

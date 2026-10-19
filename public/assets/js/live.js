@@ -26,6 +26,7 @@
  */
 
 import { api } from './api.js';
+import { siteUrl } from './site.js';
 import { wantsInbound, inboundFor, inboundText } from './inbound.js';
 // sameTrain war benutzt, aber nie importiert — siehe trainPosition().
 import { geometryOf, trainLabel, sameTrain, snapToLine, geoErrorText, nextOnLine, lineKey } from './map.js';
@@ -242,7 +243,9 @@ export class LiveTracker {
     this.render();
     try {
       const res = await api.share(this.journey);
-      const url = new URL(location.pathname, location.origin);
+      // Auf die Website, nicht auf die eigene Adresse: in der App wäre das
+      // "localhost" (siehe site.js).
+      const url = new URL(siteUrl());
       url.searchParams.set('live', res.id);
       const text = this.shareText();
       if (navigator.share) {
@@ -863,7 +866,7 @@ ${url.href}`);
     const opts = {
       body,
       // Eine Sorte ersetzt die vorige, statt sich zu stapeln.
-      tag: `omnirail-${kind}`,
+      tag: `train-maxxing-${kind}`,
       renotify: true,
       icon: '/assets/pictures/MMR_v2.png?v=2',
       badge: '/assets/pictures/MMR_v2.png?v=2',

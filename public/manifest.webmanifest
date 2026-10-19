@@ -1,6 +1,6 @@
 {
-  "name": "OmniRail — Zugverbindungen CH · DE · AT",
-  "short_name": "OmniRail",
+  "name": "train-maxxing — Zugverbindungen CH · DE · AT",
+  "short_name": "train-maxxing",
   "description": "Zugverbindungen durch Schweiz, Deutschland und Österreich vergleichen, live verfolgen und Abfahrten ansehen.",
   "lang": "de",
   "start_url": "./",

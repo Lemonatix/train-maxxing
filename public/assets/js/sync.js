@@ -32,6 +32,7 @@
  * es lässt nur die neuen Felder weg, bis es neu lädt.
  */
 import { api } from './api.js';
+import { siteUrl } from './site.js';
 import { trips, mergeTrips, tripsSignature } from './trips.js';
 import { places, mergeFavorites, favoritesSignature } from './favorites.js';
 
@@ -70,9 +71,9 @@ export function formatCode(code) {
   return String(code).match(/.{1,4}/g).join('-');
 }
 
-/** Link, der auf einem anderen Gerät das Verbinden anbietet. */
+/** Link, der auf einem anderen Gerät das Verbinden anbietet - immer auf die Website (site.js). */
 export function codeLink(code) {
-  return `${location.origin}${location.pathname}#sync=${formatCode(code)}`;
+  return siteUrl(`#sync=${formatCode(code)}`);
 }
 
 // --- Krypto ---------------------------------------------------------------
@@ -96,6 +97,9 @@ const keyCache = new Map();
 export async function keysOf(code) {
   if (keyCache.has(code)) return keyCache.get(code);
   const base = await crypto.subtle.importKey('raw', enc.encode(code), 'HKDF', false, ['deriveBits', 'deriveKey']);
+  // NICHT UMBENENNEN, auch wenn das Projekt nicht mehr OmniRail heißt: aus
+  // diesem Salz entstehen Kennung und Schlüssel jedes Sync-Codes. Ein
+  // anderer Wert, und kein verbundenes Gerät fände seinen Block wieder.
   const hkdf = (info) => ({ name: 'HKDF', hash: 'SHA-256', salt: enc.encode('omnirail-trips-v1'), info: enc.encode(info) });
   const id = hex(await crypto.subtle.deriveBits(hkdf('id'), base, 256));
   const key = await crypto.subtle.deriveKey(hkdf('key'), base, { name: 'AES-GCM', length: 256 }, false,

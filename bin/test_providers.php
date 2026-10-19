@@ -581,7 +581,7 @@ pruefe('Ist-Lage aus einem Zuglauf', PushWatch::fromRun($reise['legs'][0], ['sto
 ]]), ['depReal' => $t('10:02'), 'arrReal' => $t('11:08'), 'plat' => '18', 'arrPlat' => '7', 'cancelled' => false]);
 
 // Der Minutentakt, ohne Netz: Echtzeit und Versand sind hereingereicht.
-$ordner = sys_get_temp_dir() . '/omnirail-push-' . getmypid();
+$ordner = sys_get_temp_dir() . '/train-maxxing-push-' . getmypid();
 $watch = new PushWatch($ordner);
 $abo = ['endpoint' => 'https://fcm.googleapis.com/fcm/send/test', 'keys' => ['p256dh' => 'x', 'auth' => 'y']];
 $watch->save($abo, $reise);

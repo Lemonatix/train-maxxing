@@ -143,7 +143,7 @@ export function createSyncPanel() {
     reihe.append(button('Link teilen', async () => {
       const url = codeLink(code);
       if (navigator.share) {
-        try { await navigator.share({ title: 'OmniRail – Reisen abgleichen', url }); } catch { /* abgebrochen */ }
+        try { await navigator.share({ title: 'train-maxxing – Reisen abgleichen', url }); } catch { /* abgebrochen */ }
       } else {
         kopieren(url, 'Link kopiert.');
       }

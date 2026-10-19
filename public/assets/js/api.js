@@ -3,9 +3,12 @@
  *
  * Alle Aufrufe gehen relativ auf ./api/ - dadurch funktioniert das Tool in
  * jedem Unterordner deiner Website, ohne dass du eine Domain konfigurieren musst.
+ * In der Android-App auf ./api/ der Website - siehe site.js.
  */
 
-const BASE = new URL('api/', document.baseURI).href;
+import { siteUrl } from './site.js';
+
+const BASE = siteUrl('api/');
 
 async function call(action, params = {}, { signal } = {}) {
   const url = new URL(BASE);
@@ -44,7 +47,7 @@ async function call(action, params = {}, { signal } = {}) {
   // Auch der Offline-Hinweis oben hängt daran: "navigator.onLine" sagt nur,
   // ob das Gerät ein Netz hat, nicht, ob der Server erreichbar ist.
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('omnirail:net', { detail: { fromCache: Boolean(data.fromCache) } }));
+    window.dispatchEvent(new CustomEvent('train-maxxing:net', { detail: { fromCache: Boolean(data.fromCache) } }));
   }
 
   return data;

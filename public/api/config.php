@@ -12,9 +12,15 @@
  */
 
 $config = [
-    // Wer darf das Frontend-API aufrufen? Leeres Array = gleiche Domain (empfohlen).
-    // Beispiel: ['https://deine-domain.tld'] wenn das Frontend woanders liegt.
-    'cors_origins' => [],
+    // Wer darf das Frontend-API aufrufen? Die eigene Domain immer (dafür
+    // braucht es keinen Eintrag). Beispiel: ['https://deine-domain.tld'] wenn
+    // das Frontend woanders liegt.
+    //
+    // https://localhost ist die Android-App (app/, Capacitor): sie lädt die
+    // Oberfläche aus dem Gerät unter dieser Adresse und fragt von dort die
+    // API auf der Website. Ohne den Eintrag blockt der Browser in der App
+    // jede Antwort.
+    'cors_origins' => ['https://localhost'],
 
     // Cache-Verzeichnis. Muss vom Webserver beschreibbar sein.
     // Standard: <api>/cache. Wenn dein Hoster das nicht mag, z.B. sys_get_temp_dir().
