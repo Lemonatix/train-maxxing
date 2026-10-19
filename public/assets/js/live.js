@@ -28,7 +28,7 @@
 import { api } from './api.js';
 import { wantsInbound, inboundFor, inboundText } from './inbound.js';
 // sameTrain war benutzt, aber nie importiert — siehe trainPosition().
-import { geometryOf, trainLabel, sameTrain, snapToLine, geoErrorText } from './map.js';
+import { geometryOf, trainLabel, sameTrain, snapToLine, geoErrorText, nextOnLine, lineKey } from './map.js';
 import { spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
 import { typeOf } from './data/trains.js';
 import { affectsWindow } from './mvgTicker.js';
@@ -185,6 +185,8 @@ export class LiveTracker {
     this.gezeigteMeldungen = new Set();
     this.options = [];       // Alternativen ab dem Umsteigebahnhof
     this.optionsFor = null;  // zu welchem risk.key die Alternativen gehören
+    this.taktFor = null;     // zu welchem risk.key die Tafel gefragt wurde
+    this.taktNext = null;    // nächste Fahrt derselben Linie, siehe loadTakt()
     this.optionsLoading = false;
     /** Liefert Klasse, Abos und Verkehrsmittel für Folgeabfragen. */
     this.context = () => ({ travelClass: 2, discounts: [], products: [] });
@@ -192,6 +194,8 @@ export class LiveTracker {
     this.onChange = null;
     /** Wird mit der verfolgten Verbindung gerufen, damit sie gesichert werden kann. */
     this.onJourneyChange = null;
+    /** Zur Live-Karte wechseln - setzt app.js, die Karte liegt in einem eigenen Tab. */
+    this.onShowMap = null;
 
     /** Benachrichtigungen bei Ausfall, Verspätung, Gleiswechsel. */
     this.notify = readNotifyPref() && LiveTracker.canNotify()
@@ -510,6 +514,8 @@ ${url.href}`);
     this.risk = null;
     this.options = [];
     this.optionsFor = null;
+    this.taktFor = null;
+    this.taktNext = null;
     this.updatedAt = null;
     this.error = null;
     this.alerted = new Map();
@@ -637,8 +643,16 @@ ${url.href}`);
     // den Zugläufen und vor dem ersten Zeichnen - die Verspätung, wegen der
     // man hinschaut, wartete also auf zwei Dinge, die sie gar nicht braucht.
     // Jetzt laufen sie nebeneinander und zeichnen nach, wenn sie da sind.
+    //
+    // Danach noch einmal die Meldungen: ob ein verpasster Bus im Takt
+    // aufgefangen wird, steht erst fest, wenn die Tafel geantwortet hat -
+    // siehe collectAlerts().
     Promise.allSettled([this.loadOptions(), this.loadMvgMessages()])
-      .then(() => { if (this.journey) this.render(); });
+      .then(() => {
+        if (!this.journey) return;
+        this.render();
+        this.checkAlerts();
+      });
   }
 
   /**
@@ -751,11 +765,18 @@ ${url.href}`);
     const now = Date.now();
 
     const r = this.risk;
-    if (r && r.status !== 'ok') {
+    // Ein Umstieg auf Taktverkehr wird erst gemeldet, wenn die Tafel
+    // geantwortet hat. Sonst käme zuerst "Anschluss weg" aufs Telefon und
+    // eine Minute später die Entwarnung, dass der nächste Bus in sieben
+    // Minuten fährt.
+    const wartetAufTafel = r && r.status !== 'cancelled' && this.isTakt(r) && this.taktFor !== r.key;
+    if (r && r.status !== 'ok' && !wartetAufTafel) {
+      const takt = this.taktFor === r.key ? this.taktNext : null;
       out.push({
         key: `risk|${r.key}`,
-        level: { risky: 1, missed: 2, cancelled: 3 }[r.status] || 1,
-        title: { cancelled: 'Zug fällt aus', missed: 'Anschluss weg' }[r.status] || 'Anschluss wird knapp',
+        // Im Takt ist ein verpasster Umstieg eine Wartezeit, kein Notfall.
+        level: takt && r.status !== 'cancelled' ? 1 : ({ risky: 1, missed: 2, cancelled: 3 }[r.status] || 1),
+        title: this.riskTitle(r),
         body: this.riskText(r),
       });
     }
@@ -974,8 +995,28 @@ ${url.href}`);
     return box;
   }
 
+  /** Überschrift zur Gefahr - im Panel und in der Benachrichtigung dieselbe. */
+  riskTitle(r) {
+    const takt = r.status !== 'cancelled' && this.taktFor === r.key && this.taktNext;
+    if (takt) return r.status === 'missed' ? 'Umstieg verpasst' : 'Umstieg wird knapp';
+    return { cancelled: 'Zug fällt aus', missed: 'Anschluss weg' }[r.status] || 'Anschluss wird knapp';
+  }
+
+  /** Fährt der Anschluss im Takt (S, U, Tram, Bus)? Siehe `frequent` in trains.js. */
+  isTakt(r) {
+    const leg = this.legs[r?.legIndex]?.leg;
+    return Boolean(leg && typeOf(leg).frequent && lineKey(leg) !== '');
+  }
+
   /** Der Satz zur Gefahr - im Panel und in der Benachrichtigung derselbe. */
   riskText(r) {
+    const n = r.status !== 'cancelled' && this.taktFor === r.key ? this.taktNext : null;
+    if (n) {
+      const um = fmtTime(n.real || n.planned);
+      return r.status === 'missed'
+        ? `${r.train} in ${r.station?.name} fährt ${Math.abs(r.gap)} min vor deiner Ankunft — die nächste um ${um}.`
+        : `Nur ${r.gap} min für den Umstieg auf ${r.train} in ${r.station?.name} — sonst die nächste um ${um}.`;
+    }
     return {
       cancelled: `${r.train} ab ${r.station?.name} fällt aus.`,
       missed: `${r.train} in ${r.station?.name} ist ${Math.abs(r.gap)} min vor deiner Ankunft weg.`,
@@ -1135,10 +1176,56 @@ ${url.href}`);
     return worst;
   }
 
+  /**
+   * Die nächste Fahrt derselben Linie nach der tatsächlichen Ankunft.
+   *
+   * TAKTVERKEHR FÄNGT AUF. Wer den Bus 181 verpasst, nimmt den nächsten 181
+   * sieben Minuten später - und braucht keine neue Route über die halbe
+   * Stadt. Früher stand hier "Anschluss weg" und "Keine spätere Verbindung
+   * gefunden". Gefragt wird die Abfahrtstafel, wie bei der Trefferliste
+   * (loadNextOnLine in app.js); gezählt wird ab der Ankunft, nicht ab der
+   * geplanten Abfahrt.
+   *
+   * @returns {Promise<boolean>} true, wenn eine nächste Fahrt feststeht
+   */
+  async loadTakt() {
+    const r = this.risk;
+    if (!r || r.status === 'cancelled' || !this.isTakt(r)) return false;
+    if (this.taktFor === r.key) return this.taktNext !== null;
+
+    const leg = this.legs[r.legIndex].leg;
+    const ab = new Date(r.arrivalAt);
+    const p = (n) => String(n).padStart(2, '0');
+    let treffer = null;
+    try {
+      const res = await api.departures({
+        station: leg.from.id,
+        lat: leg.from.lat, lon: leg.from.lon,
+        date: `${ab.getFullYear()}-${p(ab.getMonth() + 1)}-${p(ab.getDate())}`,
+        time: `${p(ab.getHours())}:${p(ab.getMinutes())}`,
+        type: 'dep',
+        duration: 60,
+      });
+      treffer = nextOnLine({ ...leg, departure: ab.toISOString() }, res.departures || []);
+    } catch { /* dann eben die ganze Verbindungssuche */ }
+    // Zwischenzeitlich kann sich das Risiko geändert haben.
+    if (this.risk?.key !== r.key) return false;
+    this.taktFor = r.key;
+    this.taktNext = treffer;
+    return treffer !== null;
+  }
+
   /** Alternativen ab dem gefährdeten Umsteigebahnhof holen. */
   async loadOptions() {
     if (!this.risk) { this.options = []; this.optionsFor = null; return; }
     if (this.optionsFor === this.risk.key || this.optionsLoading) return;
+
+    // Fängt der Takt auf, braucht es keine neue Route.
+    if (await this.loadTakt()) {
+      this.options = [];
+      this.optionsFor = this.risk.key;
+      return;
+    }
 
     const trains = LiveTracker.trackableLegs(this.journey);
     const dest = trains[trains.length - 1]?.to?.id;
@@ -1625,6 +1712,18 @@ ${url.href}`);
       ctl.append(bell);
     }
 
+    // Die Route liegt auf der Live-Karte, einen Tab weiter.
+    if (this.onShowMap) {
+      const karte = el('button', 'live__gps live__map', 'Karte');
+      karte.type = 'button';
+      karte.title = 'Die Fahrt mit der Position des Zuges auf der Live-Karte zeigen.';
+      karte.addEventListener('click', () => {
+        this.map?.fitTracked();
+        this.onShowMap();
+      });
+      ctl.append(karte);
+    }
+
     // Ankunft teilen: ein Link, der beim Empfänger live mitläuft.
     const teilen = el('button', 'live__gps live__share', this.shareState || 'Teilen');
     teilen.type = 'button';
@@ -1675,12 +1774,19 @@ ${url.href}`);
     const box = el('section', `live__risk live__risk--${r.status}`);
 
     const head = el('div', 'live__risk-head');
-    head.append(el('strong', null, {
-      cancelled: 'Zug fällt aus',
-      missed: 'Anschluss weg',
-    }[r.status] || 'Anschluss wird knapp'));
+    head.append(el('strong', null, this.riskTitle(r)));
     head.append(el('span', 'live__risk-text', this.riskText(r)));
     box.append(head);
+
+    // Im Takt ist die nächste Fahrt die ganze Antwort - schon im Satz oben.
+    if (r.status !== 'cancelled' && this.taktFor === r.key && this.taktNext) {
+      box.classList.add('live__risk--takt');
+      return box;
+    }
+    if (r.status !== 'cancelled' && this.isTakt(r) && this.taktFor !== r.key) {
+      box.append(el('p', 'live__risk-note', 'Nächste Fahrt dieser Linie wird geprüft …'));
+      return box;
+    }
 
     if (this.optionsLoading) {
       box.append(el('p', 'live__risk-note', 'Suche Alternativen …'));

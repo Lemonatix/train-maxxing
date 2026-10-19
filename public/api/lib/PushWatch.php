@@ -47,6 +47,12 @@ final class PushWatch
     private const LONG = ['ICE', 'ICN', 'IC', 'EC', 'ECE', 'RJ', 'RJX', 'NJ', 'EN', 'TGV', 'FLX', 'WB', 'IR',
         'D', 'EST', 'THA', 'ES', 'FR', 'IRE', 'EUR'];
 
+    /**
+     * Gattungen im Takt, wie `frequent` in data/trains.js: ein verpasster
+     * Umstieg darauf kostet meist eine Taktlücke, nicht die Verbindung.
+     */
+    private const FREQUENT = ['S', 'U', 'TRAM', 'STR', 'BUS', 'SEV'];
+
     private string $dir;
 
     public function __construct(string $cacheDir)
@@ -231,6 +237,7 @@ final class PushWatch
                 'idx'         => $idx,
                 'label'       => self::label($leg),
                 'long'        => in_array($cat, self::LONG, true),
+                'frequent'    => in_array($cat, self::FREQUENT, true),
                 'direction'   => trim((string) ($leg['direction'] ?? '')),
                 'fromName'    => (string) ($leg['from']['name'] ?? ''),
                 'toName'      => (string) ($leg['to']['name'] ?? ''),
@@ -327,10 +334,22 @@ final class PushWatch
                     $luecke = (int) floor(($weiterAb - $an) / 60) - $l['walkAfter'];
                     if ($luecke < self::SAFE_TRANSFER_MIN) {
                         $weg = $luecke < 0;
-                        $add('risk|' . $i, $weg ? 2 : 1, $weg ? 'Anschluss weg' : 'Anschluss wird knapp',
-                            $weiter['label'] . ' in ' . $weiter['fromName'] . ' fährt ' . $uhr($weiterAb)
-                            . ($weg ? ' — ' . abs($luecke) . ' Min vor deiner Ankunft. In der App nach Alternativen schauen.'
-                                : ' — nur ' . max(0, $luecke) . ' Min zum Umsteigen.'), false);
+                        // TAKT: Wer den Bus 181 verpasst, nimmt den nächsten.
+                        // Das ist eine Wartezeit, kein Notfall - also keine
+                        // höhere Stufe und kein "Anschluss weg". Wann der
+                        // nächste fährt, weiss erst die Abfahrtstafel; die
+                        // fragt die App, nicht der Cronjob.
+                        if ($weiter['frequent'] ?? false) {
+                            $add('risk|' . $i, 1, $weg ? 'Umstieg verpasst' : 'Umstieg wird knapp',
+                                $weiter['label'] . ' in ' . $weiter['fromName'] . ' fährt ' . $uhr($weiterAb)
+                                . ($weg ? ' — ' . abs($luecke) . ' Min vor deiner Ankunft. Nimm die nächste Fahrt der Linie; die App zeigt, wann sie kommt.'
+                                    : ' — nur ' . max(0, $luecke) . ' Min zum Umsteigen, sonst die nächste Fahrt der Linie.'), false);
+                        } else {
+                            $add('risk|' . $i, $weg ? 2 : 1, $weg ? 'Anschluss weg' : 'Anschluss wird knapp',
+                                $weiter['label'] . ' in ' . $weiter['fromName'] . ' fährt ' . $uhr($weiterAb)
+                                . ($weg ? ' — ' . abs($luecke) . ' Min vor deiner Ankunft. In der App nach Alternativen schauen.'
+                                    : ' — nur ' . max(0, $luecke) . ' Min zum Umsteigen.'), false);
+                        }
                     }
                 }
             }

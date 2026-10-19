@@ -129,6 +129,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Eine geteilte Suche aus der URL hat Vorrang vor gespeicherten Werten.
   const shared = applyShareUrl();
   map = new RouteMap($('#map'));
+  // Die Karte liegt im Tab "Live-Karte" und zeichnet erst, wenn er offen
+  // ist - siehe setActive() in map.js und setupTabs().
+  map.setActive(false);
   // Nach Verschieben oder Zoomen die Züge im neuen Ausschnitt nachladen.
   map.onViewChange = scheduleLiveTrains;
   map.onTrainClick = showTrainDetails;
@@ -145,6 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
     products: state.products,
   });
   live.onJourneyChange = saveTracked;
+  live.onShowMap = () => showLiveMap();
 
   setupTabs();
   setupMode();
@@ -223,16 +227,23 @@ let board = null;
 let tripsView = null;
 
 /**
- * Drei Tabs: Verbindungen, Abfahrtstafel, gemerkte Reisen. Tafel und Reisen
- * werden erst beim ersten Öffnen aufgebaut - wer nur Verbindungen sucht,
- * lädt sie nie. Beim Zurückschalten muss die Karte neu zeichnen: solange
- * ihr Tab verborgen war, war sie null Pixel groß.
+ * Vier Tabs, in dieser Reihenfolge: Verbindungen, gemerkte Reisen,
+ * Live-Karte, Abfahrtstafel. Tafel und Reisen werden erst beim ersten Öffnen
+ * aufgebaut - wer nur Verbindungen sucht, lädt sie nie.
  *
- * Der Tab steht in der Adresse (#abfahrten, #reisen), damit er ein Neuladen
- * übersteht und sich als Lesezeichen speichern lässt.
+ * DIE KARTE HAT EINEN EIGENEN TAB. Sie stand früher über der Trefferliste
+ * und wurde bei jeder Suche, Auswahl und Zugposition neu gezeichnet - auf
+ * schwachen Geräten ruckelte dadurch die ganze Seite. Verborgen nimmt sie
+ * nur noch Daten an (map.setActive), und Live-Züge werden nur geholt,
+ * solange sie offen ist oder eine Fahrt verfolgt wird.
+ *
+ * Der Tab steht in der Adresse (#reisen, #karte, #abfahrten), damit er ein
+ * Neuladen übersteht und sich als Lesezeichen speichern lässt.
  */
-const TAB_HASH = { search: '', board: '#abfahrten', trips: '#reisen' };
+const TAB_HASH = { search: '', trips: '#reisen', map: '#karte', board: '#abfahrten' };
 let showTab = () => {};
+/** Der offene Tab - die Karte fragt danach, ob sie Züge holen soll. */
+let currentTab = 'search';
 
 function setupTabs() {
   const namen = Object.keys(TAB_HASH);
@@ -269,7 +280,18 @@ function setupTabs() {
     } else {
       tripsView?.deactivate();
     }
-    if (name === 'search') requestAnimationFrame(() => map?.render());
+    currentTab = name;
+    if (name === 'map') {
+      // Erst sichtbar machen, dann messen: im nächsten Frame hat die Karte
+      // ihre echte Größe, und ein aufgeschobener Ausschnitt passt.
+      requestAnimationFrame(() => {
+        map?.setActive(true);
+        openLiveMap();
+      });
+    } else {
+      map?.setActive(false);
+      stopLiveRefresh();
+    }
     if (remember) {
       history.replaceState(null, '', location.pathname + location.search + TAB_HASH[name]);
     }
@@ -604,6 +626,11 @@ function applyMode() {
 // ======================================================================
 
 function setupSort() {
+  // Die Routen der Trefferliste auf der Live-Karte, mit der gewählten im Bild.
+  $('#show-map')?.addEventListener('click', () => {
+    map.focusJourney(state.selectedIndex);
+    showLiveMap();
+  });
   const sel = $('#sort');
   if (!sel) return;
   sel.value = state.sort;
@@ -2131,6 +2158,52 @@ function scheduleLiveTrains() {
   liveTimer = setTimeout(fetchLiveTrains, 600);
 }
 
+/** Die Züge alle 30 s neu holen, solange die Live-Karte offen ist - so lange hält auch der Server sie. */
+const LIVE_REFRESH_MS = 30_000;
+let liveRefresh = null;
+
+/**
+ * Die Live-Karte wurde geöffnet.
+ *
+ * Die Züge laden SOFORT, ohne vorher zu suchen. Früher erschienen sie erst
+ * nach der ersten Suche - die Karte hing unter der Suchmaske, und ohne
+ * Route gab es keinen Grund, Positionen zu holen. Im eigenen Tab ist das
+ * anders: wer ihn öffnet, will sehen, was fährt.
+ *
+ * Der Überblick beim ersten Öffnen ist dafür zu groß (der Server liefert
+ * höchstens 6 × 10 Grad, siehe handleLiveTrains). Ohne Route wird deshalb
+ * so weit hineingezoomt, dass er passt.
+ */
+function openLiveMap() {
+  if (state.ranked.length === 0 && !live?.journey) {
+    for (let i = 0; i < 6; i++) {
+      const [s, w, n, e] = map.bounds();
+      if (n - s <= 6 && e - w <= 10) break;
+      map.zoom += 0.5;
+    }
+    map.render();
+  }
+  fetchLiveTrains();
+  stopLiveRefresh();
+  liveRefresh = setInterval(() => {
+    if (document.visibilityState === 'visible') fetchLiveTrains();
+  }, LIVE_REFRESH_MS);
+}
+
+/**
+ * Zur Live-Karte springen, von einem Knopf weiter unten auf der Seite aus.
+ * Ohne Hochscrollen stünde man mitten in der Karte oder darunter.
+ */
+function showLiveMap() {
+  showTab('map');
+  $('.tabs')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function stopLiveRefresh() {
+  clearInterval(liveRefresh);
+  liveRefresh = null;
+}
+
 // ======================================================================
 // Bestpreise über den Tag
 // ======================================================================
@@ -2481,13 +2554,12 @@ function renderTrainPanel(panel, head, t) {
 }
 
 async function fetchLiveTrains() {
-  // Auch ohne Trefferliste sinnvoll, sobald eine Verbindung verfolgt wird -
-  // dann liefern die Live-Züge die gemeldete Position des eigenen Zuges.
-  // Und sobald man in eine Stadt hineinzoomt: wer die Karte über München
-  // aufzieht, will die U-Bahnen sehen, auch ohne vorher zu suchen.
-  const [s, , n] = map.bounds();
-  const nah = n - s <= 1.5;
-  if (!state.liveTrains || (state.ranked.length === 0 && !live?.journey && !nah)) return;
+  // Bei offener Live-Karte immer, auch ohne Suche. Bei verborgener Karte nur
+  // noch, wenn eine Fahrt verfolgt wird: dann braucht die Live-Verfolgung
+  // die gemeldete Position des eigenen Zuges. Sonst würde für eine Karte
+  // geladen, die niemand sieht.
+  if (!state.liveTrains) return;
+  if (currentTab !== 'map' && !live?.journey) return;
 
   if (liveAbort) liveAbort.abort();
   liveAbort = new AbortController();

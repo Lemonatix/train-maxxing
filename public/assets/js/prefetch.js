@@ -126,9 +126,17 @@ export function pendingLoads(ranked, visible) {
       }
 
       const gap = leg.transferMin;
-      if (typeof gap !== 'number' || gap < TIGHT_MIN) continue;
+      if (typeof gap !== 'number') continue;
+      const takt = typeOf(leg).frequent === true;
+      // Null oder weniger Minuten: im Fernverkehr ein Datenfehler, der keine
+      // Abfrage lohnt. Im Taktverkehr dagegen genau der Fall, in dem man
+      // wissen will, wann die nächste Fahrt kommt - ebenso, wenn die
+      // Echtzeit den Anschluss schon gekappt hat.
+      if (gap < TIGHT_MIN && !takt) continue;
+      const live = typeof leg.transferMinLive === 'number' ? leg.transferMinLive : gap;
       // Knapp nach Minuten ODER wackelig nach der Pünktlichkeit des Zubringers.
-      const knapp = gap <= TIGHT_MAX || (missChance(journey, leg)?.chance ?? 0) >= RISK_SHOW;
+      const knapp = Math.min(gap, live) <= TIGHT_MAX
+        || (missChance(journey, leg)?.chance ?? 0) >= RISK_SHOW;
       if (!knapp || !leg.from?.id) continue;
 
       // TAKTVERKEHR: hier ist die nächste ganze Verbindung zum Ziel die

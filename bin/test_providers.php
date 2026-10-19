@@ -219,6 +219,25 @@ pruefe('Zubringer + ICE: eine Verbindung, Preis vom ICE',
     [1, 79.99, 'from', 264]);
 
 // ---------------------------------------------------------------------
+echo "\nDB - Abfahrtstafel an Halten, die HAFAS nicht kennt\n";
+
+// Aufgezeichnet an der Bushaltestelle Studentenstadt (790669), gekürzt.
+$tafelDb = DbVendo::mapBoard(['entries' => [
+    ['bahnhofsId' => '790669', 'zeit' => '2026-10-20T16:39:00', 'journeyId' => '2|#VN#1#ZE#181#',
+        'verkehrmittel' => ['name' => 'Bus 181', 'linienNummer' => '181', 'kurzText' => 'Bus', 'produktGattung' => 'BUS'],
+        'terminus' => 'Wallnerstraße'],
+    ['bahnhofsId' => '625226', 'zeit' => '2026-10-19T16:16:00', 'ezZeit' => '2026-10-19T16:18:00',
+        'verkehrmittel' => ['name' => 'U6', 'linienNummer' => 'U6', 'kurzText' => 'U', 'produktGattung' => 'UBAHN'],
+        'terminus' => 'Goetheplatz'],
+    ['bahnhofsId' => '1', 'verkehrmittel' => ['name' => 'ohne Zeit']],
+]]);
+pruefe('Bus: Gattung, Linie, Richtung, Planzeit mit Zone',
+    [$tafelDb[0]['category'], $tafelDb[0]['line'], $tafelDb[0]['direction'], $tafelDb[0]['planned'], $tafelDb[0]['real']],
+    ['Bus', '181', 'Wallnerstraße', '2026-10-20T16:39:00+02:00', null]);
+pruefe('U-Bahn mit Ist-Zeit: zwei Minuten Verspätung', [$tafelDb[1]['category'], $tafelDb[1]['delay']], ['U', 2]);
+pruefe('Eintrag ohne Zeit fällt weg', count($tafelDb), 2);
+
+// ---------------------------------------------------------------------
 echo "\nDB - Zuglauf für die Live-Verfolgung (U-Bahn, Tram)\n";
 
 $lauf = DbVendo::mapTrip([
@@ -538,6 +557,17 @@ pruefe('+11 Min: Verspätung Stufe 10, Anschluss knapp', array_map(static fn($e)
 $spaet[0]['arrReal'] = $t('11:17');
 $ev = PushWatch::events($spaet, $t('10:30'));
 pruefe('+14 Min: Anschluss weg', array_values(array_filter(array_map(static fn($e) => $e['key'] === 'risk|0' ? [$e['title'], $e['level']] : null, $ev)))[0] ?? null, ['Anschluss weg', 2]);
+// Derselbe verpasste Umstieg auf einen Bus im Takt: Wartezeit, kein Notfall.
+$takt = $spaet;
+$takt[1]['frequent'] = true;
+$ev = PushWatch::events($takt, $t('10:30'));
+pruefe('Takt: Umstieg verpasst, nur Stufe 1', array_values(array_filter(array_map(static fn($e) => $e['key'] === 'risk|0' ? [$e['title'], $e['level']] : null, $ev)))[0] ?? null, ['Umstieg verpasst', 1]);
+pruefe('Bus und U-Bahn gelten als Takt', array_column(PushWatch::normalize(['legs' => [
+    ['mode' => 'train', 'category' => 'Bus', 'line' => '181', 'from' => ['name' => 'A'], 'to' => ['name' => 'B'], 'departure' => $iso('10:00'), 'arrival' => $iso('10:10')],
+    ['mode' => 'train', 'category' => 'U', 'line' => 'U6', 'from' => ['name' => 'B'], 'to' => ['name' => 'C'], 'departure' => $iso('10:15'), 'arrival' => $iso('10:20')],
+    ['mode' => 'train', 'category' => 'ICE', 'trainNumber' => '1', 'from' => ['name' => 'C'], 'to' => ['name' => 'D'], 'departure' => $iso('10:30'), 'arrival' => $iso('11:20')],
+]]), 'frequent'), [true, true, false]);
+
 $gleis = $legs;
 $gleis[1]['plat'] = '11';
 pruefe('Gleiswechsel am Umsteigebahnhof', array_values(array_filter($schluesselVon(PushWatch::events($gleis, $t('10:30'))), static fn($k) => str_starts_with($k, 'gleis'))), ['gleis|1|11']);

@@ -1057,6 +1057,11 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .map-wrap { margin-top: 1rem; }
 
+/* Im eigenen Tab darf die Karte den Platz nehmen, den sie über der
+   Trefferliste nicht hatte. */
+.map-view .map-wrap { margin-top: 0; }
+.map-view .map__viewport { height: clamp(360px, 70vh, 820px); }
+
 .map-bar {
   display: flex;
   flex-wrap: wrap;
@@ -1974,6 +1979,14 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   color: var(--text-muted);
 }
 
+/* Rechtsbündig: der Weg zur Live-Karte, wo die Routen jetzt liegen. */
+.results-bar__map {
+  margin-left: auto;
+  min-height: 34px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+
 .results { display: flex; flex-direction: column; gap: 0.7rem; margin-top: 1rem; }
 
 .empty { padding: 2.5rem 0; text-align: center; color: var(--text-muted); }
@@ -2138,6 +2151,11 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .live__risk--risky .live__risk-head strong { color: var(--amber); }
 .live__risk--missed .live__risk-head strong,
 .live__risk--cancelled .live__risk-head strong { color: var(--rose); }
+
+/* Im Takt aufgefangen: Auskunft statt Alarm. Steht nach den Stufen, damit
+   es auch einen verpassten Umstieg (--missed) beruhigt. */
+.live__risk.live__risk--takt { border-left-color: var(--accent); background: var(--accent-soft); }
+.live__risk--takt .live__risk-head strong { color: var(--accent); }
 
 /* Meldungen füllen höchstens zwei Zeilen. Was nicht hineinpasst, endet mit
    "…"; ein Tipp zeigt den ganzen Satz (Klasse is-open, siehe live.js). Vier
@@ -2624,6 +2642,14 @@ details.live__msg .live__msg-text {
 .badge--risky,
 .badge--tight { border-color: color-mix(in srgb, currentColor 35%, transparent); }
 .badge.badge--cancelled { border-color: var(--rose); }
+
+/* Umstieg im Takt: kein Alarm, nur die Auskunft, wann die nächste fährt. */
+.badge--takt {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+.badge--takt .badge__icon { color: var(--accent); }
 
 /* Ab dem zweiten Tag: "+1" an der Uhrzeit. */
 .journey__day,
@@ -4466,6 +4492,15 @@ details.live__msg .live__msg-text {
 .tab:hover { color: var(--text); }
 .tab.is-active { color: var(--accent); border-bottom-color: var(--accent); }
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Vier Tabs auf dem Telefon: einzeilig und enger. Reicht die Breite
+   trotzdem nicht, scrollt die Leiste waagrecht - die Seite nicht. */
+.tab { white-space: nowrap; }
+@media (max-width: 480px) {
+  .tabs { gap: 0; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: 1 0 auto; padding: 0.5rem 0.6rem; font-size: 0.92rem; }
+}
 
 /* --- Abfahrtstafel ------------------------------------------------- */
 

@@ -1176,6 +1176,21 @@ function handleDepartures(Http $http, array $config, Cache $cache): void
         }
     }
 
+    // DB als letzte Quelle: sie kennt die lokalen Halte, über die sie
+    // routet (Bushaltestellen mit DB-Kennung wie 790669), auch dort, wo
+    // HAFAS ablehnt und die MVG nicht so weit vorausschaut. Siehe
+    // DbVendo::departures().
+    if ($entries === [] && !$isMvg && !$arrivals && ($config['providers']['db']['enabled'] ?? false) === true) {
+        $res = (new DbVendo($http, $config['providers']['db']))->departures($station, $date, $time);
+        if ($res['ok'] && $res['data'] !== []) {
+            $entries = $res['data'];
+            $sources[] = 'db';
+            $error = null;
+        } elseif ($error === null) {
+            $error = $res['error'];
+        }
+    }
+
     if ($entries === [] && $error !== null) {
         fail('Tafel nicht verfügbar: ' . $error, 502);
     }

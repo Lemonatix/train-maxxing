@@ -213,6 +213,48 @@ export function lineKey(x) {
 }
 
 /**
+ * Dieselbe Linie, auch wenn die Quellen sie verschieden schreiben.
+ *
+ * Die Verbindung kommt von der DB oder der ÖBB, die Tafel in München von
+ * der MVG - und die schreiben "Bus 181" bzw. "181", "STR 17" bzw. "17".
+ * Abgeschnitten wird nur ein vorangestelltes Verkehrsmittelwort, und nur,
+ * wenn danach noch eine Ziffer steht: "U6" bleibt "U6", "X36" bleibt "X36".
+ */
+export function sameLine(a, b) {
+  const ka = lineKey(a);
+  const kb = lineKey(b);
+  if (ka === '' || kb === '') return false;
+  if (ka === kb) return true;
+  const kern = (k) => k.replace(/^(bus|tram|str|stb|sev)(?=\d)/, '');
+  return kern(ka) === kern(kb);
+}
+
+/**
+ * Dieselbe Richtung, auch wenn die Quellen sie verschieden schreiben.
+ *
+ * "Wallnerstraße via Bayerischer Rundfunk" (DB) und "Wallnerstraße" (MVG)
+ * sind derselbe Bus, ebenso "Garching, Forschungszentrum" und
+ * "Garching-Forschungszentrum". Früher zählte nur exakte Gleichheit - dann
+ * fand sich auf der Tafel kein nächster Bus, und an einem Umstieg mit
+ * Sieben-Minuten-Takt stand "kein Anschluss".
+ *
+ * Gleich ist, was nach dem Abschneiden von "via …" und dem Vereinheitlichen
+ * von Schreibweisen übereinstimmt oder mit dem anderen beginnt. Fehlt eine
+ * Seite, zählt es: an Quellen ohne Richtungsangabe fände man sonst nie etwas.
+ */
+export function sameDirection(a, b) {
+  const norm = (v) => String(v ?? '')
+    .toLowerCase()
+    .split(/\s+via\s+/)[0]
+    .replace(/ß/g, 'ss').replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
+    .replace(/[^a-z0-9]/g, '');
+  const x = norm(a);
+  const y = norm(b);
+  if (x === '' || y === '') return true;
+  return x.startsWith(y) || y.startsWith(x);
+}
+
+/**
  * Die naechste Fahrt DERSELBEN Linie auf einer Abfahrtstafel.
  *
  * WOZU: Ein zweiminuetiger Umstieg auf eine U-Bahn wurde frueher genauso
@@ -230,15 +272,11 @@ export function lineKey(x) {
  */
 export function nextOnLine(leg, departures) {
   const plan = Date.parse(leg?.departure || '');
-  const wanted = lineKey(leg);
-  if (!Number.isFinite(plan) || wanted === '') return null;
-
-  const norm = (v) => String(v ?? '').replace(/\s+/g, '').toLowerCase();
-  const ziel = norm(leg.direction);
+  if (!Number.isFinite(plan) || lineKey(leg) === '') return null;
 
   const treffer = (departures || [])
-    .filter((d) => lineKey(d) === wanted)
-    .filter((d) => !ziel || !norm(d.direction) || norm(d.direction) === ziel)
+    .filter((d) => sameLine(leg, d))
+    .filter((d) => sameDirection(leg.direction, d.direction))
     .map((d) => ({ d, at: Date.parse(d.real || d.planned || '') }))
     // Eine halbe Minute Luft: dieselbe Fahrt kann auf der Tafel um
     // Sekunden abweichen und waere sonst ihre eigene Nachfolgerin.
@@ -480,6 +518,9 @@ export class RouteMap {
     this.level = null;
     this.zoom = 7;
     this.center = { lat: 47.8, lon: 10.5 };
+    // Sichtbar oder in einem verborgenen Tab? Siehe setActive().
+    this.active = true;
+    this.pendingView = null;
     this.ranked = [];
     this.activeIdx = 0;
     this.onSelect = null;
@@ -871,6 +912,12 @@ export class RouteMap {
   /** Ausschnitt so wählen, dass alle Punkte hineinpassen. */
   fitPoints(pts, pad = 40) {
     if (pts.length < 2) return;
+    // Verborgen ist die Karte null Pixel groß - der Ausschnitt wäre falsch.
+    // Also merken und beim Sichtbarwerden nachholen; der letzte Wunsch gilt.
+    if (!this.active) {
+      this.pendingView = () => this.fitPoints(pts, pad);
+      return;
+    }
 
     let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
     for (const [la, lo] of pts) {
@@ -925,6 +972,10 @@ export class RouteMap {
   focusJourney(index) {
     const entry = this.ranked[index];
     if (!entry) return;
+    if (!this.active) {
+      this.pendingView = () => this.focusJourney(index);
+      return;
+    }
 
     const pts = pointsOf(entry.journey);
     if (pts.length < 2) return;
@@ -1479,8 +1530,26 @@ export class RouteMap {
     return ([la, lo]) => [lonToX(lo, z) - cx + w / 2, latToY(la, z) - cy + h / 2];
   }
 
+  /**
+   * Die Karte in einen verborgenen Tab legen oder zurückholen.
+   *
+   * WOZU: Kachelgitter und SVG-Overlay neu aufzubauen ist das Teuerste auf
+   * der ganzen Seite. Solange die Karte im Tab "Live-Karte" lag und trotzdem
+   * bei jeder Suche, jeder Auswahl und jedem Positionsupdate gezeichnet
+   * wurde, ruckelte die Trefferliste auf schwachen Geräten. Verborgen nimmt
+   * sie jetzt nur Daten an; gezeichnet wird beim Sichtbarwerden, einmal.
+   */
+  setActive(on) {
+    this.active = Boolean(on);
+    if (!this.active) return;
+    const view = this.pendingView;
+    this.pendingView = null;
+    view?.();
+    this.render();
+  }
+
   render() {
-    if (!this.built) return;
+    if (!this.built || !this.active) return;
     const { w, h } = this.size();
     const z = this.zoom;
     const cx = lonToX(this.center.lon, z);

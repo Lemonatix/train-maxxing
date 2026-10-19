@@ -1675,11 +1675,22 @@ Nightjet, WESTbahn, TGV) und die Gattungsbewertung da.
 ### Karte
 
 Eine echte Slippy-Map mit Kartenhintergrund: ziehen zum Verschieben, scrollen
-oder Pinch zum Zoomen, dazu Knöpfe für Zoom und „ganze Route zeigen". Sie ist
-**immer sichtbar** — ohne Suche zeigt sie den Überblick, die Routen kommen
-dazu, sobald Start und Ziel stehen. Alle gefundenen Routen liegen übereinander,
-die ausgewählte ist hervorgehoben. Klick auf eine Linie wählt die Verbindung,
-Klick auf eine Verbindung hebt die Linie hervor — beides synchron.
+oder Pinch zum Zoomen, dazu Knöpfe für Zoom und „ganze Route zeigen". Sie hat
+**einen eigenen Tab, „Live-Karte"** — die Tabs stehen in der Reihenfolge
+Verbindungen, Reisen, Live-Karte, Abfahrten (`#reisen`, `#karte`,
+`#abfahrten` in der Adresse). Alle gefundenen Routen liegen übereinander, die
+ausgewählte ist hervorgehoben. Klick auf eine Linie wählt die Verbindung, Klick
+auf eine Verbindung hebt die Linie hervor — beides synchron. „Auf der Karte"
+über der Trefferliste und „Karte" in der Live-Verfolgung springen hin.
+
+**Warum ein eigener Tab:** Früher stand die Karte über der Trefferliste und
+wurde bei jeder Suche, jeder Auswahl und jedem Positionsupdate neu gezeichnet —
+Kachelgitter und SVG-Overlay sind das Teuerste auf der Seite, und auf
+schwachen Geräten ruckelte dadurch alles. Verborgen nimmt die Karte jetzt nur
+Daten an (`RouteMap.setActive()`); ein gewünschter Ausschnitt wird gemerkt und
+beim Öffnen nachgeholt, weil eine verborgene Karte null Pixel groß ist.
+Live-Züge holt die App nur, solange der Tab offen ist — oder eine Fahrt
+verfolgt wird, die die Position des eigenen Zuges braucht.
 
 **Eine Auswahl zoomt auf ihre Route.** Der Ausschnitt über *allen* Treffern
 taugt für den Überblick, aber nicht für die eine Verbindung, die man sich gerade
@@ -1761,7 +1772,7 @@ weg — ein fehlender Name ist besser als zwei übereinandergedruckte. Ab Zoomst
 
 ### Wo fährt der Zug gerade?
 
-Über der Karte lässt sich **„Züge live anzeigen"** einschalten. Dann erscheinen
+Auf der Live-Karte lässt sich **„Züge live anzeigen"** einschalten. Dann erscheinen
 alle Züge, die im sichtbaren Ausschnitt gerade unterwegs sind, als pulsierende
 Punkte.
 
@@ -1775,9 +1786,11 @@ Betreibers stehen darüber.
 Die Positionen kommen von HAFAS (`JourneyGeoPos`) und werden aus Fahrplan und
 Echtzeitlage **berechnet**, nicht per GPS geortet. Sie sind eine gute Näherung,
 keine Ortung auf den Meter. Die Verspätungen dagegen sind echte Echtzeitdaten.
-Beim Verschieben und Zoomen wird nachgeladen (gedrosselt, 30 Sekunden Cache);
-ein zu großer Ausschnitt liefert bewusst nichts. Ohne Suche lädt die Karte
-Züge, sobald man hineinzoomt (Ausschnitt unter 1,5 Breitengraden).
+Beim Verschieben und Zoomen wird nachgeladen (gedrosselt, 30 Sekunden Cache),
+und solange die Live-Karte offen und die Seite sichtbar ist, alle 30 Sekunden;
+ein zu großer Ausschnitt liefert bewusst nichts. Die Züge laden **sofort beim
+Öffnen**, ohne vorherige Suche — ohne Route wird dafür so weit hineingezoomt,
+dass der Ausschnitt unter der Grenze von 6 × 10 Grad liegt.
 
 **Gezählt wird, was im Ausschnitt liegt.** HAFAS liefert zu einem Rechteck
 auch Züge, die gerade weit außerhalb fahren — sie kommen nur irgendwann
@@ -1872,6 +1885,31 @@ Gattung. „S" ist eine Produktklasse, keine Linie — damit ließe sich eine S3
 einer S8 verwechseln. Ohne Linienkennung behauptet die App nichts. Die Richtung
 muss zusätzlich passen, soweit beide Seiten eine nennen, sonst käme die
 Gegenrichtung mit durch.
+
+**Die Quellen schreiben dieselbe Fahrt verschieden**, und daran scheiterte es
+lange in der Praxis. Umstieg U6 → Bus 181 an der Studentenstadt: Die
+Verbindung (DB) nennt die Richtung „Wallnerstraße via Bayerischer Rundfunk",
+die MVG-Tafel „Wallnerstraße"; die eine schreibt „Bus 181", die andere „181".
+Verglichen wird deshalb ohne „via …", ohne Satzzeichen und Umlautvarianten,
+und es genügt, wenn eine Richtung mit der anderen beginnt (`sameDirection()`).
+Bei der Linie fällt ein vorangestelltes „Bus", „Tram" oder „STR" weg, aber nur
+vor einer Ziffer: „U6" bleibt „U6" (`sameLine()`, beide in `map.js`).
+
+**Und die Tafel muss den Halt kennen.** Die DB führt Bushaltestellen unter
+eigenen Kennungen (790669), die HAFAS ablehnt. Die MVG findet sie nur über
+Koordinaten, die die DB nur an den Halten mitliefert — jetzt bekommen Ein- und
+Ausstieg sie von dort (`DbVendo`). Und weil die MVG nur 24 Stunden vorausschaut,
+springt für spätere Tage die Abfahrtstafel von bahn.de ein
+(`DbVendo::departures()`). Vorher stand an jedem solchen Umstieg „kein
+späterer Anschluss gefunden", obwohl der Bus alle sieben Minuten fährt.
+
+**Das gilt überall, wo ein Umstieg gemeldet wird.** An der Verbindung steht ein
+ruhiges Kennzeichen („2 min Umstieg · nächster Bus 181 +6 min") statt „Anschluss
+weg"; auch „laut Echtzeit nicht erreichbar" entfällt, wenn nur solche Umstiege
+gekappt sind. Die Live-Verfolgung fragt bei einem gefährdeten Umstieg im Takt
+die Tafel ab der tatsächlichen Ankunft und meldet „Umstieg verpasst — die
+nächste um 16:59" statt eine neue Route zu suchen. Die Benachrichtigung des
+Servers wird dafür nicht höher eingestuft als „Umstieg wird knapp".
 
 **Mindestumsteigezeit** lässt sich im Suchformular einstellen (Standard 5 min,
 „egal" bis 30 min). Der Wert wird an **beide** Quellen durchgereicht — HAFAS
@@ -2250,7 +2288,7 @@ nicht „wie komme ich nach X", sondern „was fährt hier als Nächstes".
   dann „Echtzeit der DB" bzw. „der SBB".
 
 Die Ansicht steht in der Adresse (`#abfahrten`) und übersteht so ein
-Neuladen.
+Neuladen. Sie ist der letzte der vier Tabs.
 
 ### Tarife, Ausstattung und Aufzüge von der DB
 

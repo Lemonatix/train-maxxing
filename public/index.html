@@ -82,16 +82,19 @@
     </div>
   </header>
 
-  <!-- Zwei Ansichten: Verbindungen suchen und die Abfahrtstafel eines
-       Bahnhofs. Die gewählte steht in der Adresse (#abfahrten), damit sie
-       ein Neuladen übersteht und sich als Lesezeichen speichern lässt. -->
+  <!-- Vier Ansichten: Verbindungen, gemerkte Reisen, Live-Karte und die
+       Abfahrtstafel eines Bahnhofs. Die gewählte steht in der Adresse
+       (#reisen, #karte, #abfahrten), damit sie ein Neuladen übersteht und
+       sich als Lesezeichen speichern lässt. -->
   <nav class="tabs" role="tablist" aria-label="Ansicht">
     <button type="button" role="tab" id="tab-search" class="tab is-active"
             aria-controls="view-search" aria-selected="true">Verbindungen</button>
-    <button type="button" role="tab" id="tab-board" class="tab"
-            aria-controls="view-board" aria-selected="false" tabindex="-1">Abfahrten</button>
     <button type="button" role="tab" id="tab-trips" class="tab"
             aria-controls="view-trips" aria-selected="false" tabindex="-1">Reisen <span id="trips-count" class="tab__count" hidden></span></button>
+    <button type="button" role="tab" id="tab-map" class="tab"
+            aria-controls="view-map" aria-selected="false" tabindex="-1">Live-Karte</button>
+    <button type="button" role="tab" id="tab-board" class="tab"
+            aria-controls="view-board" aria-selected="false" tabindex="-1">Abfahrten</button>
   </nav>
 
   <div id="view-search" role="tabpanel" aria-labelledby="tab-search">
@@ -294,6 +297,63 @@
   <!-- Bestpreise über den Reisetag -->
   <section id="bestprices" class="bp" hidden aria-label="Günstigste Abfahrtszeiten"></section>
 
+  <!-- Live-Verfolgung der ausgewählten Verbindung: Echtzeitlage aller
+       Abschnitte plus optionale GPS-Mitfahrt. Die Route dazu zeigt die
+       Live-Karte. -->
+  <aside id="live-panel" class="live" hidden aria-live="polite"></aside>
+
+  <!-- Hin- und Rückfahrt. Erscheint erst, sobald an einer Verbindung
+       „Rückfahrt" angetippt wurde - vorher gibt es keine Hinfahrt, die man
+       daneben stellen könnte. -->
+  <div id="trip-tabs" class="trip-tabs" role="tablist" aria-label="Fahrten" hidden>
+    <button type="button" class="trip-tab is-active" data-trip="return"
+            role="tab" aria-selected="true">Rückfahrten</button>
+    <button type="button" class="trip-tab" data-trip="both"
+            role="tab" aria-selected="false">Hin &amp; zurück</button>
+    <button type="button" id="trip-clear" class="trip-tabs__clear"
+            title="Hinfahrt vergessen und normal weitersuchen">Hinfahrt verwerfen</button>
+  </div>
+
+  <!-- Beide Fahrten zusammen, wenn der Reiter „Hin &amp; zurück" offen ist. -->
+  <section id="trip-pair" class="pair" hidden aria-live="polite"></section>
+
+  <!-- Sortierung der Trefferliste. Erscheint erst, wenn es etwas zu
+       sortieren gibt. -->
+  <div id="results-bar" class="results-bar" hidden>
+    <label for="sort">Sortieren nach</label>
+    <select id="sort">
+      <!-- Die Beschriftung wechselt mit dem Modus: im Normal-Modus ist die
+           Empfehlung eine Punktzahl aus Preis und Zeit, im Nerd-Modus die
+           Gruppierung nach Streckenvarianten. Siehe app.js. -->
+      <option value="smart">Empfehlung</option>
+      <option value="price">Preis — günstigste zuerst</option>
+      <option value="departure" selected>Abfahrt — chronologisch</option>
+    </select>
+    <span id="sort-note" class="results-bar__note"></span>
+    <!-- Die Routen liegen auf der Live-Karte, einen Tab weiter. -->
+    <button type="button" id="show-map" class="btn btn--ghost results-bar__map">Auf der Karte</button>
+  </div>
+
+  <main id="results-list" class="results" aria-live="polite"></main>
+
+  <!-- MVG-Störungsticker München, per JS eingeblendet wenn aktive Meldungen vorliegen. -->
+  <aside id="mvg-ticker" class="mvg-ticker-mount" hidden></aside>
+
+  <!-- Bauarbeiten im Netz: eigene Karte, darunter Abschnitt und Zeitraum.
+       Bewusst getrennt von der Live-Karte - siehe works.js. -->
+  <aside id="works" class="mvg-ticker-mount" hidden></aside>
+
+  </div>
+
+  <!-- Gemerkte Reisen - siehe trips.js und tripsView.js. -->
+  <section id="view-trips" class="trips panel" role="tabpanel" aria-labelledby="tab-trips" hidden></section>
+
+  <!-- Live-Karte: Routen der Suche, die verfolgte Fahrt und die Züge im
+       Ausschnitt. Ein eigener Tab, weil das Zeichnen der Karte das Teuerste
+       auf der Seite ist - verborgen zeichnet sie nichts (setActive in
+       map.js), und die Trefferliste bleibt auch auf schwachen Geräten
+       flüssig. Die Züge laden beim Öffnen, ohne vorher zu suchen. -->
+  <section id="view-map" class="map-view" role="tabpanel" aria-labelledby="tab-map" hidden>
   <div class="map-wrap">
     <div class="map-bar">
       <label class="check">
@@ -328,57 +388,11 @@
     <!-- Details eines angetippten Live-Zuges -->
     <aside id="train-panel" class="train-panel" hidden aria-live="polite"></aside>
 
-    <!-- Live-Verfolgung der ausgewählten Verbindung: Echtzeitlage aller
-         Abschnitte plus optionale GPS-Mitfahrt. -->
-    <aside id="live-panel" class="live" hidden aria-live="polite"></aside>
   </div>
-
-  <!-- Hin- und Rückfahrt. Erscheint erst, sobald an einer Verbindung
-       „Rückfahrt" angetippt wurde - vorher gibt es keine Hinfahrt, die man
-       daneben stellen könnte. -->
-  <div id="trip-tabs" class="trip-tabs" role="tablist" aria-label="Fahrten" hidden>
-    <button type="button" class="trip-tab is-active" data-trip="return"
-            role="tab" aria-selected="true">Rückfahrten</button>
-    <button type="button" class="trip-tab" data-trip="both"
-            role="tab" aria-selected="false">Hin &amp; zurück</button>
-    <button type="button" id="trip-clear" class="trip-tabs__clear"
-            title="Hinfahrt vergessen und normal weitersuchen">Hinfahrt verwerfen</button>
-  </div>
-
-  <!-- Beide Fahrten zusammen, wenn der Reiter „Hin &amp; zurück" offen ist. -->
-  <section id="trip-pair" class="pair" hidden aria-live="polite"></section>
-
-  <!-- Sortierung der Trefferliste. Erscheint erst, wenn es etwas zu
-       sortieren gibt. -->
-  <div id="results-bar" class="results-bar" hidden>
-    <label for="sort">Sortieren nach</label>
-    <select id="sort">
-      <!-- Die Beschriftung wechselt mit dem Modus: im Normal-Modus ist die
-           Empfehlung eine Punktzahl aus Preis und Zeit, im Nerd-Modus die
-           Gruppierung nach Streckenvarianten. Siehe app.js. -->
-      <option value="smart">Empfehlung</option>
-      <option value="price">Preis — günstigste zuerst</option>
-      <option value="departure" selected>Abfahrt — chronologisch</option>
-    </select>
-    <span id="sort-note" class="results-bar__note"></span>
-  </div>
-
-  <main id="results-list" class="results" aria-live="polite"></main>
-
-  <!-- MVG-Störungsticker München, per JS eingeblendet wenn aktive Meldungen vorliegen. -->
-  <aside id="mvg-ticker" class="mvg-ticker-mount" hidden></aside>
-
-  <!-- Bauarbeiten im Netz: eigene Karte, darunter Abschnitt und Zeitraum.
-       Bewusst getrennt von der Routenkarte oben - siehe works.js. -->
-  <aside id="works" class="mvg-ticker-mount" hidden></aside>
-
-  </div>
+  </section>
 
   <!-- Abfahrtstafel. HAFAS für jeden Bahnhof in CH/DE/AT, in München dazu
        die MVG (U-Bahn, Tram, Bus). Siehe board.js. -->
-  <!-- Gemerkte Reisen - siehe trips.js und tripsView.js. -->
-  <section id="view-trips" class="trips panel" role="tabpanel" aria-labelledby="tab-trips" hidden></section>
-
   <section id="view-board" class="board" role="tabpanel" aria-labelledby="tab-board" hidden>
     <form id="board-form" class="panel board__form" autocomplete="off">
       <div class="field">

@@ -19,7 +19,7 @@
  */
 
 import { typeOf, modelOf, FLEET_RULES, TRAIN_MODELS } from '../public/assets/js/data/trains.js';
-import { trainLabel, sameTrain, walkText, formatMeters, walksOf, geoErrorText, lineKey, nextOnLine } from '../public/assets/js/map.js';
+import { trainLabel, sameTrain, walkText, formatMeters, walksOf, geoErrorText, lineKey, nextOnLine, sameLine, sameDirection } from '../public/assets/js/map.js';
 
 // LiveTracker legt im Konstruktor einen Listener an, und api.js baut beim
 // Laden eine URL aus `document.baseURI`. Mehr Browser braucht es für diese
@@ -599,6 +599,32 @@ console.log('\nAnschluss im Taktverkehr - die naechste Fahrt derselben Linie');
   pruefe('Tafel ohne Richtungsangabe zaehlt mit',
     nextOnLine(u6, [{ line: 'U6', direction: '', planned: '2026-10-04T14:16:00+02:00' }])?.laterMin, 5);
 
+  // DER GEMELDETE FALL: U6 -> Bus 181 an der Studentenstadt. Die DB schreibt
+  // die Richtung mit "via …", die MVG-Tafel ohne - frueher fand sich kein
+  // naechster Bus, und es stand "kein Anschluss" da, obwohl er alle sieben
+  // Minuten faehrt.
+  const bus181 = { category: 'Bus', line: '181', name: 'Bus 181',
+    direction: 'Wallnerstraße via Bayerischer Rundunk', departure: '2026-10-19T16:53:00+02:00' };
+  const tafel181 = [
+    { line: '181', direction: 'Wallnerstraße', planned: '2026-10-19T16:53:00+02:00' },
+    { line: '177', direction: 'Petuelring', planned: '2026-10-19T16:55:00+02:00' },
+    { line: '181', direction: 'Wallnerstraße', planned: '2026-10-19T16:59:00+02:00' },
+  ];
+  pruefe('Richtung mit "via": naechster 181 in 6 min', nextOnLine(bus181, tafel181)?.laterMin, 6);
+  pruefe('"Bus 181" und "181" sind dieselbe Linie',
+    nextOnLine({ ...bus181, line: 'Bus 181' }, tafel181)?.laterMin, 6);
+  pruefe('Schreibweisen der Richtung', [
+    sameDirection('Garching, Forschungszentrum', 'Garching-Forschungszentrum'),
+    sameDirection('Klinikum Großhadern', 'Klinikum Grosshadern'),
+    sameDirection('Wallnerstraße, München', 'Wallnerstraße'),
+    sameDirection('Klinikum Großhadern', 'Garching-Forschungszentrum'),
+  ], [true, true, true, false]);
+  pruefe('Verkehrsmittelwort nur vor Ziffern abgeschnitten', [
+    sameLine({ line: 'STR 17' }, { line: '17' }),
+    sameLine({ line: 'U6' }, { line: '6' }),
+    sameLine({ line: 'X36' }, { line: '36' }),
+  ], [true, false, false]);
+
   // ---- Sortierung der Trefferliste --------------------------------
   const fahrt = (id, abfahrt, dauer, umstiege, preis) => ({
     id, departure: `2026-10-04T${abfahrt}:00+02:00`, arrival: `2026-10-04T${abfahrt}:00+02:00`,
@@ -716,6 +742,16 @@ console.log('\nNachladen - jede Abfrage genau einmal');
   // Ein Abschnitt ohne Haltestellen-Kennung laesst sich nicht abfragen.
   const ohneId = zug({ transferMin: 2, from: { id: '', name: '?' } });
   pruefe('ohne Halt-Kennung kein Nachladen', pendingLoads([reise([zug({}), ohneId])], 1), []);
+
+  // Im Takt wird auch bei null Minuten und bei gekappter Echtzeit-Luecke
+  // nachgeschaut - genau dann will man wissen, wann der naechste Bus kommt.
+  // Im Fernverkehr ist null Minuten ein Datenfehler und bleibt ohne Abfrage.
+  const taktNull = zug({ category: 'Bus', line: '181', name: 'Bus 181', transferMin: 0 });
+  const taktGekappt = zug({ category: 'Bus', line: '181', name: 'Bus 181', transferMin: 8, transferMinLive: -2 });
+  const fernNull = zug({ transferMin: 0 });
+  pruefe('Takt: auch bei 0 min und gekappter Luecke',
+    pendingLoads([reise([zug({}), taktNull]), reise([zug({}), taktGekappt]), reise([zug({}), fernNull])], 3)
+      .map((j) => j.kind), ['nextOnLine', 'nextOnLine']);
 
   // Ohne Ziel am letzten Abschnitt ist die Reise unbrauchbar.
   pruefe('ohne Ziel kein Nachladen',

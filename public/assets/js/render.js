@@ -483,7 +483,7 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
       ausfaelle.length === 1 ? `${trainLabel(ausfaelle[0])} fällt aus` : `${ausfaelle.length} Züge fallen aus`,
       'badge--cancelled', 'warn'
     );
-  } else if (j.reachable === false) {
+  } else if (j.reachable === false && !nurTaktGekappt(j)) {
     // HAFAS rechnet jede Verbindung gegen die Echtzeitlage nach. Passt sie
     // nicht mehr - meist, weil eine Verspätung den Anschluss gekappt hat -,
     // steht das hier, bevor man sie bucht.
@@ -512,26 +512,57 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   // missChance in prefetch.js): acht Minuten nach einem EC mit 60 %
   // Pünktlichkeit sind wackeliger als vier nach einer S-Bahn, die fast immer
   // pünktlich ist - und zwanzig nach einem verlässlichen ICE gar nichts.
-  const plan = j.minTransferMin;
-  const live = typeof j.minTransferLive === 'number' ? j.minTransferLive : null;
-  const gap = live ?? plan;
-  const risiken = j.legs.map((l) => missChance(j, l)).filter(Boolean);
+  //
+  // TAKTVERKEHR FÄNGT AUF. Ein verpasster Umstieg auf den Bus 181 kostet
+  // sieben Minuten, nicht die Verbindung. Solche Umstiege zählen deshalb
+  // nicht als Warnung, sondern bekommen ein ruhiges Kennzeichen mit der
+  // nächsten Fahrt - siehe taktAuffang(). Gewarnt wird nur noch für die
+  // übrigen Umstiege, also wie bisher für Fern- und Regionalverkehr und für
+  // eine Linie, die laut Tafel in der nächsten Stunde nicht mehr fährt.
+  const luecke = (l) => (typeof l.transferMinLive === 'number' ? l.transferMinLive : l.transferMin);
+  const umstiege = j.legs.filter((l) => l.mode === 'train' && typeof l.transferMin === 'number');
+  const sonst = umstiege.filter((l) => !taktAuffang(l));
+  const engster = sonst.reduce((a, b) => (a === null || luecke(b) < luecke(a) ? b : a), null);
+  const plan = engster ? engster.transferMin : null;
+  const live = typeof engster?.transferMinLive === 'number' ? engster.transferMinLive : null;
+  const gap = engster ? luecke(engster) : null;
+  const risiken = sonst.map((l) => missChance(j, l)).filter(Boolean);
   const schlimmstes = risiken.sort((a, b) => b.chance - a.chance)[0] || null;
+  let umstiegGewarnt = true;
   if (typeof gap === 'number' && gap < 0) {
     add(`Anschluss weg (${gap} min)`, 'badge--risky', 'warn');
-  } else if (schlimmstes) {
-    if (schlimmstes.chance >= RISK_SHOW) {
-      const b = add(`${schlimmstes.gap} min Umstieg · wackelig`,
-        schlimmstes.chance >= RISK_HIGH ? 'badge--risky' : 'badge--tight', 'warn');
-      b.title = `Nach ${trainLabel(schlimmstes.feeder)} (zu ${Math.round(schlimmstes.rate * 100)} % pünktlich) `
-        + `ist der Anschluss in etwa ${Math.max(1, Math.round(schlimmstes.chance * 10))} von 10 Fällen weg.`;
-    }
-  } else if (typeof gap === 'number' && gap < 10) {
+  } else if (schlimmstes && schlimmstes.chance >= RISK_SHOW) {
+    const b = add(`${schlimmstes.gap} min Umstieg · wackelig`,
+      schlimmstes.chance >= RISK_HIGH ? 'badge--risky' : 'badge--tight', 'warn');
+    b.title = `Nach ${trainLabel(schlimmstes.feeder)} (zu ${Math.round(schlimmstes.rate * 100)} % pünktlich) `
+      + `ist der Anschluss in etwa ${Math.max(1, Math.round(schlimmstes.chance * 10))} von 10 Fällen weg.`;
+  } else if (!schlimmstes && typeof gap === 'number' && gap < 10) {
     const knapper = live !== null && typeof plan === 'number' && live < plan;
     add(
       knapper ? `nur noch ${gap} min Umstieg` : gap < 5 ? `nur ${gap} min Umstieg` : `${gap} min Umstieg`,
       gap < 5 ? 'badge--risky' : 'badge--tight', 'warn'
     );
+  } else {
+    umstiegGewarnt = false;
+  }
+
+  // Der knappste Umstieg im Takt, ruhig angeschrieben - aber nur, wenn
+  // nicht schon eine echte Warnung dasteht, und nur, wo prefetch.js die
+  // Tafel gefragt hat (knapp oder wackelig). Sieben Minuten auf einen Bus im
+  // Sieben-Minuten-Takt sind keine Zeile wert.
+  const taktEng = umstiege
+    .filter((l) => taktAuffang(l) && l.nextOnLineState)
+    .sort((a, b) => luecke(a) - luecke(b))[0];
+  if (taktEng && !umstiegGewarnt) {
+    const g = luecke(taktEng);
+    const n = taktEng.nextOnLine;
+    const b = add(
+      `${g < 0 ? 'Umstieg verpasst' : `${g} min Umstieg`} · ${n ? `${naechste(taktEng)} +${n.laterMin} min` : 'Takt'}`,
+      'badge--takt', 'swap'
+    );
+    b.title = n
+      ? `Klappt der Umstieg nicht, fährt ${naechste(taktEng, true)} um ${formatTime(n.real || n.planned)}.`
+      : `${trainLabel(taktEng)} fährt im Takt — die nächste Fahrt wird auf der Abfahrtstafel nachgeschaut.`;
   }
 
   // PÜNKTLICHKEIT AUF DIE KARTE. Die Statistik sammelt sich mit jeder
@@ -837,6 +868,52 @@ function expandableNote(cls, label, text) {
 }
 
 /**
+ * "nächste U6", aber "nächster Bus 181": der Bus ist das einzige Maskulinum
+ * unter den Taktverkehrsmitteln. Mit Artikel: "die nächste U6", "der
+ * nächste Bus 181".
+ */
+function naechste(leg, mitArtikel = false) {
+  const bus = typeOf(leg) === typeOf({ mode: 'train', category: 'Bus' });
+  const wort = mitArtikel ? (bus ? 'der nächste' : 'die nächste') : (bus ? 'nächster' : 'nächste');
+  return `${wort} ${trainLabel(leg)}`;
+}
+
+/**
+ * Fängt der Takt einen verpassten Umstieg auf?
+ *
+ * 'next'    - die nächste Fahrt derselben Linie steht fest (Abfahrtstafel)
+ * 'pending' - Taktverkehrsmittel, die Tafel wird noch gefragt
+ * null      - kein Taktverkehr, oder die Tafel kennt in der nächsten Stunde
+ *             keine weitere Fahrt (abends, auf dem Land): dann ist ein
+ *             verpasster Umstieg wirklich ein Problem.
+ *
+ * `frequent` heisst nur "nachschauen lohnt sich" (siehe trains.js); erst die
+ * Tafel sagt, ob wirklich etwas fährt. Solange sie noch lädt, wird nicht
+ * gewarnt - sonst blitzte der Fehlalarm auf, um den es hier geht.
+ */
+export function taktAuffang(leg) {
+  if (!typeOf(leg).frequent) return null;
+  if (leg.nextOnLine) return 'next';
+  if (leg.nextOnLineState === 'none' || leg.nextOnLineState === 'error') return null;
+  return 'pending';
+}
+
+/**
+ * Hat die Echtzeit nur Umstiege gekappt, die der Takt auffängt?
+ *
+ * HAFAS markiert eine Verbindung als "nicht erreichbar", sobald irgendein
+ * Anschluss platzt - auch der auf einen Bus, der sieben Minuten später
+ * wieder fährt. Ist kein gekappter Umstieg bekannt, bleibt es bei der
+ * Warnung: dann wissen wir nicht, woran es liegt.
+ */
+function nurTaktGekappt(j) {
+  const gekappt = (j.legs || []).filter((l) => l.mode === 'train'
+    && typeof (l.transferMinLive ?? l.transferMin) === 'number'
+    && (l.transferMinLive ?? l.transferMin) < 0);
+  return gekappt.length > 0 && gekappt.every((l) => taktAuffang(l));
+}
+
+/**
  * Hinweis auf eine knappe Umsteigezeit.
  *
  * Die Zahl allein sagt wenig — entscheidend ist, was ein verpasster
@@ -856,14 +933,18 @@ function renderTransferWarning(leg, risiko = null) {
     ? (risiko.chance >= RISK_HIGH ? 'risky' : 'tight')
     : leg.transferRisk;
   const minuten = `${stufe === 'risky' && leg.transferMin < 5 ? 'Nur ' : ''}${leg.transferMin} min zum Umsteigen`;
+  // Im Takt zählt die echte Lücke: hat die Echtzeit den Umstieg gekappt,
+  // steht das da - zusammen mit der Fahrt, die einen auffängt.
+  const g = typeof leg.transferMinLive === 'number' ? leg.transferMinLive : leg.transferMin;
+  const taktMinuten = g < 0 ? 'Umstieg laut Echtzeit verpasst' : `${g} min zum Umsteigen`;
 
   // Die nächste Fahrt steht fest: das ist die ganze Antwort, und sie ist
   // keine Warnung.
   if (n) {
     const box = el('div', 'leg__transfer leg__transfer--frequent');
-    box.append(el('span', 'leg__transfer-gap', minuten));
+    box.append(el('span', 'leg__transfer-gap', taktMinuten));
     box.append(el('span', 'leg__transfer-next',
-      `nächste ${trainLabel(leg)} um ${formatTime(n.real || n.planned)} — ${n.laterMin} min später`));
+      `${naechste(leg)} um ${formatTime(n.real || n.planned)} — ${n.laterMin} min später`));
 
     // Ist die Ersatzbahn selbst verspätet, steht oben schon ihre Ist-Zeit.
     // Der Zuschlag sagt, dass 14:17 ein verspätetes 14:16 ist - sonst sieht
@@ -889,7 +970,7 @@ function renderTransferWarning(leg, risiko = null) {
 
   if (offen) {
     const box = el('div', 'leg__transfer leg__transfer--frequent');
-    box.append(el('span', 'leg__transfer-gap', minuten));
+    box.append(el('span', 'leg__transfer-gap', taktMinuten));
     box.append(el('span', 'leg__transfer-next', 'nächste Fahrt dieser Linie wird geprüft …'));
     return box;
   }

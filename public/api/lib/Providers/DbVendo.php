@@ -320,6 +320,79 @@ final class DbVendo
         return ['ok' => true, 'error' => null, 'data' => self::mapTrip($res['json'])];
     }
 
+    /**
+     * Abfahrtstafel von bahn.de (`/web/api/reiseloesung/abfahrten`).
+     *
+     * WOZU: Die DB kennt jede Haltestelle, über die sie routet - auch die
+     * Münchner Bushaltestelle "Studentenstadt" (790669), die HAFAS mit
+     * "location missing or invalid" ablehnt. Die MVG springt dort nur bis
+     * einen Tag voraus ein. Für eine Fahrt übermorgen fand die App deshalb
+     * keinen nächsten Bus 181 und meldete am knappen Umstieg "kein
+     * Anschluss". Diese Tafel ist die Rückfallebene dafür.
+     *
+     * Eine Stunde ab `$time`, samt der Halte im selben Haltestellenbereich
+     * (U-Bahn und Bus an der Studentenstadt sind verschiedene Halte). Ist-Zeit
+     * nur, wo die DB eine hat (`ezZeit`).
+     *
+     * @return array{ok:bool,error:?string,data:array}
+     */
+    public function departures(string $extId, string $date, string $time): array
+    {
+        $base = preg_replace('#/angebote/fahrplan$#', '/reiseloesung/abfahrten', $this->cfg['bahnde']['journeys'])
+            ?? $this->cfg['bahnde']['journeys'];
+        $url = $base . '?datum=' . rawurlencode($date) . '&zeit=' . rawurlencode($time . ':00')
+            . '&ortExtId=' . rawurlencode($extId) . '&mitVias=false';
+
+        $res = $this->http->getJson($url, $this->browserHeaders());
+        $blocked = $this->detectBlock($res);
+        if ($blocked !== null) {
+            return ['ok' => false, 'error' => $blocked, 'data' => []];
+        }
+        if (!$res['ok'] || $res['json'] === null) {
+            return ['ok' => false, 'error' => 'DB: HTTP ' . $res['status'], 'data' => []];
+        }
+        return ['ok' => true, 'error' => null, 'data' => self::mapBoard($res['json'])];
+    }
+
+    /** Gattung der Tafel ("BUS", "UBAHN") als Kürzel wie im Rest der App. */
+    private const BOARD_CATEGORY = ['BUS' => 'Bus', 'UBAHN' => 'U', 'TRAM' => 'Tram', 'SBAHN' => 'S'];
+
+    /** Antwort von `reiseloesung/abfahrten` im Tafel-Format der App. */
+    public static function mapBoard(array $json): array
+    {
+        $out = [];
+        foreach (($json['entries'] ?? []) as $e) {
+            $vm = $e['verkehrmittel'] ?? [];
+            $planned = self::iso($e['zeit'] ?? null);
+            if ($planned === null) {
+                continue;
+            }
+            $real = self::iso($e['ezZeit'] ?? null);
+            $line = trim((string) ($vm['linienNummer'] ?? ''));
+            $gattung = strtoupper((string) ($vm['produktGattung'] ?? ''));
+            $out[] = [
+                'jid'             => '',
+                'dbJourneyId'     => (string) ($e['journeyId'] ?? ''),
+                'category'        => self::BOARD_CATEGORY[$gattung] ?? trim((string) ($vm['kurzText'] ?? '')),
+                'categoryName'    => '',
+                'line'            => $line,
+                'trainNumber'     => '',
+                'name'            => trim((string) ($vm['name'] ?? $line)),
+                'direction'       => trim((string) ($e['terminus'] ?? '')),
+                'planned'         => $planned,
+                'real'            => $real,
+                'delay'           => $real !== null ? (int) round((strtotime($real) - strtotime($planned)) / 60) : null,
+                'platform'        => isset($e['gleis']) && $e['gleis'] !== '' ? (string) $e['gleis'] : null,
+                'platformChanged' => false,
+                'cancelled'       => false,
+                'sev'             => false,
+                'remarks'         => [],
+                'source'          => 'db',
+            ];
+        }
+        return $out;
+    }
+
     /** Antwort von `reiseloesung/fahrt` im Zuglauf-Format der App. */
     public static function mapTrip(array $f): array
     {
@@ -646,6 +719,25 @@ final class DbVendo
                     'platform'      => $h['ezGleis'] ?? $h['gleis'] ?? null,
                     'cancelled'     => (bool) ($h['ausfall'] ?? false),
                 ];
+            }
+
+            // Einstieg und Ausstieg bekommen die Koordinaten ihres Halts. Die
+            // DB nennt sie nur in den Halten - ohne sie fand die Abfahrtstafel
+            // an einer Bushaltestelle wie "Studentenstadt" (DB-Kennung 790669,
+            // HAFAS kennt sie nicht) keine MVG-Haltestelle, und an einem
+            // knappen Umstieg auf den Bus 181 stand "kein Anschluss", obwohl
+            // er alle sieben Minuten fährt.
+            if ($stops !== []) {
+                $first = $stops[0];
+                $last  = $stops[count($stops) - 1];
+                if ($from['lat'] === null && ($first['id'] === $from['id'] || $first['name'] === $from['name'])) {
+                    $from['lat'] = $first['lat'];
+                    $from['lon'] = $first['lon'];
+                }
+                if ($to['lat'] === null && ($last['id'] === $to['id'] || $last['name'] === $to['name'])) {
+                    $to['lat'] = $last['lat'];
+                    $to['lon'] = $last['lon'];
+                }
             }
 
             // Gründe für die Verspätung, soweit die DB sie nennt
