@@ -758,6 +758,12 @@ console.log('\nZubringer - der Satz zum einfahrenden Zug');
   const spaet = inboundText(link(10, 20, 25, 10));
   pruefe('verspätet: Verspätung und spätere Abfahrt, als Warnung',
     [/\(\+10\)/.test(spaet.text), /Abfahrt wohl erst gegen/.test(spaet.text), spaet.late], [true, true, true]);
+  const bald = { ...link(10, 12, null, 2), departure: { planned: iso(20) } };
+  pruefe('kurz vor der Abfahrt da: ab wann man einsteigen kann',
+    /^Einsteigen vermutlich ab ca\. \d\d:\d\d · kommt als RE9 aus Ulm Hbf, an \d\d:\d\d \(\+2\)$/.test(inboundText(bald).board), true);
+  const frueh = { ...link(10, 10, null, 0), departure: { planned: iso(70) } };
+  pruefe('eine Stunde vorher da: keine Einsteige-Zeit versprechen, nur "am Gleis"',
+    /^Zug vermutlich ab ca\. \d\d:\d\d am Gleis/.test(inboundText(frueh).board), true);
   pruefe('schon eingefahren: steht vermutlich schon da',
     /^Steht vermutlich schon da/.test(inboundText(link(-8, -6)).text), true);
   const leg = { mode: 'train', from: { id: '8000261', name: 'München Hbf' }, departure: iso(30) };
@@ -768,6 +774,10 @@ console.log('\nZubringer - der Satz zum einfahrenden Zug');
     wantsInbound({ ...leg, departure: iso(-10) }),
     wantsInbound({ ...leg, from: { id: 'mvg:de:09162:6', name: 'Hbf' } }),
   ], [true, false, false, false, false]);
+  pruefe('Ist-Zeit gleich Plan-Zeit sagt nichts: HAFAS setzt sie bei Zügen, die hier beginnen', [
+    wantsInbound({ ...leg, departureReal: leg.departure }),
+    wantsInbound(leg, { stops: [{ id: '8000261', departure: leg.departure, departureReal: leg.departure }] }),
+  ], [true, true]);
 }
 
 // ---------------------------------------------------------------------
@@ -810,6 +820,22 @@ console.log('\nReisen abgleichen - zusammenführen und verschlüsseln');
   let fremd = 'gelesen';
   try { await decryptState(k2.key, block); } catch { fremd = 'abgelehnt'; }
   pruefe('mit einem anderen Code nicht zu öffnen', fremd, 'abgelehnt');
+}
+
+// ---------------------------------------------------------------------
+console.log('\nOrtssuche - Sofort-Vorschläge vor der Antwort des Servers');
+{
+  const { instantScore } = await import('../public/assets/js/autocomplete.js');
+  pruefe('Name beginnt so: am besten', instantScore('München Hbf', 'Mün'), 2);
+  pruefe('ohne Umlaut getippt', instantScore('München Hbf', 'mun'), 2);
+  pruefe('ein späteres Wort beginnt so: "Pasing" findet "München-Pasing"', instantScore('München-Pasing', 'pasing'), 1);
+  pruefe('mehrere Wörter: "zur hb" findet "Zürich HB"', instantScore('Zürich HB', 'zur hb'), 1);
+  pruefe('mehrere Wörter, eins passt nicht: kein Treffer', instantScore('München Hbf', 'zur hb'), 0);
+  pruefe('mitten im Wort zählt nicht', instantScore('Augsburg Hbf', 'burg'), 0);
+  const { STATIONS } = await import('../public/assets/js/data/stations.js');
+  pruefe('Bahnhofsliste: nur UIC-Nummern, keine doppelten',
+    [STATIONS.every((st) => /^[5-8]\d{6}$/.test(st.id)), new Set(STATIONS.map((st) => st.id)).size === STATIONS.length],
+    [true, true]);
 }
 
 // ---------------------------------------------------------------------

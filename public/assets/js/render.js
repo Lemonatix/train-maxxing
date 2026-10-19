@@ -9,6 +9,7 @@
 import { typeOf } from './data/trains.js';
 import { trainLabel, RouteMap, walkText } from './map.js';
 import { formatDuration, formatTime, formatPrice, priceOrigin, counterValue, fxInfo, comfortOf } from './scoring.js';
+import { wantsInbound, inboundFor, inboundText } from './inbound.js';
 
 /**
  * Höchste gemeldete Auslastung einer Verbindung, für die gewählte Klasse.
@@ -597,6 +598,12 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   }
   card.append(chain);
 
+  // Beginnt der erste Zug am Einstieg, sagt die Echtzeit vor der Abfahrt
+  // nichts - der einfahrende Zug schon: ab wann man einsteigen kann.
+  const ersterZug = j.legs.find((l) => l.mode === 'train');
+  const bereit = ersterZug ? readyLine(ersterZug, 'journey__ready') : null;
+  if (bereit) card.append(bereit);
+
   // --- Live verfolgen, Rückfahrt ---
   // Stehen vor den Details, weil sie die häufigsten Handlungen sind.
   const aktionen = el('div', 'card-actions');
@@ -1108,71 +1115,41 @@ function hatReihung(leg, eva) {
     || (String(eva).startsWith('85') && /^(ICE|IC|ICN|EC|ECE|IR|IRE|RE)$/.test(gattung)));
 }
 
+/** Hat dieser Abschnitt eine Wagenreihung, die sich abfragen lässt? */
+function canSequence(leg, actions) {
+  const eva = leg?.from?.id;
+  return Boolean(actions?.loadSequence && eva && leg.departure && hatReihung(leg, eva));
+}
+
 /**
- * Die Wagenreihung EINES Zuges, am Zug selbst.
- *
- * WOZU HIER UND NICHT NUR AM UMSTIEG: Die Reihung hing früher im Lageplan
- * des Umsteigebahnhofs. Damit sah sie nur, wer umsteigt - wer durchfährt,
- * bekam sie nie zu Gesicht, obwohl die Frage dieselbe ist: in welchem
- * Sektor steht mein Wagen, wo ist die 1. Klasse, wo das Bordrestaurant.
+ * Die Wagenreihung EINES Zuges, im Reiter der Fahrtinfo.
  *
  * Gefragt wird am EINSTIEG des Abschnitts: dort steht man auf dem
- * Bahnsteig, und dort gilt die Sektorangabe.
- *
- * Zugeklappt kostet sie nichts - geladen wird erst beim Aufklappen, und
- * jede Abfrage geht an die DB bzw. die SBB.
+ * Bahnsteig, und dort gilt die Sektorangabe. Geladen wird erst, wenn der
+ * Reiter aufgeht - jede Abfrage geht an die DB bzw. die SBB.
  */
-function renderCoachSequence(leg, actions) {
-  const eva = leg?.from?.id;
-  if (!actions?.loadSequence || !eva || !leg.departure || !hatReihung(leg, eva)) return null;
+async function sequenceInto(body, leg, actions) {
+  body.replaceChildren(el('p', 'wagen__source', 'Lade Wagenreihung …'));
+  const res = await actions.loadSequence({
+    eva: String(leg.from.id),
+    cat: String(leg.category).trim().toUpperCase(),
+    num: String(leg.trainNumber),
+    time: leg.departure,
+  }).catch(() => null);
 
-  const box = el('details', 'wagen-box');
-  const sum = el('summary', 'wagen-box__sum');
-  sum.append(el('span', 'wagen-box__label', 'Wagenreihung'));
-  sum.append(el('span', 'wagen-box__hint', `${trainLabel(leg)} ab ${leg.from?.name || ''}`.trim()));
-  box.append(sum);
-
-  const body = el('div', 'wagen');
-  box.append(body);
-
-  let geladen = false;
-  const laden = async () => {
-    if (geladen) return;
-    geladen = true;
-    body.replaceChildren(el('p', 'wagen__source', 'Lade Wagenreihung …'));
-
-    const res = await actions.loadSequence({
-      eva: String(eva),
-      cat: String(leg.category).trim().toUpperCase(),
-      num: String(leg.trainNumber),
-      time: leg.departure,
-    }).catch(() => null);
-
-    const seq = res?.sequence;
-    if (!seq?.vehicles?.length) {
-      // Nicht als Fehler verkaufen: die Reihung gibt es nur am Reisetag und
-      // meist erst wenige Stunden vor Abfahrt.
-      body.replaceChildren(el('p', 'wagen__source',
-        'Für diesen Zug liegt noch keine Wagenreihung vor — sie erscheint meist '
-        + 'erst am Reisetag, wenige Stunden vor der Abfahrt.'));
-      return;
-    }
-
-    body.replaceChildren(
-      renderSequence('Abfahrt', leg, seq),
-      el('p', 'wagen__source', sequenceSource(seq)),
-    );
-  };
-
-  // Offen bleibt offen, auch wenn die Liste neu gezeichnet wird.
-  box.open = Boolean(leg._wagenOpen);
-  box.addEventListener('toggle', () => {
-    leg._wagenOpen = box.open;
-    if (box.open) laden();
-  });
-  if (box.open) laden();
-
-  return box;
+  const seq = res?.sequence;
+  if (!seq?.vehicles?.length) {
+    // Nicht als Fehler verkaufen: die Reihung gibt es nur am Reisetag und
+    // meist erst wenige Stunden vor Abfahrt.
+    body.replaceChildren(el('p', 'wagen__source',
+      'Für diesen Zug liegt noch keine Wagenreihung vor — sie erscheint meist '
+      + 'erst am Reisetag, wenige Stunden vor der Abfahrt.'));
+    return;
+  }
+  const wagen = el('div', 'wagen');
+  wagen.append(renderSequence(`Ab ${leg.from?.name || ''}`.trim() + ' ·', leg, seq),
+    el('p', 'wagen__source', sequenceSource(seq)));
+  body.replaceChildren(wagen);
 }
 
 /** Herkunftszeile unter einer Reihung - eine Quelle oder beide. */
@@ -1477,6 +1454,64 @@ const offeneHalte = new Set();
 const halteKey = (leg) => `${leg.category || ''}${leg.trainNumber || leg.line || ''}|${leg.departure || ''}`;
 
 /**
+ * Ab so vielen Minuten ist ein Halt unterwegs auffällig. Meist steht er so
+ * im Fahrplan, weil gebaut wird: der EC 98 fährt im Oktober 2026 schon um
+ * 16:31 statt 16:52 in München ab und wartet dafür 20 Minuten in Buchloe.
+ * Einen Grund liefern weder HAFAS noch die DB mit.
+ */
+const LONG_DWELL_MIN = 10;
+const LONG_DWELL_HINT = 'Laut Fahrplan ungewöhnlich lang — meist wegen Bauarbeiten oder weil der Zug auf '
+  + 'eingleisiger Strecke einen Gegenzug abwartet. Aussteigen ist dort meist möglich, der Zug fährt aber '
+  + 'nicht früher.';
+
+/**
+ * Ein Halt als Zeile der senkrechten Liste: Uhrzeit (mit Verspätung, wo
+ * bekannt) und Name; im Nerd-Mode Haltezeit und Gleis. `land.last` trägt das
+ * Land des vorigen Halts, damit der Grenzübertritt markiert werden kann.
+ */
+function stopRow(s, nerd, land) {
+  const li = el('li', 'stop');
+  if (s.cancelled) li.classList.add('is-cancelled');
+
+  // Ankunft zählt: dann ist man dort. Am Startpunkt eines Flügelzugs
+  // gibt es nur die Abfahrt.
+  const plan = s.arrival || s.departure;
+  const real = s.arrival ? s.arrivalReal : s.departureReal;
+  const zeit = el('span', 'stop__time', formatTime(plan));
+  const spaet = lateBy(plan, real);
+  if (spaet != null && spaet !== 0) {
+    zeit.append(el('span', 'stop__delay' + (spaet >= 5 ? ' is-bad' : spaet > 0 ? ' is-warn' : ''),
+      spaet > 0 ? `+${spaet}` : `${spaet}`));
+  }
+  li.append(zeit);
+  const name = el('span', 'stop__name', s.name || '?');
+  // Grenzübertritt sichtbar machen: daran hängen Tarife und Abos.
+  if (s.country && land.last && s.country !== land.last) {
+    const b = el('span', 'stop__border', s.country.toUpperCase());
+    b.title = `Ab hier ${s.country.toUpperCase()}`;
+    name.append(b);
+  }
+  if (s.country) land.last = s.country;
+  li.append(name);
+
+  const halt = s.arrival && s.departure ? lateBy(s.arrival, s.departure) : null;
+  if (halt != null && halt >= LONG_DWELL_MIN) {
+    // In beiden Modi: wer 20 Minuten in Buchloe steht, will das vorher wissen.
+    const lang = el('span', 'stop__meta stop__meta--long', `${halt} min Aufenthalt`);
+    lang.title = LONG_DWELL_HINT;
+    li.append(lang);
+  }
+  if (nerd) {
+    const meta = [];
+    if (halt != null && halt >= 2 && halt < LONG_DWELL_MIN) meta.push(`${halt} min Halt`);
+    if (s.platform) meta.push(`Gl. ${s.platform}`);
+    if (meta.length) li.append(el('span', 'stop__meta', meta.join(' · ')));
+  }
+  if (s.cancelled) li.append(el('span', 'stop__meta stop__meta--bad', 'Halt entfällt'));
+  return li;
+}
+
+/**
  * Zwischenhalte eines Abschnitts, zugeklappt als "12 Zwischenhalte",
  * aufgeklappt untereinander zwischen Ein- und Ausstieg - mit Uhrzeit und,
  * wo bekannt, Verspätung.
@@ -1499,48 +1534,315 @@ function renderStops(leg, state) {
     if (box.open) offeneHalte.add(key);
     else offeneHalte.delete(key);
   });
-  box.append(el('summary', 'leg__stops-sum', `${mid.length} Zwischenhalt${mid.length === 1 ? '' : 'e'}`));
+  const sum = el('summary', 'leg__stops-sum', `${mid.length} Zwischenhalt${mid.length === 1 ? '' : 'e'}`);
+  // Ein langer Aufenthalt gehört schon in die zugeklappte Zeile.
+  const lang = mid.map((st) => ({ st, h: st.arrival && st.departure ? lateBy(st.arrival, st.departure) : 0 }))
+    .filter((x) => x.h >= LONG_DWELL_MIN)
+    .sort((a, b) => b.h - a.h)[0];
+  if (lang) {
+    const hinweis = el('span', 'leg__stops-long', ` · ${lang.h} min Aufenthalt in ${lang.st.name}`);
+    hinweis.title = LONG_DWELL_HINT;
+    sum.append(hinweis);
+  }
+  box.append(sum);
 
   const list = el('ol', 'stops');
-  let land = stops[0]?.country || leg.from?.country || '';
-  for (const s of mid) {
-    const li = el('li', 'stop');
-    if (s.cancelled) li.classList.add('is-cancelled');
-
-    // Ankunft zählt: dann ist man dort. Am Startpunkt eines Flügelzugs
-    // gibt es nur die Abfahrt.
-    const plan = s.arrival || s.departure;
-    const real = s.arrival ? s.arrivalReal : s.departureReal;
-    const zeit = el('span', 'stop__time', formatTime(plan));
-    const spaet = lateBy(plan, real);
-    if (spaet != null && spaet !== 0) {
-      zeit.append(el('span', 'stop__delay' + (spaet >= 5 ? ' is-bad' : spaet > 0 ? ' is-warn' : ''),
-        spaet > 0 ? `+${spaet}` : `${spaet}`));
-    }
-    li.append(zeit);
-    const name = el('span', 'stop__name', s.name || '?');
-    // Grenzübertritt sichtbar machen: daran hängen Tarife und Abos.
-    if (s.country && land && s.country !== land) {
-      const b = el('span', 'stop__border', s.country.toUpperCase());
-      b.title = `Ab hier ${s.country.toUpperCase()}`;
-      name.append(b);
-    }
-    if (s.country) land = s.country;
-    li.append(name);
-
-    if (nerd) {
-      const meta = [];
-      const halt = s.arrival && s.departure ? lateBy(s.arrival, s.departure) : null;
-      if (halt != null && halt >= 2) meta.push(`${halt} min Halt`);
-      if (s.platform) meta.push(`Gl. ${s.platform}`);
-      if (meta.length) li.append(el('span', 'stop__meta', meta.join(' · ')));
-    }
-    if (s.cancelled) li.append(el('span', 'stop__meta stop__meta--bad', 'Halt entfällt'));
-
-    list.append(li);
-  }
+  const land = { last: stops[0]?.country || leg.from?.country || '' };
+  for (const s of mid) list.append(stopRow(s, nerd, land));
   box.append(list);
   return box;
+}
+
+/**
+ * BEREITSTELLUNG: Ab wann steht der Zug, der am Einstieg beginnt?
+ *
+ * Gerade im Regionalverkehr ist das die Frage am Bahnsteig: der RE nach
+ * Augsburg beginnt in München, hat vor der Abfahrt keine Echtzeit, und
+ * "pünktlich" hieße dort nur "keine Information". Der einfahrende Zug
+ * dagegen ist unterwegs und hat eine - geschätzt aus der Gleisbelegung,
+ * siehe inbound.js.
+ *
+ * Nur für Abfahrten der nächsten Stunden: weiter vorn gibt es keine
+ * Echtzeit, und der Satz wäre nur ein zweiter Fahrplan. Die Antwort wird
+ * eine Minute gemerkt, damit das Neuzeichnen der Liste nicht flackert.
+ */
+const READY_WINDOW_MS = 4 * 3600_000;
+/** So lange gilt eine Antwort; danach wird beim nächsten Zeichnen neu gefragt. */
+const READY_TTL_MS = 60_000;
+const bereitstellung = new Map(); // halteKey -> {at, link, laden}
+
+function readyLine(leg, cls) {
+  const ab = Date.parse(leg.departure || '');
+  if (!wantsInbound(leg) || !(ab - Date.now() < READY_WINDOW_MS)) return null;
+  const key = halteKey(leg);
+  const p = el('p', cls);
+  p.hidden = true;
+  p.dataset.ready = key;
+  const fuellen = () => {
+    const link = bereitstellung.get(key)?.link;
+    if (!link) return;
+    const z = inboundText(link);
+    p.textContent = z.board;
+    p.title = z.title;
+    p.classList.toggle('is-late', z.late);
+    p.hidden = false;
+  };
+  p.addEventListener('ready', fuellen);
+
+  // Was schon da ist, gleich zeigen - auch wenn es gleich neu geholt wird.
+  const da = bereitstellung.get(key);
+  fuellen();
+  if (!da || (!da.laden && Date.now() - da.at > READY_TTL_MS)) {
+    bereitstellung.set(key, { at: Date.now(), link: da?.link ?? null, laden: true });
+    inboundFor(leg).then((link) => {
+      bereitstellung.set(key, { at: Date.now(), link, laden: false });
+      // Dieselbe Karte kann inzwischen neu gezeichnet sein: alle Platzhalter
+      // dieses Abschnitts füllen.
+      for (const n of document.querySelectorAll(`[data-ready="${CSS.escape(key)}"]`)) n.dispatchEvent(new Event('ready'));
+    });
+  }
+  return p;
+}
+
+/**
+ * FAHRTINFO: was zu EINEM Zug gehört, aber nicht in jeden Streckenverlauf.
+ *
+ * Die Wagenreihung stand früher als Kasten mitten im Abschnitt, zwischen
+ * Einstieg und Zwischenhalten. Jetzt liegt sie hinter einem Knopf am Zug,
+ * zusammen mit dem, was man sonst noch über ihn wissen will - in Reitern:
+ *
+ *   Wagenreihung - wo steht mein Wagen (nur wo es eine gibt)
+ *   Zuglauf      - woher kommt der Zug, wo ist er gerade, wohin fährt er
+ *                  weiter; beginnt er hier, mit welchem Zug er vermutlich
+ *                  ankommt (inbound.js)
+ *   Zug          - Fahrzeug und woher wir es wissen, Betreiber, Auslastung
+ *                  je Klasse, Ausstattung, Pünktlichkeit dieses Zuges
+ *
+ * Geladen wird erst beim Öffnen eines Reiters. Welcher Kasten mit welchem
+ * Reiter offen ist, überlebt das Neuzeichnen - wie bei den Zwischenhalten.
+ */
+const offeneInfo = new Map(); // halteKey -> Reiter
+const laeufe = new Map();     // halteKey -> {at, promise}
+const LAUF_TTL_MS = 60_000;
+
+/** Betreiber nur, wenn es ein Name ist - HAFAS liefert auch Kürzel wie "80____". */
+const operatorName = (o) => (/[A-Za-zÄÖÜäöü]{2}/.test(String(o || '')) ? String(o).trim() : '');
+
+function loadRunCached(leg, actions) {
+  const key = halteKey(leg);
+  const alt = laeufe.get(key);
+  if (alt && Date.now() - alt.at < LAUF_TTL_MS) return alt.promise;
+  const promise = actions.loadRun(leg);
+  laeufe.set(key, { at: Date.now(), promise });
+  promise.catch(() => laeufe.delete(key));
+  return promise;
+}
+
+/** Woher die Fahrzeugangabe stammt - je Gewissheit ein Satz. */
+function modelSource(leg, comfortEntry) {
+  return {
+    series: `Aus der Wagenreihung ermittelt (${leg.seriesName || 'BR ' + leg.series}).`,
+    learned: `Dieser Zug fuhr zuletzt als ${leg.seriesName || 'BR ' + leg.series}`
+      + (leg.seriesLearned ? ` (vor ${leg.seriesLearned} Tag${leg.seriesLearned == 1 ? '' : 'en'} beobachtet).` : '.')
+      + ' Umläufe ändern sich gelegentlich.',
+    route: comfortEntry?.note || 'Auf dieser Strecke verkehrt nur dieses Fahrzeug.',
+    sole: 'Diese Gattung verkehrt nur mit diesem Fahrzeug.',
+  }[comfortEntry?.certainty] || '';
+}
+
+/**
+ * Knopf und Kasten der Fahrtinfo zu einem Abschnitt.
+ *
+ * @returns {{button: HTMLElement, panel: HTMLElement} | null}
+ */
+function renderTrainInfo(journey, leg, comfortEntry, state, actions) {
+  const reiter = [];
+  if (canSequence(leg, actions)) reiter.push(['reihung', 'Wagenreihung']);
+  if (actions?.loadRun && actions.canRun?.(leg)) reiter.push(['lauf', 'Zuglauf']);
+  reiter.push(['zug', 'Zug']);
+
+  const key = halteKey(leg);
+  const panel = el('div', 'fahrt');
+  const button = el('button', 'leg__info-btn');
+  button.type = 'button';
+  button.setAttribute('aria-expanded', 'false');
+
+  const zeichne = () => {
+    const offen = offeneInfo.get(key);
+    button.textContent = offen ? 'Fahrtinfo ▴' : 'Fahrtinfo ▾';
+    button.setAttribute('aria-expanded', String(Boolean(offen)));
+    panel.hidden = !offen;
+    if (!offen) {
+      panel.replaceChildren();
+      return;
+    }
+    const aktiv = reiter.some(([id]) => id === offen) ? offen : reiter[0][0];
+    const leiste = el('div', 'fahrt__tabs');
+    leiste.setAttribute('role', 'tablist');
+    for (const [id, label] of reiter) {
+      const t = el('button', 'fahrt__tab' + (id === aktiv ? ' is-active' : ''), label);
+      t.type = 'button';
+      t.setAttribute('role', 'tab');
+      t.setAttribute('aria-selected', String(id === aktiv));
+      t.addEventListener('click', (e) => {
+        e.stopPropagation();
+        offeneInfo.set(key, id);
+        zeichne();
+      });
+      leiste.append(t);
+    }
+    const body = el('div', 'fahrt__body');
+    body.setAttribute('role', 'tabpanel');
+    panel.replaceChildren(leiste, body);
+    if (aktiv === 'reihung') sequenceInto(body, leg, actions);
+    else if (aktiv === 'lauf') runInto(body, leg, state, actions);
+    else body.append(...trainFacts(journey, leg, comfortEntry, state));
+  };
+
+  button.addEventListener('click', (e) => {
+    // Die Karte reagiert sonst auf den Klick und wählt die Verbindung neu.
+    e.stopPropagation();
+    if (offeneInfo.has(key)) offeneInfo.delete(key);
+    else offeneInfo.set(key, reiter[0][0]);
+    zeichne();
+  });
+  panel.addEventListener('click', (e) => e.stopPropagation());
+  zeichne();
+  return { button, panel };
+}
+
+/** Reiter "Zuglauf": der ganze Lauf, der eigene Abschnitt hervorgehoben. */
+async function runInto(body, leg, state, actions) {
+  body.replaceChildren(el('p', 'fahrt__muted', 'Lade Zuglauf …'));
+  let run;
+  try {
+    run = (await loadRunCached(leg, actions))?.train;
+  } catch {
+    run = null;
+  }
+  const stops = run?.stops || [];
+  if (stops.length < 2) {
+    body.replaceChildren(el('p', 'fahrt__muted', 'Den Zuglauf liefert die Quelle für diesen Zug gerade nicht.'));
+    return;
+  }
+
+  const out = [];
+  const gleich = (s, ort) => (ort?.id && String(s.id) === String(ort.id)) || s.name === ort?.name;
+  let ein = stops.findIndex((s) => gleich(s, leg.from));
+  let aus = stops.findIndex((s, i) => i > ein && gleich(s, leg.to));
+  if (ein < 0) ein = 0;
+  if (aus < 0) aus = stops.length - 1;
+
+  out.push(el('p', 'fahrt__head',
+    `${trainLabel(leg)} · ${stops[0].name} → ${stops[stops.length - 1].name}`
+    + (operatorName(run.operator) ? ` · ${operatorName(run.operator)}` : '')));
+
+  // Wo ist der Zug gerade? Der letzte Halt mit Ist-Zeit in der Vergangenheit.
+  const jetzt = Date.now();
+  if (run.cancelled) {
+    out.push(el('p', 'fahrt__status is-bad', 'Dieser Zug fällt aus.'));
+  } else if (run.hasRealtime) {
+    let zuletzt = -1;
+    stops.forEach((s, i) => {
+      const t = Date.parse(s.departureReal || s.arrivalReal || '');
+      if (Number.isFinite(t) && t <= jetzt) zuletzt = i;
+    });
+    const s = stops[zuletzt];
+    const delay = s ? lateBy(s.departure || s.arrival, s.departureReal || s.arrivalReal) : null;
+    const v = delay > 0 ? `+${delay} min` : 'pünktlich';
+    if (zuletzt < 0) {
+      const ab = stops[0];
+      const d = lateBy(ab.departure, ab.departureReal);
+      out.push(el('p', 'fahrt__status', `Noch nicht unterwegs · Abfahrt in ${ab.name} ${formatTime(ab.departureReal || ab.departure)}`
+        + (d > 0 ? ` (+${d})` : '')));
+    } else if (zuletzt >= stops.length - 1) {
+      out.push(el('p', 'fahrt__status', `Angekommen in ${s.name}${delay > 0 ? `, +${delay} min` : ''}`));
+    } else {
+      out.push(el('p', 'fahrt__status' + (delay >= 5 ? ' is-bad' : delay > 0 ? ' is-warn' : ' is-good'),
+        `Zuletzt in ${s.name} · ${v}`));
+    }
+  } else {
+    out.push(el('p', 'fahrt__muted', 'Keine Echtzeit für diesen Zug — Zeiten nach Fahrplan.'));
+  }
+
+  // Beginnt der Zug hier und schweigt, sagt der einfahrende Zug etwas.
+  if (ein === 0 && wantsInbound(leg, run)) {
+    const p = el('p', 'fahrt__inbound', 'Suche den einfahrenden Zug …');
+    out.push(p);
+    inboundFor(leg).then((link) => {
+      if (!link) {
+        p.textContent = 'Der Zug beginnt hier; welcher Zug vorher einfährt, ließ sich nicht zuordnen.';
+        p.classList.add('fahrt__muted');
+        return;
+      }
+      const z = inboundText(link);
+      p.textContent = z.text;
+      p.title = z.title;
+      if (z.late) p.classList.add('is-late');
+    });
+  } else if (ein > 0) {
+    out.push(el('p', 'fahrt__muted', `Kommt aus ${stops[0].name} — ${ein} Halt${ein === 1 ? '' : 'e'} vor deinem Einstieg.`));
+  }
+
+  const nerd = state.mode === 'nerd';
+  const list = el('ol', 'stops stops--run');
+  const land = { last: stops[0].country || '' };
+  stops.forEach((s, i) => {
+    const li = stopRow(s, nerd, land);
+    if (i < ein || i > aus) li.classList.add('is-outside');
+    if (i === ein || i === aus) li.classList.add('is-mine');
+    if (i === ein) li.append(el('span', 'stop__meta', 'Einstieg'));
+    if (i === aus) li.append(el('span', 'stop__meta', 'Ausstieg'));
+    list.append(li);
+  });
+  out.push(list);
+
+  const meldungen = [...new Set((run.messages || []).map((m) => m.text).filter(Boolean))].slice(0, 3);
+  for (const m of meldungen) out.push(el('p', 'leg__remark', m));
+  body.replaceChildren(...out);
+}
+
+/** Reiter "Zug": was über das Fahrzeug und diese Zugnummer bekannt ist. */
+function trainFacts(journey, leg, comfortEntry, state) {
+  const out = [];
+  const zeile = (label, text, title) => {
+    const p = el('p', 'fahrt__fact');
+    p.append(el('span', 'fahrt__label', label), el('span', null, text));
+    if (title) p.title = title;
+    out.push(p);
+  };
+
+  const typ = typeOf(leg);
+  zeile('Zug', [trainLabel(leg), typ.long, leg.direction ? `Richtung ${leg.direction}` : null].filter(Boolean).join(' · '));
+  if (comfortEntry?.model) {
+    zeile('Fahrzeug', comfortEntry.model.label);
+    out.push(el('p', 'fahrt__muted', modelSource(leg, comfortEntry)));
+  } else if (leg.seriesName || leg.series) {
+    zeile('Fahrzeug', leg.seriesName || `Baureihe ${leg.series}`);
+  }
+  if (operatorName(leg.operator)) zeile('Betreiber', operatorName(leg.operator));
+  if (leg.occupancy) {
+    const k = (v) => (typeof v === 'number' && v > 0 ? OCCUPANCY_LABELS[v] || `Stufe ${v}` : '—');
+    zeile('Auslastung', `1. Kl. ${k(leg.occupancy.first)} · 2. Kl. ${k(leg.occupancy.second)}`);
+  }
+  if (comfortEntry && state.mode === 'nerd') zeile('Komfort', String(comfortEntry.comfort));
+
+  const amen = leg.amenities || [];
+  if (amen.length) {
+    const box = el('div', 'leg__amenities');
+    for (const a of amen) box.append(el('span', 'leg__amenity' + (a.important ? ' leg__amenity--warn' : ''), a.label));
+    out.push(box);
+  }
+
+  const h = journey.history?.[`${String(leg.category || '').trim()} ${String(leg.trainNumber || '').trim()}`];
+  if (h) {
+    const num = (v) => (typeof v === 'number' ? v.toFixed(1).replace('.', ',') : '?');
+    zeile('Pünktlich', `${Math.round((h.rate ?? 0) * 100)} % · Ø +${num(h.avg)} min`
+      + (h.samples7d > 0 ? ` · letzte 7 Tage Ø +${num(h.avg7d)} min` : ''),
+    h.source === 'baseline' ? 'Näherung aus der Jahresstatistik des Betreibers.' : 'Aus eigenen Messungen.');
+  }
+  if (out.length === 1) out.push(el('p', 'fahrt__muted', 'Mehr ist über diesen Zug gerade nicht bekannt.'));
+  return out;
 }
 
 /**
@@ -1644,14 +1946,7 @@ function renderLegs(journey, entry, state, actions) {
     // Gattung geschlossen. Das gehört dazugesagt.
     if (comfortEntry?.model) {
       const m = el('span', 'leg__model', comfortEntry.model.label);
-      m.title = {
-        series: `Aus der Wagenreihung ermittelt (${leg.seriesName || 'BR ' + leg.series}).`,
-        learned: `Dieser Zug fuhr zuletzt als ${leg.seriesName || 'BR ' + leg.series}`
-          + (leg.seriesLearned ? ` (vor ${leg.seriesLearned} Tagen beobachtet).` : '.')
-          + ' Umläufe ändern sich gelegentlich.',
-        route: comfortEntry.note || 'Auf dieser Strecke verkehrt nur dieses Fahrzeug.',
-        sole: 'Diese Gattung verkehrt nur mit diesem Fahrzeug.',
-      }[comfortEntry.certainty] || '';
+      m.title = modelSource(leg, comfortEntry);
       if (comfortEntry.certainty !== 'series') m.classList.add('leg__model--inferred');
       info.append(m);
     } else if (leg.seriesName || leg.series) {
@@ -1670,17 +1965,17 @@ function renderLegs(journey, entry, state, actions) {
     if (state.mode === 'nerd' && comfortEntry) {
       info.append(el('span', 'leg__comfort', `Komfort ${comfortEntry.comfort}`));
     }
-    row.append(info);
 
-    // Wagenreihung DIESES Zuges - nicht nur beim Umsteigen. Wer durchfährt,
-    // bekam sie früher nie zu sehen, obwohl die Frage dieselbe ist: in
-    // welchem Sektor steht mein Wagen.
-    const reihung = renderCoachSequence(leg, actions);
-    if (reihung) row.append(reihung);
+    // Fahrtinfo: Wagenreihung, Zuglauf, Fahrzeug - hinter einem Knopf, damit
+    // unter dem Einstieg gleich die Halte folgen (siehe renderTrainInfo).
+    const fahrtinfo = renderTrainInfo(journey, leg, comfortEntry, state, actions);
+    info.append(fahrtinfo.button);
+    row.append(info, fahrtinfo.panel);
 
-    // Ausstattung laut DB. Was die Fahrt verhindern kann (Reservierungs-
-    // pflicht, DB-Fahrscheine gelten nicht), steht zuerst und farbig.
-    const amen = [...(leg.amenities || [])].sort((a, b) => Number(b.important) - Number(a.important));
+    // Was die Fahrt verhindern kann (Reservierungspflicht, DB-Fahrscheine
+    // gelten nicht), steht direkt am Zug und farbig. Die übrige Ausstattung
+    // steht in der Fahrtinfo.
+    const amen = (leg.amenities || []).filter((a) => a.important);
     if (amen.length > 0) {
       const box = el('div', 'leg__amenities');
       for (const a of amen) {

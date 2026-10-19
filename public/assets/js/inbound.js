@@ -24,8 +24,23 @@ const hhmm = (iso) => {
 };
 
 /**
+ * Sagt die Ist-Zeit am Einstieg etwas? Eine Abweichung ja. Dieselbe Minute
+ * wie der Plan dagegen nicht unbedingt: für Züge, die hier beginnen, liefert
+ * HAFAS als "Prognose" einfach die Plan-Zeit - der RE9 München-Augsburg
+ * stand so als "pünktlich" da, während sein Zubringer zehn Minuten Verspätung
+ * hatte.
+ */
+function saysSomething(plan, real) {
+  if (!real) return false;
+  const p = Date.parse(plan || '');
+  const r = Date.parse(real);
+  return !(Number.isFinite(p) && Number.isFinite(r) && Math.round((r - p) / 60_000) === 0);
+}
+
+/**
  * Lohnt die Frage für diesen Abschnitt? Nur Züge mit EVA-Nummer am Einstieg,
- * die noch nicht abgefahren sind und dort keine Ist-Zeit haben.
+ * die noch nicht abgefahren sind und dort keine aussagekräftige Ist-Zeit
+ * haben. Ob der Zug wirklich hier beginnt, entscheidet der Server.
  *
  * @param {object} leg      Abschnitt der Verbindung
  * @param {?object} run     nachgeladener Zuglauf, falls schon da
@@ -34,10 +49,10 @@ export function wantsInbound(leg, run = null) {
   if (!leg || leg.mode === 'walk' || !/^\d{7}$/.test(String(leg.from?.id || ''))) return false;
   const ab = Date.parse(leg.departure || '');
   if (!Number.isFinite(ab) || Date.now() > ab + 2 * 60_000) return false;
-  if (leg.departureReal) return false;
+  if (saysSomething(leg.departure, leg.departureReal)) return false;
   const ein = (run?.stops || []).find((s) => String(s.id || '') === String(leg.from.id))
     || (run?.stops || []).find((s) => s.name === leg.from.name);
-  return !ein?.departureReal;
+  return !saysSomething(ein?.departure, ein?.departureReal);
 }
 
 /** Der Zubringer zu einem Abschnitt, oder null. Fehler bleiben still. */
@@ -65,9 +80,21 @@ export async function inboundFor(leg) {
 }
 
 /**
+ * So lange nach der Ankunft, bis man einsteigen kann: erst steigen die
+ * Fahrgäste des einfahrenden Zuges aus. In der Regionalbahn geht das
+ * schnell, zwei Minuten sind eine vorsichtige Schätzung.
+ */
+const BOARD_AFTER_MIN = 2;
+/** Ab so viel Wartezeit am Gleis keine Einsteige-Zeit mehr versprechen. */
+const LONG_WAIT_MIN = 20;
+
+/**
  * Der Satz dazu.
  *
- * @returns {{text: string, late: boolean, title: string}}
+ * `text` ist die ausführliche Fassung (Live-Verfolgung, Zuglauf), `board`
+ * die kurze für die Trefferkarte: ab wann man einsteigen kann.
+ *
+ * @returns {{text: string, board: string, late: boolean, title: string}}
  */
 export function inboundText(link) {
   const z = link.inbound;
@@ -80,8 +107,25 @@ export function inboundText(link) {
     : `Kommt vermutlich als ${name} aus ${z.from} · an ${hhmm(z.planned)}${verspaetung}`;
   if (!schonDa && !z.real) text += ' nach Fahrplan';
   if (link.expectedDeparture) text += ` — Abfahrt wohl erst gegen ${hhmm(link.expectedDeparture)}`;
+
+  // Steht der Zug lange vor der Abfahrt da, wird er oft abgeschlossen oder
+  // zum Reinigen abgestellt - dann keine Einsteige-Zeit versprechen, nur
+  // sagen, ab wann er am Gleis ist.
+  const herkunft = `${name} aus ${z.from}`;
+  const bereitAb = Date.parse(an) + BOARD_AFTER_MIN * 60_000;
+  const lange = Date.parse(link.departure?.planned || '') - bereitAb > LONG_WAIT_MIN * 60_000;
+  let board;
+  if (schonDa) {
+    board = `Steht vermutlich schon am Gleis · kam als ${herkunft}`;
+  } else {
+    board = (lange ? `Zug vermutlich ab ca. ${hhmm(new Date(bereitAb).toISOString())} am Gleis`
+      : `Einsteigen vermutlich ab ca. ${hhmm(new Date(bereitAb).toISOString())}`)
+      + ` · kommt als ${herkunft}, an ${hhmm(an)}${verspaetung}${z.real ? '' : ' (Fahrplan)'}`;
+  }
+  if (link.expectedDeparture) board += ` · Abfahrt wohl erst ${hhmm(link.expectedDeparture)}`;
   return {
     text,
+    board,
     late: Boolean(link.expectedDeparture),
     title: 'Geschätzt aus der Gleisbelegung: der Zug, der vorher an diesem Gleis ankommt und hier endet. '
       + 'Die Bahn meldet nicht, welches Fahrzeug welche Fahrt übernimmt.'

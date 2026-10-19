@@ -2898,39 +2898,81 @@ details.live__msg .live__msg-text {
 
 .xfer__body { padding: 0.1rem 0.5rem 0.5rem; }
 
-/* --- Wagenreihung am Zug --------------------------------------------
-   Dieselbe Sprache wie der Umstiegsplan: ein zugeklappter Kasten am
-   Abschnitt. Sie stand früher nur im Lageplan des Umsteigebahnhofs und war
-   damit für Durchfahrende unsichtbar. */
-.wagen-box {
-  margin: 0.2rem 0 0.4rem;
+/* --- Fahrtinfo am Zug (renderTrainInfo) ----------------------------
+   Ein Knopf am Zug, darunter Reiter: Wagenreihung, Zuglauf, Zug. Die
+   Wagenreihung stand früher als Kasten zwischen Einstieg und Halten. */
+.leg__info-btn {
+  margin-left: auto;
+  padding: 0.12rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.leg__info-btn:hover, .leg__info-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+
+.fahrt {
+  margin: 0.15rem 0 0.35rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-xs);
   background: var(--surface-card);
 }
+.fahrt[hidden] { display: none; }
 
-.wagen-box__sum {
+.fahrt__tabs {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.3rem 0.5rem;
+  gap: 0.2rem;
+  padding: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.fahrt__tab {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.6rem;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 0.72rem;
-  color: var(--text-dim);
   cursor: pointer;
-  list-style: none;
+}
+.fahrt__tab:hover { color: var(--text-dim); }
+.fahrt__tab.is-active {
+  background: var(--surface-solid);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-soft);
 }
 
-.wagen-box__sum::-webkit-details-marker { display: none; }
-.wagen-box__sum::after { content: '▾'; margin-left: auto; opacity: 0.6; }
-.wagen-box[open] .wagen-box__sum::after { content: '▴'; }
-.wagen-box__sum:hover { color: var(--accent); }
+.fahrt__body { padding: 0.45rem 0.6rem 0.55rem; }
+.fahrt__body .wagen { margin: 0; }
+.fahrt__head { margin: 0; font-size: 0.82rem; color: var(--text-dim); }
+.fahrt__status { margin: 0.25rem 0 0; font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-dim); }
+.fahrt__status.is-good { color: var(--green); }
+.fahrt__status.is-warn { color: var(--amber); }
+.fahrt__status.is-bad { color: var(--rose); }
+.fahrt__muted { margin: 0.25rem 0 0; font-size: 0.76rem; line-height: 1.45; color: var(--text-muted); }
+.fahrt__inbound { margin: 0.3rem 0 0; font-size: 0.78rem; font-style: italic; color: var(--text-dim); }
+.fahrt__inbound.is-late { color: var(--amber); }
+.fahrt__fact { display: flex; gap: 0.6rem; margin: 0.2rem 0 0; font-size: 0.8rem; color: var(--text-dim); }
+.fahrt__fact:first-child { margin-top: 0; }
+.fahrt__label {
+  flex: 0 0 5.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.fahrt__body .leg__amenities { margin-top: 0.4rem; }
 
-.wagen-box__label { color: var(--text); font-weight: 500; }
-.wagen-box__hint { color: var(--text-muted); font-size: 0.68rem; }
-
-.wagen-box .wagen { margin: 0; padding: 0.1rem 0.5rem 0.5rem; }
+/* Zuglauf: der eigene Abschnitt kräftig, davor und danach blass. */
+.stops--run { margin-top: 0.5rem; }
+.stop.is-outside { opacity: 0.5; }
+.stop.is-mine .stop__name { font-weight: 600; color: var(--text); }
+.stop.is-mine::before { border-color: var(--accent); background: var(--accent); }
 
 .xfer__note {
   margin: 0 0 0.4rem;
@@ -4742,3 +4784,26 @@ details.live__msg .live__msg-text {
 }
 .sync__msg { margin: 0.45rem 0 0; font-size: 0.78rem; color: var(--green); }
 .sync__danger { border-color: var(--rose); color: var(--rose); }
+.sync__qr { margin-top: 0.6rem; }
+.sync__qr svg {
+  display: block;
+  width: min(220px, 70vw);
+  height: auto;
+  border-radius: var(--radius-xs);
+}
+
+/* Bereitstellung: ab wann der Zug am Einstieg steht (readyLine, inbound.js) */
+.journey__ready {
+  margin: 0.45rem 0 0;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--accent-soft);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+.journey__ready[hidden] { display: none; }
+.journey__ready.is-late { border-left-color: var(--amber); color: var(--amber); }
+
+/* Ungewöhnlich langer Aufenthalt unterwegs */
+.leg__stops-long { color: var(--amber); cursor: help; }
+.stop__meta--long { color: var(--amber); cursor: help; }

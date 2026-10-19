@@ -9,6 +9,7 @@
  * würde, schickte seine Reisen an jemanden, der den Code kennt.
  */
 import { sync, formatCode, codeLink, normalizeCode } from './sync.js';
+import { qrSvg } from './qr.js';
 
 const el = (tag, className, text) => {
   const n = document.createElement(tag);
@@ -39,6 +40,7 @@ export function createSyncPanel() {
   let angebot = null;   // Code aus einem Link, noch nicht bestätigt
   let eingabe = '';     // was im Feld steht - überlebt das Neuzeichnen
   let codeOffen = false;
+  let qrOffen = false;
   let trennenFragen = false;
   let meldung = null;   // {text, bad}
 
@@ -145,7 +147,22 @@ export function createSyncPanel() {
         kopieren(url, 'Link kopiert.');
       }
     }));
+    reihe.append(button(qrOffen ? 'QR-Code ausblenden' : 'QR-Code zeigen', () => {
+      qrOffen = !qrOffen;
+      render();
+    }));
     det.append(reihe);
+    if (qrOffen) {
+      const qr = el('div', 'sync__qr');
+      try {
+        qr.append(qrSvg(codeLink(code), { label: 'QR-Code mit dem Link zum Verbinden' }));
+        qr.append(el('p', 'sync__hint', 'Mit der Handykamera scannen. Der Link öffnet sich im Browser und '
+          + 'fragt vor dem Verbinden nach.'));
+      } catch {
+        qr.append(el('p', 'sync__hint', 'Der Link ist zu lang für einen QR-Code — bitte den Code eintippen.'));
+      }
+      det.append(qr);
+    }
     det.append(el('p', 'sync__hint',
       'Auf dem anderen Gerät unter „Reisen" eingeben. In der App vom iPhone-Home-Bildschirm bitte '
       + 'eintippen: ein Link öffnet Safari, und Safari hat einen eigenen Speicher.'));

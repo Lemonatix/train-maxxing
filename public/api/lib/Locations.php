@@ -31,6 +31,13 @@ final class Locations
      * gewinnt "Marienplatz, Schwerin" (Regionalhalt) gegen "München
      * Marienplatz" (S-/U-Bahn-Knoten mit 150.000 Fahrgästen am Tag).
      */
+    /**
+     * Sekunden, nach denen die Ortssuche nicht mehr auf langsame Quellen
+     * wartet, wenn eine schon geantwortet hat. Beim Tippen zählt jede
+     * Zehntelsekunde; der nächste Buchstabe fragt ohnehin neu.
+     */
+    private const SOFT_DEADLINE = 1.2;
+
     private const PRODUCT_SCORE = [
         'ICE'            => 1000,
         'EC_IC'          => 600,
@@ -123,45 +130,43 @@ final class Locations
         // kennt Deutschland, die ÖBB Österreich.
         $orte    = [];
 
-        // --- DB: beste Abdeckung für Deutschland inkl. Stadtverkehr ---
-        if (($this->cfg['db']['enabled'] ?? false) === true) {
-            $db  = new DbVendo($this->http, $this->cfg['db']);
-            $res = $db->locations($query, $limit);
-            $sources['db'] = $res['ok'];
-            if ($res['ok']) {
-                foreach ($res['data'] as $i => $loc) {
-                    $this->merge($byId, $this->fromDb($loc, $i));
+        // Alle Quellen gleichzeitig: erst aufzeichnen, was sie fragen
+        // würden, dann alles auf einmal schicken - siehe Http::record().
+        // Nacheinander addierten sich drei Antwortzeiten zu einer Sekunde.
+        //
+        // Wer schon geantwortet hat, wartet nicht auf den Nachzügler: die ÖBB
+        // braucht ab und zu fünf Sekunden für "Graz", die DB hat Graz Hbf
+        // längst geliefert. Nach SOFT_DEADLINE gilt, was da ist - aber nur,
+        // wenn eine fertige Antwort den gesuchten Namen überhaupt enthält.
+        // Für "Wien Mitte-Landstraße" liefert die DB Dortmund-Mitte; dann
+        // wird auf die ÖBB gewartet, die den Bahnhof kennt.
+        $genug = static function (array $fertig) use ($query): bool {
+            foreach ($fertig as $res) {
+                if ($res['ok'] && mb_stripos($res['body'], $query) !== false) {
+                    return true;
                 }
-                array_push($orte, ...($res['places'] ?? []));
-            } else {
-                $errors[] = $res['error'];
             }
-        }
+            return false;
+        };
+        $komplett = Http::prefetch(Http::record(fn () => $this->ask($query, $limit)), self::SOFT_DEADLINE, $genug);
+        $antworten = $this->ask($query, $limit);
 
-        // --- ÖBB: ergänzt AT/CH-Halte, die die DB nicht kennt ---
-        $oebb = new OebbHafas($this->http, $this->cfg['oebb']);
-        $res  = $oebb->locations($query, $limit);
-        $sources['oebb'] = $res['ok'];
-        if ($res['ok']) {
+        // DB: beste Abdeckung für Deutschland inkl. Stadtverkehr.
+        // ÖBB: ergänzt AT/CH-Halte, die die DB nicht kennt.
+        // MVG: schließt die Münchner Nahverkehrslücke (Odeonsplatz & Co).
+        $umwandeln = ['db' => 'fromDb', 'oebb' => 'fromOebb', 'mvg' => 'fromMvg'];
+        foreach ($antworten as $quelle => $res) {
+            $sources[$quelle] = $res['ok'];
+            if (!$res['ok']) {
+                $errors[] = $res['error'];
+                continue;
+            }
             foreach ($res['data'] as $i => $loc) {
-                $this->merge($byId, $this->fromOebb($loc, $i));
+                $this->merge($byId, $this->{$umwandeln[$quelle]}($loc, $i));
             }
-            array_push($orte, ...($res['places'] ?? []));
-        } else {
-            $errors[] = $res['error'];
-        }
-
-        // --- MVG: schließt die Münchner Nahverkehrslücke (Odeonsplatz &Co) ---
-        if (($this->cfg['mvg']['enabled'] ?? false) === true) {
-            $mvg = new Mvg($this->http, $this->cfg['mvg']);
-            $res = $mvg->locations($query, $limit);
-            $sources['mvg'] = $res['ok'];
-            if ($res['ok']) {
-                foreach ($res['data'] as $i => $loc) {
-                    $this->merge($byId, $this->fromMvg($loc, $i));
-                }
-            } else {
-                $errors[] = $res['error'];
+            // Die MVG liefert nur Haltestellen; Adressen kommen von DB und ÖBB.
+            if ($quelle !== 'mvg') {
+                array_push($orte, ...($res['places'] ?? []));
             }
         }
 
@@ -179,6 +184,7 @@ final class Locations
                 'error'   => $orte === [] ? ($errors[0] ?? null) : null,
                 'data'    => $orte,
                 'sources' => $sources,
+                'complete' => $komplett,
             ];
         }
 
@@ -238,7 +244,26 @@ final class Locations
             ? array_merge($orte, $out)
             : array_merge($out, $orte);
 
-        return ['ok' => true, 'error' => null, 'data' => $out, 'sources' => $sources];
+        return ['ok' => true, 'error' => null, 'data' => $out, 'sources' => $sources, 'complete' => $komplett];
+    }
+
+    /**
+     * Die Quellen fragen - in fester Reihenfolge, DB zuerst: sie kennt
+     * Deutschland, die ÖBB Österreich.
+     *
+     * @return array<string,array{ok:bool,error:?string,data:array,places?:array}>
+     */
+    private function ask(string $query, int $limit): array
+    {
+        $out = [];
+        if (($this->cfg['db']['enabled'] ?? false) === true) {
+            $out['db'] = (new DbVendo($this->http, $this->cfg['db']))->locations($query, $limit);
+        }
+        $out['oebb'] = (new OebbHafas($this->http, $this->cfg['oebb']))->locations($query, $limit);
+        if (($this->cfg['mvg']['enabled'] ?? false) === true) {
+            $out['mvg'] = (new Mvg($this->http, $this->cfg['mvg']))->locations($query, $limit);
+        }
+        return $out;
     }
 
     /** Höchstens so viele Adressen bzw. POIs je Suche. */

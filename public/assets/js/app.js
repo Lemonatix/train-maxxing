@@ -262,6 +262,8 @@ function setupTabs() {
         state,
         loadPlatforms,
         loadSequence,
+        canRun,
+        loadRun,
       });
       tripsView.activate();
     } else {
@@ -747,6 +749,8 @@ function drawTripTabs() {
     loadPlatforms,
     loadOffers,
     loadSequence,
+    canRun,
+    loadRun,
     isSaved: (journey) => trips.has(journey),
     toggleSave: saveTrip,
   });
@@ -1493,6 +1497,8 @@ function draw() {
     loadPlatforms,
     loadOffers,
     loadSequence,
+    canRun,
+    loadRun,
     returnTrip,
     isSaved: (journey) => trips.has(journey),
     toggleSave: saveTrip,
@@ -1979,6 +1985,18 @@ function loadOffers(journey) {
 
 /** Wagenreihungen je Zug und Bahnhof - eine Abfrage je Umstiegsplan. */
 const sequenceCache = new Map();
+
+/**
+ * Zuglauf eines Abschnitts für die Fahrtinfo - dieselbe Abfrage wie die
+ * Live-Verfolgung, mit denselben Rückfallquellen (DB, SBB).
+ */
+function canRun(leg) {
+  return Boolean(LiveTracker.sourceOf(leg));
+}
+
+function loadRun(leg) {
+  return LiveTracker.fetchRun({ leg, jid: leg.jid, src: LiveTracker.sourceOf(leg) });
+}
 
 function loadSequence(p) {
   const key = [p.eva, p.cat, p.num, String(p.time).slice(0, 16)].join('|');

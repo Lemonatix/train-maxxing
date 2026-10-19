@@ -375,11 +375,11 @@ Bordrestaurant grün unterstrichen.
 Lageplan des Umsteigebahnhofs — damit sah sie nur, wer umsteigt. Wer
 durchfährt, bekam sie nie zu Gesicht, obwohl die Frage dieselbe ist: in
 welchem Sektor steht mein Wagen, wo ist die 1. Klasse, wo das
-Bordrestaurant. Jetzt hat **jeder Zugabschnitt** seinen eigenen
-zugeklappten Kasten „Wagenreihung", gefragt wird am Einstieg des
-Abschnitts — dort steht man auf dem Bahnsteig, und dort gilt die
-Sektorangabe. Zugeklappt kostet er nichts; geladen wird erst beim
-Aufklappen, und jede Abfrage geht an die DB bzw. die SBB.
+Bordrestaurant. Jetzt hat **jeder Zugabschnitt** sie in seiner
+**Fahrtinfo** (Reiter „Wagenreihung", siehe „Ergebnisliste und Umstiege"),
+gefragt wird am Einstieg des Abschnitts — dort steht man auf dem Bahnsteig,
+und dort gilt die Sektorangabe. Geladen wird erst beim Öffnen des Reiters,
+und jede Abfrage geht an die DB bzw. die SBB.
 
 **Der Zug hat eine Form.** Eine Reihe gleich geformter Kästchen sieht aus wie
 eine Tabelle — man erkennt nicht, wo der Zug aufhört und wie herum er steht.
@@ -1387,6 +1387,41 @@ oben. Er hing früher an denselben vier Minuten und verschwand damit dort, wo ma
 ihn genauso braucht: auch bei zwanzig Minuten will man wissen, ob man quer durch
 den Bahnhof muss.
 
+#### Zwischenhalte und Fahrtinfo
+
+Unter dem Einstieg folgt **„▸ 12 Zwischenhalte"**: aufgeklappt stehen die Halte
+untereinander an einer gepunkteten Linie zwischen Ein- und Ausstieg, mit
+Uhrzeit und — wo bekannt — Verspätung; ein entfallener Halt ist
+durchgestrichen. Im Nerd-Modus dazu Gleis, Haltezeit ab zwei Minuten und das
+Länderkürzel am ersten Halt hinter einer Grenze.
+
+**Langer Aufenthalt** ab zehn Minuten steht in beiden Modi, schon in der
+zugeklappten Zeile („8 Zwischenhalte · 20 min Aufenthalt in Buchloe"). Er
+steht so im Fahrplan, meist wegen Bauarbeiten: der EC 98 München–Zürich fährt
+im Oktober 2026 um 16:31 statt 16:52 ab und wartet dafür 20 Minuten in
+Buchloe (sonst 17:33–17:36). Einen Grund liefern weder HAFAS noch die DB mit;
+die Zeile sagt deshalb nur, dass es so geplant ist.
+
+Was zu **einem Zug** gehört, aber nicht in jeden Streckenverlauf, liegt hinter
+dem Knopf **Fahrtinfo** am Zug, in Reitern (`renderTrainInfo` in `render.js`):
+
+- **Wagenreihung** — wo steht mein Wagen. Nur, wo es eine gibt. Sie stand
+  früher als Kasten zwischen Einstieg und Halten.
+- **Zuglauf** — der ganze Lauf vom Start- bis zum Endbahnhof, der eigene
+  Abschnitt kräftig, davor und danach blass; wo der Zug gerade ist („Zuletzt
+  in Augsburg Hbf · +4 min"), und woher er kommt. Beginnt er am Einstieg, steht
+  dort der vermutliche Zubringer („Kommt vermutlich als RE9 aus Ulm Hbf …",
+  siehe „Zubringer"). Dieselbe Abfrage wie die Live-Verfolgung, eine Minute
+  gemerkt.
+- **Zug** — Fahrzeug und woher wir es wissen, Betreiber, Auslastung je Klasse,
+  die ganze Ausstattung und die Pünktlichkeit dieser Zugnummer. Was die Fahrt
+  verhindern kann (Reservierungspflicht, „nur 2. Klasse"), steht weiterhin
+  direkt am Zug.
+
+Geladen wird erst beim Öffnen eines Reiters; welcher offen ist, überlebt das
+Neuzeichnen. Dieselbe Darstellung steht im Reiter **Reisen** unter
+„Streckenverlauf".
+
 ### Zugkomfort und die Sache mit dem ICE 4
 
 **Die Fahrplandaten enthalten keine Baureihe.** Du bekommst Gattung und Zugnummer
@@ -2352,10 +2387,24 @@ mit Ab- und Ankunftstafel des Bahnhofs (`?action=inbound`):
 - „Abfahrt wohl erst gegen …" mit fünf Minuten Wendezeit nach der Ankunft —
   nur, wenn das später ist als geplant.
 
-Gefragt wird nur für Züge ohne Ist-Zeit am Einstieg, höchstens einmal je
-Minute; eine Antwort gilt für alle Abfahrten einer Viertelstunde am selben
-Bahnhof. Die Schätzung geht **nicht** in Benachrichtigungen — eine falsche
-Meldung wäre schlimmer als keine.
+Gefragt wird nur für Züge ohne aussagekräftige Ist-Zeit am Einstieg,
+höchstens einmal je Minute; eine Antwort gilt für alle Abfahrten einer
+Viertelstunde am selben Bahnhof. **Ist-Zeit gleich Plan-Zeit zählt nicht als
+Auskunft:** für Züge, die hier beginnen, setzt HAFAS die Plan-Zeit als
+„Prognose" ein — der RE9 München–Augsburg stand so als pünktlich da, während
+sein Zubringer drei Minuten Verspätung hatte. Die Schätzung geht **nicht** in
+Benachrichtigungen — eine falsche Meldung wäre schlimmer als keine.
+
+**Auf der Trefferkarte**, für Abfahrten der nächsten vier Stunden, steht die
+kurze Fassung — gerade im Regionalverkehr die Frage am Bahnsteig:
+
+> Einsteigen vermutlich ab ca. 12:23 · kommt als RE89 aus Aalen Hbf, an 12:21 (+1)
+
+Zwei Minuten nach der Ankunft, damit die Fahrgäste aussteigen können. Ist der
+Zug mehr als zwanzig Minuten vor der Abfahrt da, verspricht die Zeile keine
+Einsteige-Zeit — dann wird er oft abgeschlossen oder zum Reinigen abgestellt —,
+sondern sagt „Zug vermutlich ab ca. 12:00 am Gleis". Schon eingefahren:
+„Steht vermutlich schon am Gleis". Die Antwort gilt eine Minute.
 
 ### Reisen merken
 
@@ -2400,6 +2449,9 @@ und kurz nach jedem Merken oder Löschen (`sync.js`, `syncView.js`).
   sich jedes Gerät 60 Tage lang. Jeder Block hat eine Versionsnummer —
   schreiben zwei Geräte gleichzeitig, bekommt das zweite den neuen Stand
   zurück und führt noch einmal zusammen.
+- **QR-Code** auf Wunsch („QR-Code zeigen"): der Link als QR-Code, mit der
+  Handykamera zu scannen (`qr.js`, eigener kleiner Encoder, nichts von
+  fremden Servern).
 - **iPhone-App vom Home-Bildschirm:** den Code dort eintippen. Ein Link öffnet
   Safari, und Safari hat einen eigenen Speicher.
 - **Trennen** lässt die Reisen auf allen Geräten stehen. Ein Block, den ein
@@ -2595,6 +2647,25 @@ Zwei Quellen werden zusammengeführt, weil keine allein reicht: Die ÖBB-Suche i
 auf Österreich geeicht — „Marienplatz" liefert dort Graz, Viehofen und
 Hafnerbach, aber kein München. Die DB-Suche kennt den deutschen Nahverkehr bis
 zur einzelnen U-Bahn-Station, ist dafür bei kleinen Halten in AT und CH dünner.
+
+**Gleichzeitig, mit Frist.** DB, ÖBB und MVG werden parallel gefragt
+(`Http::record()` zeichnet die Anfragen auf, `Http::prefetch()` schickt sie
+zusammen los). Nacheinander addierten sich ihre Antwortzeiten auf rund eine
+Sekunde. Wer nach 1,2 Sekunden noch nicht geantwortet hat, wird nicht
+abgewartet, wenn eine fertige Antwort den gesuchten Namen schon enthält: die
+ÖBB braucht für „Graz" ab und zu fünf Sekunden, die DB hat Graz Hbf längst
+geliefert. Für „Wien Mitte-Landstraße" liefert die DB dagegen Dortmund-Mitte —
+dann wird auf die ÖBB gewartet. Unvollständige Antworten merkt sich der Server
+nur zehn Minuten statt eines Tages.
+
+**Sofort-Vorschläge.** Rund 230 große Bahnhöfe in DE, AT, CH und den
+Nachbarländern stehen in `assets/js/data/stations.js` und erscheinen schon beim
+ersten Buchstaben — zusammen mit passenden Favoriten und zuletzt benutzten
+Orten, ohne Umlaute zu verlangen („mun") und auch über spätere Wörter
+(„pasing", „zur hb"). Die Antwort des Servers ersetzt die Liste, sobald sie da
+ist. Antworten, die schon einmal kamen, gelten für die Sitzung — Zurücklöschen
+fragt nicht neu. Die Liste baut `php bin/build_stations.php` aus derselben
+Ortssuche, nur Bahnhöfe mit UIC-Nummer.
 
 Sortiert wird in drei Stufen:
 
@@ -2827,6 +2898,8 @@ public/
 │       ├── tripsView.js          Reiter "Reisen"
 │       ├── sync.js               Reisen über Geräte abgleichen (Sync-Code, verschlüsselt)
 │       ├── syncView.js           Kasten "Auf mehreren Geräten"
+│       ├── qr.js                 QR-Code als SVG (Sync-Link)
+│       ├── data/stations.js      Große Bahnhöfe für Sofort-Vorschläge (bin/build_stations.php)
 │       └── data/trains.js        Gattungen, Fahrzeugmodelle, Komfortwerte
 └── api/
     ├── index.php                 Router, führt Fahrplan und Preise zusammen

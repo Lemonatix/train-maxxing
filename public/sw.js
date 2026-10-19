@@ -22,7 +22,7 @@
 
 // Bei jeder Änderung an dieser Datei hochzählen - dann räumt activate()
 // die alten Caches weg.
-const VERSION = 'omnirail-v8';
+const VERSION = 'omnirail-v10';
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 
@@ -51,6 +51,8 @@ const SHELL_FILES = [
   'assets/js/tripsView.js',
   'assets/js/sync.js',
   'assets/js/syncView.js',
+  'assets/js/qr.js',
+  'assets/js/data/stations.js',
   'assets/js/works.js',
   'assets/js/data/routes.js',
   'assets/js/data/trains.js',

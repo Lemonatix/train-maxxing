@@ -51,15 +51,115 @@ class Http
     }
 
     /**
-     * @param array<string,string> $headers
-     * @return array{ok:bool,status:int,body:string,error:?string,json:?array}
+     * Aufzeichnen und Vorab-Laden - für Abfragen, die mehrere Quellen
+     * NACHEINANDER fragen, obwohl keine auf die andere wartet.
+     *
+     * WOZU: Die Ortssuche fragt DB, ÖBB und MVG. Nacheinander addierten sich
+     * deren Antwortzeiten zu einer Sekunde, bevor beim Tippen von "Mün" der
+     * erste Vorschlag erschien. Statt jeden Anbieter in "Anfrage bauen" und
+     * "Antwort lesen" zu zerlegen, läuft die Abfrage zweimal:
+     *
+     *   1. record(): die Anbieter laufen, request() schreibt nur auf, was es
+     *      schicken würde, und meldet einen Fehler zurück.
+     *   2. prefetch(): alles Aufgeschriebene geht GLEICHZEITIG raus.
+     *   3. Die Anbieter laufen noch einmal; request() findet jede Antwort
+     *      schon vor und gibt sie sofort zurück.
+     *
+     * Fragt ein Anbieter in Schritt 3 etwas, das nicht aufgezeichnet war
+     * (eine Folgeanfrage), geht diese ganz normal raus. Langsamer, nie falsch.
+     *
+     * @var array<string,array{0:Http,1:string,2:string,3:array<string,string>,4:?string}>|null
      */
-    public function request(string $method, string $url, array $headers = [], ?string $body = null): array
-    {
-        if (!function_exists('curl_init')) {
-            return $this->fail('cURL ist auf diesem Server nicht verfügbar.');
-        }
+    private static ?array $recorded = null;
+    /** @var array<string,array> Antworten aus prefetch(), je einmal abholbar */
+    private static array $prefetched = [];
 
+    private static function specKey(string $method, string $url, ?string $body): string
+    {
+        return $method . ' ' . $url . ' ' . hash('sha256', (string) $body);
+    }
+
+    /**
+     * Führt `$fn` aus und liefert die Anfragen, die dabei gestellt würden.
+     *
+     * @return array<string,array{0:Http,1:string,2:string,3:array<string,string>,4:?string}>
+     */
+    public static function record(callable $fn): array
+    {
+        self::$recorded = [];
+        try {
+            $fn();
+            return self::$recorded;
+        } finally {
+            self::$recorded = null;
+        }
+    }
+
+    /**
+     * Aufgezeichnete Anfragen gleichzeitig ausführen - siehe record().
+     *
+     * @param float $deadline Sekunden; danach wird auf Nachzügler nicht mehr
+     *                        gewartet, sobald das Fertige reicht. 0 = auf alle
+     *                        warten. Die Nachzügler bekommen einen Fehler ("zu
+     *                        langsam"), der Anbieter meldet sich dann wie bei
+     *                        jedem anderen Ausfall.
+     * @param ?callable $enough bekommt die fertigen Antworten und sagt, ob sie
+     *                        reichen. Ohne: sobald eine gut zurück ist.
+     * @return bool ob alle Anfragen fertig wurden
+     */
+    public static function prefetch(array $specs, float $deadline = 0, ?callable $enough = null): bool
+    {
+        if ($specs === [] || !function_exists('curl_multi_init')) {
+            return true;
+        }
+        $start = microtime(true);
+        $multi = curl_multi_init();
+        $handles = [];
+        foreach ($specs as $key => [$client, $method, $url, $headers, $body]) {
+            $ch = $client->handle($method, $url, $headers, $body);
+            curl_multi_add_handle($multi, $ch);
+            $handles[$key] = [$ch, $url];
+        }
+        $fertig = [];
+        $gut = false;
+        do {
+            $status = curl_multi_exec($multi, $laufen);
+            while (($info = curl_multi_info_read($multi)) !== false) {
+                foreach ($handles as $key => [$ch, $url]) {
+                    if ($ch === $info['handle']) {
+                        $raw = curl_multi_getcontent($ch);
+                        curl_multi_remove_handle($multi, $ch);
+                        $res = self::finish($ch, $url, $info['result'] === CURLE_OK && $raw !== null ? $raw : false);
+                        self::$prefetched[$key] = $res;
+                        $fertig[$key] = true;
+                        $gut = $gut || $res['ok'];
+                    }
+                }
+            }
+            if ($laufen && $deadline > 0 && $gut && microtime(true) - $start > $deadline
+                && ($enough === null || $enough(array_intersect_key(self::$prefetched, $fertig)))) {
+                break;
+            }
+            if ($laufen) {
+                curl_multi_select($multi, 0.1);
+            }
+        } while ($laufen && $status === CURLM_OK);
+
+        foreach ($handles as $key => [$ch, $url]) {
+            if (!isset($fertig[$key])) {
+                curl_multi_remove_handle($multi, $ch);
+                Health::note($url, false, 'zu langsam');
+                self::$prefetched[$key] = ['ok' => false, 'status' => 0, 'body' => '',
+                    'error' => 'zu langsam', 'json' => null];
+            }
+        }
+        curl_multi_close($multi);
+        return count($fertig) === count($handles);
+    }
+
+    /** Ein fertig eingestelltes cURL-Handle für eine Anfrage. */
+    private function handle(string $method, string $url, array $headers, ?string $body): CurlHandle
+    {
         $ch = curl_init();
         $hdr = [];
         foreach ($headers as $k => $v) {
@@ -94,15 +194,14 @@ class Http
         if ($body !== null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
         }
+        return $ch;
+    }
 
-        $raw    = curl_exec($ch);
+    /** Antwort eines ausgeführten Handles in die übliche Form bringen. */
+    private static function finish(CurlHandle $ch, string $url, string|bool $raw): array
+    {
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $err    = curl_error($ch);
-        // Kein curl_close(): seit PHP 8.0 wirkungslos, seit 8.5 gibt es dafür
-        // eine Deprecation-Warnung. Die landete mitten in der JSON-Antwort und
-        // machte damit JEDEN API-Aufruf auf PHP 8.5 unbrauchbar. Das Handle
-        // räumt der Garbage Collector auf.
-        unset($ch);
 
         // Jeden Aufruf nach draußen verbuchen - siehe Health.php. Der Haken
         // sitzt hier und nicht an den Aufrufstellen, weil er sonst genau die
@@ -111,7 +210,8 @@ class Http
             $err !== '' ? $err : ('HTTP ' . $status));
 
         if ($raw === false) {
-            return $this->fail($err !== '' ? $err : 'Unbekannter Netzwerkfehler', $status);
+            return ['ok' => false, 'status' => $status, 'body' => '',
+                'error' => $err !== '' ? $err : 'Unbekannter Netzwerkfehler', 'json' => null];
         }
 
         $json = null;
@@ -127,6 +227,36 @@ class Http
             'error'  => null,
             'json'   => $json,
         ];
+    }
+
+    /**
+     * @param array<string,string> $headers
+     * @return array{ok:bool,status:int,body:string,error:?string,json:?array}
+     */
+    public function request(string $method, string $url, array $headers = [], ?string $body = null): array
+    {
+        if (!function_exists('curl_init')) {
+            return $this->fail('cURL ist auf diesem Server nicht verfügbar.');
+        }
+
+        $key = self::specKey($method, $url, $body);
+        if (self::$recorded !== null) {
+            self::$recorded[$key] = [$this, $method, $url, $headers, $body];
+            return $this->fail('aufgezeichnet');
+        }
+        if (isset(self::$prefetched[$key])) {
+            $res = self::$prefetched[$key];
+            unset(self::$prefetched[$key]);
+            return $res;
+        }
+
+        $ch  = $this->handle($method, $url, $headers, $body);
+        $raw = curl_exec($ch);
+        // Kein curl_close(): seit PHP 8.0 wirkungslos, seit 8.5 gibt es dafür
+        // eine Deprecation-Warnung. Die landete mitten in der JSON-Antwort und
+        // machte damit JEDEN API-Aufruf auf PHP 8.5 unbrauchbar. Das Handle
+        // räumt der Garbage Collector auf.
+        return self::finish($ch, $url, $raw);
     }
 
     /** @param array<string,string> $headers */

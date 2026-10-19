@@ -34,6 +34,66 @@ export function isStation(loc) {
   return !/^A=[24]@/.test(String(loc.id || ''));
 }
 
+/**
+ * SOFORT-VORSCHLÄGE. Die Ortssuche des Servers fragt drei Quellen und
+ * braucht dafür eine halbe Sekunde, mal mehr. Für die großen Bahnhöfe muss
+ * niemand so lange warten: sie stehen in data/stations.js und erscheinen
+ * beim ersten Buchstaben, zusammen mit passenden Favoriten und zuletzt
+ * benutzten Orten. Die Antwort des Servers ersetzt die Liste, sobald sie da
+ * ist - sie kennt auch die kleinen Halte, Adressen und Sehenswürdigkeiten.
+ *
+ * Geladen wird die Liste erst, wenn ein Feld den Fokus bekommt.
+ */
+let stationList = null;
+const loadStations = () => (stationList ??= import('./data/stations.js')
+  .then((m) => m.STATIONS)
+  .catch(() => []));
+
+/** Für den Vergleich: klein, ohne Akzente, Trennzeichen als Leerzeichen. */
+const fold = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/ß/g, 'ss').replace(/[^a-z0-9]+/g, ' ').trim();
+
+/**
+ * Wie gut passt `name` zu `q`? 2 = Name beginnt so, 1 = ein Wort beginnt
+ * so ("Pasing" findet "München-Pasing"), 0 = gar nicht. Mehrere Wörter der
+ * Eingabe müssen alle passen: "zur hb" findet "Zürich HB".
+ */
+export function instantScore(name, q) {
+  const n = fold(name);
+  const teile = fold(q).split(' ').filter(Boolean);
+  if (!teile.length) return 0;
+  const woerter = n.split(' ');
+  if (!teile.every((t) => woerter.some((w) => w.startsWith(t)))) return 0;
+  return n.startsWith(teile.join(' ')) ? 2 : 1;
+}
+
+/** Sofort-Treffer aus Favoriten, Verlauf und der Bahnhofsliste. */
+function instantMatches(q, stations, usable) {
+  const gesehen = new Set();
+  const out = [];
+  const nimm = (loc, score, rang) => {
+    const id = String(loc.id || loc.name);
+    if (score === 0 || gesehen.has(id) || !usable(loc)) return;
+    gesehen.add(id);
+    out.push({ loc, score, rang });
+  };
+  // Eigene Orte zuerst: wer "Ho" tippt und täglich nach Holzkirchen fährt,
+  // meint Holzkirchen und nicht Hof.
+  [...places.favorites(), ...places.recent()].forEach((loc, i) => {
+    const score = instantScore(loc.name, q);
+    nimm(loc, score && score + 1, i - 1000);
+  });
+  for (const st of stations) {
+    const { rank, ...loc } = st;
+    nimm({ ...loc, kind: 'station' }, instantScore(st.name, q), rank);
+  }
+  return out.sort((a, b) => b.score - a.score || a.rang - b.rang).slice(0, 6).map(({ loc }) => ({ loc }));
+}
+
+/** Antworten des Servers für diese Sitzung - Zurücklöschen fragt nicht neu. */
+const answered = new Map();
+const MAX_ANSWERED = 150;
+
 /** Kurzbezeichnung für Orte, die kein Bahnhof sind. */
 const KIND_LABEL = { address: 'Adresse', poi: 'Ort' };
 
@@ -142,29 +202,55 @@ export function setupAutocomplete(input, list, onPick, opts = {}) {
   };
 
   input.addEventListener('focus', () => {
+    loadStations();
     // Nur bei leerem Feld - wer schon etwas getippt hat, will seine Treffer.
     if (input.value.trim() === '') showSaved();
   });
 
-  input.addEventListener('input', () => {
+  const fromServer = (locs) => {
+    items = locs.filter(usable).map((loc) => ({ loc }));
+    active = -1;
+    draw();
+  };
+
+  input.addEventListener('input', async () => {
     const q = input.value.trim();
     clearTimeout(timer);
     if (abort) abort.abort();
 
     if (q.length === 0) { showSaved(); return; }
-    if (q.length < 2) { close(); return; }
 
+    const key = q.toLowerCase();
+    if (answered.has(key)) { fromServer(answered.get(key)); return; }
+
+    // Sofort, was die eigene Liste weiß - schon ab dem ersten Buchstaben.
+    const stations = await loadStations();
+    if (input.value.trim() !== q) return; // inzwischen weitergetippt
+    const sofort = instantMatches(q, stations, usable);
+    if (sofort.length) {
+      items = sofort;
+      active = -1;
+      draw();
+    } else if (q.length < 2) {
+      close();
+    }
+    if (q.length < 2) return;
+
+    // Steht schon etwas da, darf der Server sich einen Moment mehr Zeit
+    // lassen: dann fragt nicht jeder Buchstabe einzeln.
     timer = setTimeout(async () => {
       abort = new AbortController();
       try {
         const res = await api.locations(q, { signal: abort.signal });
-        items = (res.locations || []).filter(usable).map((loc) => ({ loc }));
-        active = -1;
-        draw();
+        const locs = res.locations || [];
+        answered.set(key, locs);
+        if (answered.size > MAX_ANSWERED) answered.delete(answered.keys().next().value);
+        if (input.value.trim() === q) fromServer(locs);
       } catch (err) {
-        if (err.name !== 'AbortError') close();
+        // Ohne Server bleiben die Sofort-Treffer stehen, statt zu verschwinden.
+        if (err.name !== 'AbortError' && !sofort.length) close();
       }
-    }, 220);
+    }, sofort.length ? 200 : 120);
   });
 
   input.addEventListener('keydown', (e) => {

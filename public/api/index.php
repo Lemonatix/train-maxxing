@@ -413,6 +413,10 @@ function handleLocations(Http $http, array $config, Cache $cache): void
     if ($cached !== null) {
         ok(['locations' => $cached, 'cached' => true]);
     }
+    $teil = $cache->get('locp:' . mb_strtolower($q), 600);
+    if ($teil !== null) {
+        ok(['locations' => $teil, 'cached' => true]);
+    }
 
     // Beide Quellen: die DB kennt den deutschen Stadtverkehr, die ÖBB die
     // kleinen Halte in AT und CH.
@@ -423,7 +427,13 @@ function handleLocations(Http $http, array $config, Cache $cache): void
         fail('Ortssuche fehlgeschlagen: ' . ($res['error'] ?? 'unbekannt'), 502);
     }
 
-    $cache->set($key, $res['data']);
+    // Unvollständig (eine Quelle zu langsam, siehe Locations::SOFT_DEADLINE):
+    // nur kurz merken, damit der nächste Versuch die fehlende Quelle bekommt.
+    if (($res['complete'] ?? true) === true) {
+        $cache->set($key, $res['data']);
+    } else {
+        $cache->set('locp:' . mb_strtolower($q), $res['data']);
+    }
     ok(['locations' => $res['data'], 'sources' => $res['sources'], 'cached' => false]);
 }
 
