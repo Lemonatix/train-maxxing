@@ -1376,11 +1376,34 @@ neuen Verbindungen stehen also vorne — und die Zahl der sichtbaren Karten wäc
 entsprechend mit, sonst hätte man geladen und zugleich etwas verloren.
 
 Die Umsteigezeit steht standardmäßig auf **kürzestmöglich**. Damit tauchen auch
-Verbindungen mit vier Minuten Umstieg auf — und für genau die (1 bis 4 Minuten)
-lädt die App den **nächstspäteren Anschluss** nach und schreibt ihn unter die
-Warnung: „Verpasst? 13:36 → 14:53 · SBB 19732 · S 18955 · +30 min später am Ziel."
-Die Frage bei einem Vier-Minuten-Umstieg ist nicht, ob man ihn schafft, sondern
-was passiert, wenn nicht.
+Verbindungen mit vier Minuten Umstieg auf — und für die lädt die App die
+**nächsten Möglichkeiten** nach und schreibt sie unter die Warnung, jede mit
+„übernehmen". Die Frage bei einem knappen Umstieg ist nicht, ob man ihn
+schafft, sondern was passiert, wenn nicht.
+
+**Knapp heißt: der Zubringer ist zu oft zu spät dafür.** Früher hing die
+Warnung an festen Minuten (unter fünf riskant, unter zehn knapp). Acht Minuten
+nach dem EC 98, der nur zu 60 % pünktlich ist (Ø +9 min), galten damit als
+harmlos. Jetzt schätzt `missChance()` in `prefetch.js` aus der Pünktlichkeit
+des ankommenden Zuges, wie oft der Anschluss weg ist: der Anteil über sechs
+Minuten Verspätung, exponentiell auf den Puffer umgerechnet (Umsteigezeit
+minus zwei Minuten Weg); mit Echtzeit zählt die tatsächliche Lücke.
+
+> 8 min zum Umsteigen · EC 98: 60 % pünktlich — Anschluss in etwa 4 von 10 Fällen weg
+
+Ab drei von zehn Fällen gilt der Umstieg als wackelig: Warnung am Umstieg,
+Abzeichen „wackelig" auf der Karte, und die nächsten Möglichkeiten werden
+nachgeladen — unter „Falls verpasst", übernehmbar, wenn die Verspätung dann
+eintritt. Zwanzig Minuten nach einem verlässlichen ICE warnen nicht mehr. Ohne
+Statistik gilt die alte Minutenregel. Als Ausweg zählt nur, was mindestens
+fünf Minuten nach dem verpassten Zug fährt — wer den 20:36 verpasst, bekommt
+den 20:37 auch nicht.
+
+**Taktverkehr** (S-Bahn, U-Bahn, Tram, Bus) fragt zuerst die Abfahrtstafel nach
+der nächsten Fahrt derselben Linie. Findet sie in der nächsten Stunde keine —
+die S 27 Baden–Koblenz fährt nur stündlich —, wird wie bei jedem anderen Zug
+die nächste ganze Verbindung gesucht, statt nur „bei Verspätung weg" stehen
+zu lassen.
 
 An **jedem** Umstieg steht außerdem der Lageplan des Umsteigebahnhofs — siehe
 oben. Er hing früher an denselben vier Minuten und verschwand damit dort, wo man
@@ -1413,8 +1436,9 @@ dem Knopf **Fahrtinfo** am Zug, in Reitern (`renderTrainInfo` in `render.js`):
   dort der vermutliche Zubringer („Kommt vermutlich als RE9 aus Ulm Hbf …",
   siehe „Zubringer"). Dieselbe Abfrage wie die Live-Verfolgung, eine Minute
   gemerkt.
-- **Zug** — Fahrzeug und woher wir es wissen, Betreiber, Auslastung je Klasse,
-  die ganze Ausstattung und die Pünktlichkeit dieser Zugnummer. Was die Fahrt
+- **Zug** — Fahrzeug und woher wir es wissen, Auslastung je Klasse, die ganze
+  Ausstattung und die Pünktlichkeit dieser Zugnummer. Den Betreiber nicht:
+  HAFAS liefert ihn nur als internen Code („80____", „GYRE__"). Was die Fahrt
   verhindern kann (Reservierungspflicht, „nur 2. Klasse"), steht weiterhin
   direkt am Zug.
 

@@ -22,7 +22,7 @@
 
 // Bei jeder Änderung an dieser Datei hochzählen - dann räumt activate()
 // die alten Caches weg.
-const VERSION = 'omnirail-v10';
+const VERSION = 'omnirail-v11';
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 

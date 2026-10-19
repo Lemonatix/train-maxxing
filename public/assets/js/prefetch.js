@@ -20,9 +20,77 @@
 
 import { typeOf } from './data/trains.js';
 
-/** Umsteigezeiten in diesem Fenster (Minuten) lösen eine Rückfallebene aus. */
+/** Umsteigezeiten in diesem Fenster (Minuten) lösen immer eine Rückfallebene aus. */
 export const TIGHT_MIN = 1;
 export const TIGHT_MAX = 4;
+
+/**
+ * Ab diesem geschätzten Risiko gilt ein Umstieg als wackelig: Warnung an der
+ * Verbindung, und die nächsten Möglichkeiten werden nachgeladen - auch bei
+ * acht Minuten, wenn der Zubringer dafür zu oft zu spät ist.
+ */
+export const RISK_SHOW = 0.3;
+/** Ab diesem Risiko: "wahrscheinlich weg". */
+export const RISK_HIGH = 0.5;
+
+/**
+ * Was ein Umstieg mindestens braucht, auch bei pünktlichem Zubringer. Was
+ * darüber hinaus geplant ist, ist Puffer gegen Verspätung.
+ */
+const MIN_CHANGE_MIN = 2;
+
+/** Der Zug vor diesem Abschnitt, Fußwege übersprungen. */
+export function feederOf(journey, leg) {
+  const legs = journey?.legs || [];
+  const i = legs.indexOf(leg);
+  for (let k = i - 1; k >= 0; k--) if (legs[k].mode === 'train') return legs[k];
+  return null;
+}
+
+/**
+ * Wie wahrscheinlich ist der Anschluss an `leg` weg?
+ *
+ * VORHER hing das an festen Minuten: unter fünf riskant, unter zehn knapp.
+ * Acht Minuten nach einem EC, der nur zu 60 % pünktlich ist, galten damit
+ * als harmlos - obwohl er im Schnitt neun Minuten zu spät kommt. Jetzt zählt
+ * die Pünktlichkeit des ZUBRINGERS (`journey.history`, eigene Messungen oder
+ * die Statistik des Betreibers).
+ *
+ * MODELL, bewusst einfach: Verspätungen fallen grob exponentiell ab. Die
+ * Statistik sagt, welcher Anteil unter sechs Minuten bleibt (`rate`); daraus
+ * folgt der Anteil über x Minuten als (1 - rate)^(x/6). Der Puffer ist die
+ * Umsteigezeit abzüglich dessen, was der Weg selbst braucht. Mit Echtzeit
+ * gilt die tatsächliche Lücke.
+ *
+ *   EC 98, 60 % pünktlich, 8 min Umstieg  -> rund 40 %
+ *   IR,    92 % pünktlich, 3 min Umstieg  -> rund 65 %
+ *   ICE,   90 % pünktlich, 20 min Umstieg -> unter 5 %
+ *
+ * Eine Schätzung für die Entscheidung "lieber eine Alternative zeigen",
+ * keine Vorhersage - so steht sie auch da.
+ *
+ * @returns {?{chance: number, feeder: object, rate: number, avg: ?number, source: string, gap: number}}
+ *          null, wenn es keinen Zubringer oder keine Statistik gibt
+ */
+export function missChance(journey, leg) {
+  if (typeof leg?.transferMin !== 'number') return null;
+  const feeder = feederOf(journey, leg);
+  if (!feeder) return null;
+  const gap = typeof leg.transferMinLive === 'number' ? leg.transferMinLive : leg.transferMin;
+  const base = { feeder, gap };
+  if (gap < 0) return { ...base, chance: 1, rate: null, avg: null, source: 'live' };
+  const h = journey?.history?.[`${String(feeder.category || '').trim()} ${String(feeder.trainNumber || '').trim()}`];
+  if (!h || typeof h.rate !== 'number') return null;
+  const spaet = Math.min(0.95, Math.max(0.01, 1 - h.rate));
+  const puffer = Math.max(0.5, gap - MIN_CHANGE_MIN);
+  return {
+    ...base,
+    chance: Math.pow(spaet, puffer / 6),
+    rate: h.rate,
+    avg: typeof h.avg === 'number' ? h.avg : null,
+    source: h.source || '',
+  };
+}
 
 /**
  * Die offenen Nachladungen für die sichtbaren Treffer.
@@ -58,8 +126,10 @@ export function pendingLoads(ranked, visible) {
       }
 
       const gap = leg.transferMin;
-      if (typeof gap !== 'number' || gap < TIGHT_MIN || gap > TIGHT_MAX) continue;
-      if (!leg.from?.id) continue;
+      if (typeof gap !== 'number' || gap < TIGHT_MIN) continue;
+      // Knapp nach Minuten ODER wackelig nach der Pünktlichkeit des Zubringers.
+      const knapp = gap <= TIGHT_MAX || (missChance(journey, leg)?.chance ?? 0) >= RISK_SHOW;
+      if (!knapp || !leg.from?.id) continue;
 
       // TAKTVERKEHR: hier ist die nächste ganze Verbindung zum Ziel die
       // falsche Antwort. Wer die U6 um zwei Minuten verpasst, nimmt die

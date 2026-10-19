@@ -723,6 +723,36 @@ console.log('\nNachladen - jede Abfrage genau einmal');
 }
 
 // ---------------------------------------------------------------------
+console.log('\nUmstieg - Risiko nach der Pünktlichkeit des Zubringers');
+{
+  const { missChance, pendingLoads, RISK_SHOW } = await import('../public/assets/js/prefetch.js');
+  const ec = { mode: 'train', category: 'EC', trainNumber: '98', from: { id: 'M' }, to: { id: 'Z' } };
+  const ir = (transferMin, o = {}) => ({ mode: 'train', category: 'IR', trainNumber: '1986', transferMin,
+    from: { id: '8503000' }, to: { id: 'B' }, departure: '2026-10-22T20:36:00+02:00', ...o });
+  const reise = (anschluss, rate) => ({ legs: [ec, { mode: 'walk' }, anschluss],
+    history: { 'EC 98': { rate, avg: 9, source: 'baseline' } } });
+  const p = (r, l) => Math.round(missChance(r, l).chance * 100);
+
+  const unzuverlaessig = ir(8);
+  pruefe('8 min nach einem EC mit 60 % Pünktlichkeit: rund 40 %, also wackelig',
+    [p(reise(unzuverlaessig, 0.6), unzuverlaessig), missChance(reise(unzuverlaessig, 0.6), unzuverlaessig).chance >= RISK_SHOW],
+    [40, true]);
+  const lang = ir(20);
+  pruefe('20 min nach einem verlässlichen Zug: kaum Risiko', p(reise(lang, 0.92), lang) < 5, true);
+  const kurz = ir(3);
+  pruefe('3 min sind auch nach einem verlässlichen Zug wackelig', p(reise(kurz, 0.92), kurz) > 50, true);
+  const mitEchtzeit = ir(8, { transferMinLive: -2 });
+  pruefe('laut Echtzeit schon weg: sicher weg', missChance(reise(mitEchtzeit, 0.9), mitEchtzeit).chance, 1);
+  pruefe('ohne Statistik keine Schätzung', missChance({ legs: [ec, ir(8)] }, ir(8)), null);
+
+  const r = reise(ir(8), 0.6);
+  pruefe('wackelige 8 Minuten laden die nächsten Möglichkeiten nach',
+    pendingLoads([{ journey: r }], 1).map((j) => j.kind), ['nextConnection']);
+  const r2 = reise(ir(8), 0.97);
+  pruefe('verlässliche 8 Minuten laden nichts', pendingLoads([{ journey: r2 }], 1), []);
+}
+
+// ---------------------------------------------------------------------
 console.log('\nReisen merken - dieselbe Fahrt wiedererkennen');
 {
   const { tripKey } = await import('../public/assets/js/trips.js');

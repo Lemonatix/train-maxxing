@@ -10,6 +10,7 @@ import { typeOf } from './data/trains.js';
 import { trainLabel, RouteMap, walkText } from './map.js';
 import { formatDuration, formatTime, formatPrice, priceOrigin, counterValue, fxInfo, comfortOf } from './scoring.js';
 import { wantsInbound, inboundFor, inboundText } from './inbound.js';
+import { missChance, RISK_SHOW, RISK_HIGH } from './prefetch.js';
 
 /**
  * Höchste gemeldete Auslastung einer Verbindung, für die gewählte Klasse.
@@ -506,19 +507,31 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   // 120 min Umstieg" an einer Verbindung, an der zwei Minuten Verspätung
   // nichts ändern. Und wird der Umstieg durch die Echtzeit länger, ist das
   // keine Warnung, sondern Entwarnung.
+  //
+  // Wo die Pünktlichkeit des Zubringers bekannt ist, entscheidet SIE (siehe
+  // missChance in prefetch.js): acht Minuten nach einem EC mit 60 %
+  // Pünktlichkeit sind wackeliger als vier nach einer S-Bahn, die fast immer
+  // pünktlich ist - und zwanzig nach einem verlässlichen ICE gar nichts.
   const plan = j.minTransferMin;
   const live = typeof j.minTransferLive === 'number' ? j.minTransferLive : null;
   const gap = live ?? plan;
-  if (typeof gap === 'number') {
-    if (gap < 0) {
-      add(`Anschluss weg (${gap} min)`, 'badge--risky', 'warn');
-    } else if (gap < 10) {
-      const knapper = live !== null && typeof plan === 'number' && live < plan;
-      add(
-        knapper ? `nur noch ${gap} min Umstieg` : gap < 5 ? `nur ${gap} min Umstieg` : `${gap} min Umstieg`,
-        gap < 5 ? 'badge--risky' : 'badge--tight', 'warn'
-      );
+  const risiken = j.legs.map((l) => missChance(j, l)).filter(Boolean);
+  const schlimmstes = risiken.sort((a, b) => b.chance - a.chance)[0] || null;
+  if (typeof gap === 'number' && gap < 0) {
+    add(`Anschluss weg (${gap} min)`, 'badge--risky', 'warn');
+  } else if (schlimmstes) {
+    if (schlimmstes.chance >= RISK_SHOW) {
+      const b = add(`${schlimmstes.gap} min Umstieg · wackelig`,
+        schlimmstes.chance >= RISK_HIGH ? 'badge--risky' : 'badge--tight', 'warn');
+      b.title = `Nach ${trainLabel(schlimmstes.feeder)} (zu ${Math.round(schlimmstes.rate * 100)} % pünktlich) `
+        + `ist der Anschluss in etwa ${Math.max(1, Math.round(schlimmstes.chance * 10))} von 10 Fällen weg.`;
     }
+  } else if (typeof gap === 'number' && gap < 10) {
+    const knapper = live !== null && typeof plan === 'number' && live < plan;
+    add(
+      knapper ? `nur noch ${gap} min Umstieg` : gap < 5 ? `nur ${gap} min Umstieg` : `${gap} min Umstieg`,
+      gap < 5 ? 'badge--risky' : 'badge--tight', 'warn'
+    );
   }
 
   // PÜNKTLICHKEIT AUF DIE KARTE. Die Statistik sammelt sich mit jeder
@@ -837,9 +850,12 @@ function expandableNote(cls, label, text) {
  * oder keine gefunden wurde, bleibt es bei der vorsichtigen Formulierung:
  * ohne Gegenbeweis kann es die letzte Bahn des Tages gewesen sein.
  */
-function renderTransferWarning(leg) {
+function renderTransferWarning(leg, risiko = null) {
   const n = leg.nextOnLine;
-  const minuten = `${leg.transferRisk === 'risky' ? 'Nur ' : ''}${leg.transferMin} min zum Umsteigen`;
+  const stufe = risiko
+    ? (risiko.chance >= RISK_HIGH ? 'risky' : 'tight')
+    : leg.transferRisk;
+  const minuten = `${stufe === 'risky' && leg.transferMin < 5 ? 'Nur ' : ''}${leg.transferMin} min zum Umsteigen`;
 
   // Die nächste Fahrt steht fest: das ist die ganze Antwort, und sie ist
   // keine Warnung.
@@ -878,10 +894,25 @@ function renderTransferWarning(leg) {
     return box;
   }
 
-  const box = el('div', `leg__transfer leg__transfer--${leg.transferRisk}`);
+  const box = el('div', `leg__transfer leg__transfer--${stufe}`);
   box.append(el('span', 'leg__transfer-gap', minuten));
-  box.append(el('span', 'leg__transfer-next',
-    leg.transferRisk === 'risky' ? 'bei Verspätung weg' : 'knapp'));
+  if (risiko) {
+    // Das Risiko in Worten, die Rechnung im Tooltip.
+    const zubringer = trainLabel(risiko.feeder);
+    const prozent = Math.round(risiko.chance * 10) * 10;
+    const t = el('span', 'leg__transfer-next', risiko.chance >= 1
+      ? 'Anschluss laut Echtzeit weg'
+      : `${zubringer}: ${Math.round(risiko.rate * 100)} % pünktlich — `
+        + `Anschluss in etwa ${prozent >= 100 ? 'fast allen' : `${Math.max(10, prozent) / 10} von 10`} Fällen weg`);
+    t.title = 'Geschätzt aus der Pünktlichkeit des ankommenden Zuges'
+      + (risiko.avg != null ? ` (Ø +${String(risiko.avg).replace('.', ',')} min)` : '')
+      + (risiko.source === 'baseline' ? ', Näherung aus der Jahresstatistik des Betreibers' : ', aus eigenen Messungen')
+      + '. Darunter die nächsten Möglichkeiten — übernehmbar, falls es so kommt.';
+    box.append(t);
+  } else {
+    box.append(el('span', 'leg__transfer-next',
+      leg.transferRisk === 'risky' ? 'bei Verspätung weg' : 'knapp'));
+  }
   return box;
 }
 
@@ -919,7 +950,7 @@ function renderFallback(journey, leg, actions) {
   }
 
   const box = el('div', 'leg__fallback' + (ausfall ? ' leg__fallback--ersatz' : ''));
-  box.append(el('span', 'leg__fallback-label', ausfall ? 'Ersatz' : 'Stattdessen'));
+  box.append(el('span', 'leg__fallback-label', ausfall ? 'Ersatz' : 'Falls verpasst'));
 
   const list = el('div', 'leg__fallback-list');
   for (const f of options) {
@@ -1615,8 +1646,10 @@ function readyLine(leg, cls) {
  *   Zuglauf      - woher kommt der Zug, wo ist er gerade, wohin fährt er
  *                  weiter; beginnt er hier, mit welchem Zug er vermutlich
  *                  ankommt (inbound.js)
- *   Zug          - Fahrzeug und woher wir es wissen, Betreiber, Auslastung
- *                  je Klasse, Ausstattung, Pünktlichkeit dieses Zuges
+ *   Zug          - Fahrzeug und woher wir es wissen, Auslastung je Klasse,
+ *                  Ausstattung, Pünktlichkeit dieses Zuges. Den Betreiber
+ *                  nicht: HAFAS liefert ihn nur als internen Code
+ *                  ("80____", "GYRE__"), nie als Namen.
  *
  * Geladen wird erst beim Öffnen eines Reiters. Welcher Kasten mit welchem
  * Reiter offen ist, überlebt das Neuzeichnen - wie bei den Zwischenhalten.
@@ -1624,9 +1657,6 @@ function readyLine(leg, cls) {
 const offeneInfo = new Map(); // halteKey -> Reiter
 const laeufe = new Map();     // halteKey -> {at, promise}
 const LAUF_TTL_MS = 60_000;
-
-/** Betreiber nur, wenn es ein Name ist - HAFAS liefert auch Kürzel wie "80____". */
-const operatorName = (o) => (/[A-Za-zÄÖÜäöü]{2}/.test(String(o || '')) ? String(o).trim() : '');
 
 function loadRunCached(leg, actions) {
   const key = halteKey(leg);
@@ -1734,8 +1764,7 @@ async function runInto(body, leg, state, actions) {
   if (aus < 0) aus = stops.length - 1;
 
   out.push(el('p', 'fahrt__head',
-    `${trainLabel(leg)} · ${stops[0].name} → ${stops[stops.length - 1].name}`
-    + (operatorName(run.operator) ? ` · ${operatorName(run.operator)}` : '')));
+    `${trainLabel(leg)} · ${stops[0].name} → ${stops[stops.length - 1].name}`));
 
   // Wo ist der Zug gerade? Der letzte Halt mit Ist-Zeit in der Vergangenheit.
   const jetzt = Date.now();
@@ -1820,7 +1849,6 @@ function trainFacts(journey, leg, comfortEntry, state) {
   } else if (leg.seriesName || leg.series) {
     zeile('Fahrzeug', leg.seriesName || `Baureihe ${leg.series}`);
   }
-  if (operatorName(leg.operator)) zeile('Betreiber', operatorName(leg.operator));
   if (leg.occupancy) {
     const k = (v) => (typeof v === 'number' && v > 0 ? OCCUPANCY_LABELS[v] || `Stufe ${v}` : '—');
     zeile('Auslastung', `1. Kl. ${k(leg.occupancy.first)} · 2. Kl. ${k(leg.occupancy.second)}`);
@@ -1899,10 +1927,14 @@ function renderLegs(journey, entry, state, actions) {
       if (ersatz) row.append(ersatz);
     }
 
-    // Umsteigezeit vor diesem Zug, wenn sie knapp ist.
-    const knapp = leg.transferRisk && leg.transferRisk !== 'ok';
+    // Umsteigezeit vor diesem Zug, wenn sie knapp ist - nach der
+    // Pünktlichkeit des Zubringers, wo bekannt, sonst nach Minuten.
+    const risiko = missChance(journey, leg);
+    const knapp = risiko
+      ? risiko.chance >= RISK_SHOW || (leg.transferMin ?? 99) <= 4
+      : Boolean(leg.transferRisk && leg.transferRisk !== 'ok');
     if (knapp) {
-      row.append(renderTransferWarning(leg));
+      row.append(renderTransferWarning(leg, risiko));
 
       // Bei sehr knappen Umstiegen die Alternativen gleich mitliefern:
       // die Frage ist nicht nur, ob man es schafft, sondern auch, ob man

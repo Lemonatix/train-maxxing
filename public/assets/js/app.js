@@ -1705,7 +1705,7 @@ async function ensureFallbacks() {
   // als reine Funktion und von den Tests abgedeckt. Hier wird nur geladen.
   const jobs = pendingLoads(state.ranked, state.visible).map(({ kind, journey, leg, dest }) => {
     if (kind === 'replacements') return loadReplacements(journey, leg, dest);
-    if (kind === 'nextOnLine') return loadNextOnLine(leg);
+    if (kind === 'nextOnLine') return loadNextOnLine(leg, dest);
     return loadNextConnection(leg, dest);
   });
 
@@ -1724,6 +1724,9 @@ async function ensureFallbacks() {
  * bei vier Minuten Umsteigezeit nicht nur wissen will, was sonst passiert,
  * sondern auch gleich umsteigen können, ohne neu zu suchen.
  */
+/** So viel später muss eine Alternative fahren, damit sie nach einem verpassten Anschluss hilft. */
+const FALLBACK_GAP_MIN = 5;
+
 function loadNextConnection(leg, dest) {
   const at = shiftIso(leg.departure, 1);
   if (!at) {
@@ -1745,10 +1748,17 @@ function loadNextConnection(leg, dest) {
     exclude: leg.trainNumber || '',
     discounts: state.discounts,
     products: state.products,
-    limit: 3,
+    limit: 4,
   })
     .then((res) => {
-      leg.fallbacks = res.connections || [];
+      // Wer den Anschluss verpasst, kommt zu spät für ihn - und damit auch
+      // für den Zug eine Minute danach. In Zürich stand sonst der 20:37 als
+      // Ausweg für den verpassten 20:36. Nur wenn es nichts anderes gibt,
+      // bleibt er stehen.
+      const alle = res.connections || [];
+      const ab = Date.parse(leg.departure || '');
+      const spaeter = alle.filter((c) => !(Date.parse(c.departure) < ab + FALLBACK_GAP_MIN * 60_000));
+      leg.fallbacks = (spaeter.length ? spaeter : alle).slice(0, 3);
       leg.fallbackState = 'done';
     })
     .catch(() => {
@@ -1769,10 +1779,12 @@ function loadNextConnection(leg, dest) {
  * eine reine Funktion und wird von bin/test_units.mjs geprüft. Hier bleibt
  * nur das Laden samt Zustand, damit ensureFallbacks() nicht zweimal fragt.
  *
- * Ohne Treffer bleibt es bei der vorsichtigen Formulierung - dann kann es
- * die letzte Bahn des Tages gewesen sein.
+ * Ohne Treffer in der nächsten Stunde ist es kein Takt, der einen auffängt:
+ * die S 27 Baden-Koblenz fährt stündlich. Dann wird die nächste ganze
+ * Verbindung zum Ziel gesucht, wie bei jedem anderen Zug - vorher stand dort
+ * nur "bei Verspätung weg", ohne Ausweg.
  */
-function loadNextOnLine(leg) {
+function loadNextOnLine(leg, dest) {
   const at = shiftIso(leg.departure, 0);
   if (!at || lineKey(leg) === '' || !Number.isFinite(Date.parse(leg.departure || ''))) {
     // Ohne Zeit oder Linienkennung laesst sich auf der Tafel nichts zuordnen.
@@ -1794,12 +1806,16 @@ function loadNextOnLine(leg) {
       const treffer = nextOnLine(leg, res.departures || []);
       if (!treffer) {
         leg.nextOnLineState = 'none';
-        return;
+        return dest ? loadNextConnection(leg, dest) : undefined;
       }
       leg.nextOnLine = treffer;
       leg.nextOnLineState = 'done';
+      return undefined;
     })
-    .catch(() => { leg.nextOnLineState = 'error'; });
+    .catch(() => {
+      leg.nextOnLineState = 'error';
+      return dest ? loadNextConnection(leg, dest) : undefined;
+    });
 }
 
 /**
