@@ -140,7 +140,12 @@
         <input type="date" id="date">
       </div>
       <div class="field">
-        <label for="time">Uhrzeit</label>
+        <div class="field__head">
+          <label for="time">Uhrzeit</label>
+          <!-- Setzt Datum und Uhrzeit auf jetzt und sucht, wenn Start und
+               Ziel schon stehen - wie "jetzt" an der Abfahrtstafel. -->
+          <button type="button" id="time-now" class="here-btn" title="Ab jetzt suchen">Jetzt</button>
+        </div>
         <input type="time" id="time" value="08:00">
       </div>
       <div class="field">

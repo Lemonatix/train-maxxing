@@ -120,6 +120,23 @@ let live = null;
 // Start
 // ======================================================================
 
+/**
+ * Aufklappen weich einblenden - aber nur, wenn der Nutzer es tut.
+ *
+ * Die Trefferliste wird bei jeder Auswahl und jedem Regler neu gebaut, und
+ * ein offener Bereich entsteht dabei schon offen. Hinge die Einblendung an
+ * [open] allein, blinkte er jedes Mal neu auf. `toggle` dagegen feuert nur
+ * beim echten Auf- und Zuklappen. Es steigt nicht auf, deshalb die
+ * Capture-Phase: so steht die Klasse schon, bevor der Bereich selbst seinen
+ * Inhalt baut (renderCard baut erst beim Aufklappen).
+ */
+document.addEventListener('toggle', (e) => {
+  const d = e.target;
+  if (!(d instanceof HTMLDetailsElement) || !d.open) return;
+  d.classList.add('is-opening');
+  setTimeout(() => d.classList.remove('is-opening'), 400);
+}, true);
+
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   loadOutbound();
@@ -251,7 +268,32 @@ function setupTabs() {
   const views = Object.fromEntries(namen.map((n) => [n, $(`#view-${n}`)]));
   if (namen.some((n) => !tabs[n] || !views[n])) return;
 
+  // Die gleitende Linie unter dem aktiven Tab - siehe .tabs__indicator.
+  const leiste = tabs[namen[0]].parentElement;
+  const linie = document.createElement('span');
+  linie.className = 'tabs__indicator is-instant';
+  linie.setAttribute('aria-hidden', 'true');
+  leiste.append(linie);
+  let aktiv = null;
+  const linieSetzen = (name, { sofort = false } = {}) => {
+    const tab = tabs[name];
+    if (!tab || tab.offsetWidth === 0) return;
+    const vorher = aktiv ? namen.indexOf(aktiv) : -1;
+    const nachher = namen.indexOf(name);
+    linie.classList.toggle('is-instant', sofort || vorher < 0);
+    linie.classList.toggle('to-right', nachher > vorher);
+    linie.classList.toggle('to-left', nachher < vorher);
+    linie.style.setProperty('--tab-l', `${tab.offsetLeft}px`);
+    linie.style.setProperty('--tab-r', `${leiste.clientWidth - tab.offsetLeft - tab.offsetWidth}px`);
+    aktiv = name;
+  };
+  // Breiten ändern sich mit dem Fenster und sobald die Schrift geladen ist.
+  const nachmessen = () => { if (aktiv) linieSetzen(aktiv, { sofort: true }); };
+  window.addEventListener('resize', nachmessen);
+  document.fonts?.ready.then(nachmessen);
+
   const show = (name, { focus = false, remember = true } = {}) => {
+    linieSetzen(name);
     for (const [k, tab] of Object.entries(tabs)) {
       const on = k === name;
       tab.classList.toggle('is-active', on);
@@ -325,6 +367,8 @@ function setupTabs() {
     if (!syncAusAdresse()) show(ausAdresse(), { remember: false });
   });
   if (!syncAusAdresse() && ausAdresse() !== 'search') show(ausAdresse(), { remember: false });
+  // Ohne Tab in der Adresse ruft niemand show() - die Linie steht trotzdem.
+  if (!aktiv) linieSetzen('search', { sofort: true });
 
   // Zahl der kommenden Reisen am Tab.
   const zaehler = $('#trips-count');
@@ -1259,6 +1303,21 @@ function setupForm() {
     await runSearch();
   });
 
+  // "Jetzt": Datum und Uhrzeit auf den Augenblick. Stehen Start und Ziel
+  // schon, geht die Suche gleich los - wer "jetzt" drückt, will wissen, was
+  // jetzt fährt, und nicht noch einmal auf "Verbindungen suchen" tippen.
+  $('#time-now')?.addEventListener('click', () => {
+    const wann = localDateTime(Date.now());
+    state.date = wann.date;
+    state.time = wann.time;
+    state.arrival = false;
+    $('#date').value = state.date;
+    $('#time').value = state.time;
+    $('#arrival').checked = false;
+    saveSettings();
+    if (state.from && state.to) runSearch();
+  });
+
   $('#date').addEventListener('change', (e) => { state.date = e.target.value; });
   $('#time').addEventListener('change', (e) => { state.time = e.target.value; saveSettings(); });
   $('#arrival').addEventListener('change', (e) => { state.arrival = e.target.checked; saveSettings(); });
@@ -1441,6 +1500,9 @@ async function runSearch() {
         + (payload.fromCache ? ' · offline, gespeicherter Stand' : '');
     }
     updateShareUrl();
+    // Die Treffer einer neuen Suche gleiten nacheinander herein - nur jetzt,
+    // nicht bei jedem Neusortieren. Siehe .results.is-entering.
+    animateNextDraw = true;
     rerank();
     // Neue Suche, neuer Ausschnitt: sonst zeigt die Karte nach Zürich-Wien
     // weiter den Alpenraum, während die Liste Berlin-Hamburg führt. Nur
@@ -1527,9 +1589,22 @@ function rerankSoon() {
   }, RERANK_DELAY_MS);
 }
 
+/** Beim nächsten draw() die Treffer einblenden - gesetzt nach einer Suche. */
+let animateNextDraw = false;
+let enterTimer = null;
+
 /** Liste und Karte zeichnen. Beide teilen sich die Auswahl. */
 function draw() {
   const ranked = state.ranked;
+  const liste = $('#results-list');
+  if (animateNextDraw && liste) {
+    animateNextDraw = false;
+    liste.classList.add('is-entering');
+    clearTimeout(enterTimer);
+    // Danach wieder weg: ein Neuzeichnen beim Sortieren soll nicht noch
+    // einmal hereingleiten.
+    enterTimer = setTimeout(() => liste.classList.remove('is-entering'), 900);
+  }
   showSortBar(ranked.length > 0);
   // Bestenzeichen über ALLE Treffer bestimmen, nicht nur die sichtbaren:
   // sonst wandert das Label "günstigste" beim Ausklappen weiter.

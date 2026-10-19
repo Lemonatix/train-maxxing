@@ -1697,6 +1697,15 @@ ausgewählte ist hervorgehoben. Klick auf eine Linie wählt die Verbindung, Klic
 auf eine Verbindung hebt die Linie hervor — beides synchron. „Auf der Karte"
 über der Trefferliste und „Karte" in der Live-Verfolgung springen hin.
 
+**Die Linie unter dem aktiven Tab gleitet** vom bisherigen zum neuen Tab
+(`.tabs__indicator`): die Kante in Bewegungsrichtung eilt voraus, die andere
+zieht nach, nach rechts wie nach links. Auch sonst ist Bewegung dabei —
+Aufklappen mit gleitender Höhe (wo der Browser `interpolate-size` kann),
+neue Treffer nacheinander, eine weich einblendende Ansicht beim Tab-Wechsel.
+Animiert wird nur, was man selbst auslöst; die Liste wird bei jedem Regler
+neu gebaut, und offene Bereiche sollen dabei nicht aufblinken. Bewegt werden
+nur Deckkraft, Position und Höhe, „Bewegung reduzieren" schaltet alles ab.
+
 **Warum ein eigener Tab:** Früher stand die Karte über der Trefferliste und
 wurde bei jeder Suche, jeder Auswahl und jedem Positionsupdate neu gezeichnet —
 Kachelgitter und SVG-Overlay sind das Teuerste auf der Seite, und auf
@@ -1924,6 +1933,10 @@ gekappt sind. Die Live-Verfolgung fragt bei einem gefährdeten Umstieg im Takt
 die Tafel ab der tatsächlichen Ankunft und meldet „Umstieg verpasst — die
 nächste um 16:59" statt eine neue Route zu suchen. Die Benachrichtigung des
 Servers wird dafür nicht höher eingestuft als „Umstieg wird knapp".
+
+**„Jetzt"** neben der Uhrzeit setzt Datum und Uhrzeit auf den Augenblick,
+nimmt „als Ankunftszeit" zurück und sucht sofort, wenn Start und Ziel schon
+stehen — wie „jetzt" an der Abfahrtstafel.
 
 **Mindestumsteigezeit** lässt sich im Suchformular einstellen (Standard 5 min,
 „egal" bis 30 min). Der Wert wird an **beide** Quellen durchgereicht — HAFAS
@@ -2243,10 +2256,18 @@ und die Querhalle.
 
 Was die Verbindungen mitbringen:
 
-- **Kein Preis, sondern die Tarifzone** („MVV · Zone M"). Die MVG nennt die
-  Zonen, einen Betrag nicht, und schätzen wäre hier Raten. Beim Zubringer
-  steht unter dem Preis des Fernzugs „+ MVV Zone M" — im Flexpreis der DB
-  ist das City-Ticket enthalten, mit Deutschlandticket fährt man ohnehin.
+- **Der MVV-Preis aus den Tarifzonen** („4,20 € · MVV · Zone M"). Die MVG
+  nennt die Zonen, und im MVV hängt die Einzelfahrkarte nur an deren Anzahl —
+  Zone M zählt wie zwei (`Fares::MVV_SINGLE`, abgelesen am Preisrechner des
+  MVV, Stand 1.1.2026; zum 1.1.2027 neu ablesen). Früher stand an den
+  MVG-Verbindungen nur „MVV", an derselben Fahrt von der DB dagegen der
+  geschätzte Entfernungspreis — je nach Uhrzeit also mal das eine, mal das
+  andere. Jetzt bekommt **jede reine Nahverkehrsfahrt** einer Stadtsuche den
+  MVV-Preis, gleich aus welcher Quelle; Echtpreise der DB bleiben stehen. Die
+  Kurzstrecke (2,10 €) bleibt außen vor, sie hängt an der Zahl der Halte. Mit
+  Deutschlandticket steht „im Abo". Beim Zubringer steht unter dem Preis des
+  Fernzugs „+ 4,20 € MVV Zone M" — im Flexpreis der DB ist das City-Ticket
+  enthalten, mit Deutschlandticket fährt man ohnehin.
 - **Deutschlandticket**: gilt im ganzen MVV und steht deshalb an jedem
   MVG-Abschnitt.
 - **Echtzeit und Streckenverlauf** aus der MVG-Antwort — die Karte zeigt die
@@ -2780,7 +2801,7 @@ beginnt dann mit einem **Fußweg**:
 
 **Auf der Karte** steht der Fußweg der gewählten Verbindung gestrichelt in
 Lila, mit der Gehzeit daneben („🚶 4 Min"), in der Liste mit Länge
-(„🚶 Zu Fuß: Leopoldstraße 50 → Giselastraße · 4 Min · 200 m"). Hat der
+(„Zu Fuß: Leopoldstraße 50 → Giselastraße · 4 Min · 200 m"). Hat der
 Fahrplan keine Linie geliefert, holt die App den Weg auf der Straße nach —
 über den Fußgänger-Router von FOSSGIS (`routing.openstreetmap.de`, kein
 Schlüssel, 30 Tage Cache). Bis dahin, oder wenn er nicht antwortet, steht die

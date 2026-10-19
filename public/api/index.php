@@ -2276,6 +2276,46 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
             $notices[] = 'Stadtfahrt: Verbindungen mit U-Bahn, Tram und Bus von der MVG. '
                 . 'Im ganzen MVV gilt das Deutschlandticket.';
         }
+
+        // EIN PREIS FÜR DIESELBE FAHRT. Die Verbindungen der DB trugen den
+        // geschätzten Entfernungspreis, die der MVG nur ihre Tarifzonen - für
+        // dieselbe Strecke zu einer anderen Uhrzeit stand mal "ca. 4,48 €",
+        // mal "MVV". Im MVV zählen nur die Zonen, und die sind für Start und
+        // Ziel dieselben, egal ob U-Bahn oder Bus. Also bekommt jede reine
+        // Nahverkehrsfahrt dieser Suche den MVV-Preis, mit den Zonen, die die
+        // MVG genannt hat. Echtpreise der DB bleiben, wie sie sind.
+        $zonen = [];
+        foreach ($localJourneys as $lj) {
+            if (($lj['tariffZones'] ?? []) !== []) {
+                $zonen = $lj['tariffZones'];
+                break;
+            }
+        }
+        $mvvPreis = $zonen !== [] ? Fares::mvvPrice($zonen, $discounts) : null;
+        if ($mvvPreis !== null) {
+            $alle = true;
+            foreach ($journeys as $i => $j) {
+                $echt = ($j['price']['estimated'] ?? true) === false && ($j['price']['source'] ?? '') !== 'mvv';
+                if (Fares::isLocalOnly($j) && !$echt) {
+                    $journeys[$i]['price'] = $mvvPreis;
+                    $journeys[$i]['tariffZones'] = $zonen;
+                } else {
+                    $alle = false;
+                }
+            }
+            if ($alle) {
+                $priceSource = 'mvv';
+            }
+        }
+    }
+
+    // Zubringer in München: das Stück in der Stadt kostet eine eigene
+    // MVV-Fahrkarte - die steht mit Betrag an der Verbindung, nicht nur mit
+    // den Zonen. Siehe CityTrips::compose().
+    foreach ($journeys as $i => $j) {
+        if (isset($j['feeder']) && ($j['feeder']['tariffZones'] ?? []) !== []) {
+            $journeys[$i]['feeder']['price'] = Fares::mvvPrice($j['feeder']['tariffZones'], $discounts);
+        }
     }
 
     // Fußwege: Koordinaten an beiden Enden, Länge, notfalls geschätzte

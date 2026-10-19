@@ -610,6 +610,25 @@ foreach (array_merge(glob($ordner . '/push/*') ?: [], glob($ordner . '/push/.[a-
 @rmdir($ordner . '/push');
 @rmdir($ordner);
 
+echo PHP_EOL . "Fares - MVV-Tarif nach Zonen" . PHP_EOL;
+
+// Abgelesen am Preisrechner des MVV (Stand 1.1.2026): Zone M zählt wie zwei
+// Zonen, der Preis hängt nur an der Anzahl.
+pruefe('Zonenzahl: M, M–1, M–2, 1–3, eine Zone', [
+    Fares::mvvZoneCount([0]), Fares::mvvZoneCount([0, 1]), Fares::mvvZoneCount([0, 1, 2]),
+    Fares::mvvZoneCount([1, 2, 3]), Fares::mvvZoneCount([4]), Fares::mvvZoneCount([]),
+], [2, 3, 4, 3, 1, null]);
+pruefe('Preise: M 4,20, M–1 6,40, M–12 27,10, eine Zone 2,70', [
+    Fares::mvvPrice([0], [])['amount'], Fares::mvvPrice([0, 1], [])['amount'],
+    Fares::mvvPrice(range(0, 12), [])['amount'], Fares::mvvPrice([3], [])['amount'],
+], [4.20, 6.40, 27.10, 2.70]);
+$mitD = Fares::mvvPrice([0, 1, 2], ['deutschlandticket']);
+pruefe('Deutschlandticket deckt den MVV', [$mitD['covered'], $mitD['amount'], $mitD['label']], [true, 0.0, 'MVV · Zonen M–2']);
+pruefe('nur Nahverkehr: U-Bahn + Bus ja, mit ICE nein', [
+    Fares::isLocalOnly(['legs' => [['mode' => 'train', 'category' => 'U'], ['mode' => 'walk'], ['mode' => 'train', 'category' => 'Bus']]]),
+    Fares::isLocalOnly(['legs' => [['mode' => 'train', 'category' => 'S'], ['mode' => 'train', 'category' => 'ICE']]]),
+], [true, false]);
+
 echo PHP_EOL . "Fares - Grenzquerung ohne Zwischenhalt" . PHP_EOL;
 
 // Stuetzpunkte wie HAFAS sie liefert, grob nachgezeichnet.

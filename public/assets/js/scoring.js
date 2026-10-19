@@ -555,6 +555,8 @@ export function formatPrice(price) {
 export function priceOrigin(price) {
   if (!price) return 'kein Preis';
   if (price.covered) return (price.appliedAbos || []).join(' + ') || 'Abo';
+  // MVV-Tarif nach Zonen: kein Schätzwert, sondern der Preis am Automaten.
+  if (price.source === 'mvv') return price.label || 'MVV-Tarif';
   if (price.source === 'db') return 'Echtpreis DB';
   if (price.source === 'db+abo') return 'Echtpreis + Abo geschätzt';
   return 'geschätzt';

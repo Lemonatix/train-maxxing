@@ -323,6 +323,9 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   // Auswahl um, ohne die Liste neu zu bauen. Die Kinder der Liste taugen
   // dafür nicht - im Nerd-Modus stehen Gruppenköpfe dazwischen.
   card.dataset.index = String(index);
+  // Staffelung beim Hereingleiten nach einer Suche - nach acht Karten ist
+  // man ohnehin unter dem Bildschirmrand.
+  card.style.setProperty('--i', String(Math.min(index, 8)));
   if (index === 0) card.classList.add('journey--best');
   if (index === state.selectedIndex) card.classList.add('is-selected');
 
@@ -391,7 +394,9 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
     // Zubringer in München: für das Stück in der Stadt braucht es ein
     // eigenes Ticket - außer man hat den Flexpreis mit City-Ticket.
     if (j.feeder) {
-      const z = el('div', 'journey__price-alt', `+ MVV ${zonesLabel(j.feeder.tariffZones)}`);
+      const fp = j.feeder.price;
+      const betrag = fp && !fp.covered && typeof fp.amount === 'number' ? `${formatPrice(fp)} ` : '';
+      const z = el('div', 'journey__price-alt', `+ ${betrag}MVV ${zonesLabel(j.feeder.tariffZones)}`);
       z.title = 'Für die Fahrt in der Stadt. Im Flexpreis der DB ist das City-Ticket enthalten, '
         + 'mit Deutschlandticket fährt man ohnehin.';
       right.append(z);
@@ -714,7 +719,8 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   // in zugeklappten Bereichen, die niemand ansah. Auf schwächeren Telefonen
   // hing so jeder Regler und jede Auswahl spürbar nach.
   const details = el('details', 'journey__details');
-  details.append(el('summary', null, 'Streckenverlauf und Details'));
+  const summary = el('summary', null, 'Streckenverlauf und Details');
+  details.append(summary);
   let gebaut = false;
   const bauen = () => {
     if (gebaut) return;
@@ -723,6 +729,11 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   };
   details.open = Boolean(j._detailsOpen);
   if (details.open) bauen();
+  // Schon beim Klick bauen, VOR dem Aufklappen: `toggle` kommt erst danach,
+  // und die weiche Höhe (::details-content) liefe sonst auf den leeren
+  // Bereich zu und spränge dann. Enter auf der Überschrift löst auch einen
+  // Klick aus; `toggle` bleibt als Rückfallebene.
+  summary.addEventListener('click', bauen);
   details.addEventListener('toggle', () => {
     j._detailsOpen = details.open;
     if (details.open) bauen();
@@ -2007,7 +2018,7 @@ function renderLegs(journey, entry, state, actions) {
 
       // Gehzeit und Länge - "ca.", wo sie geschätzt sind (Walks.php).
       const text = walksBetween
-        ? `🚶 Zu Fuß: ${leg.from.name} → ${leg.to.name} · ${walkText(leg) || formatDuration(leg.durationMin)}`
+        ? `Zu Fuß: ${leg.from.name} → ${leg.to.name} · ${walkText(leg) || formatDuration(leg.durationMin)}`
         : `Umstieg am selben Halt · ${formatDuration(leg.durationMin)}`;
 
       const row = el('div', 'leg leg--walk');

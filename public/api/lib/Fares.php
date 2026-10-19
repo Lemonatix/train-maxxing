@@ -165,6 +165,96 @@ final class Fares
     ];
 
     /**
+     * MVV-Einzelfahrkarte für Erwachsene nach Zahl der befahrenen Zonen.
+     *
+     * Stand 1.1.2026, abgelesen aus dem Preisrechner auf mvv-muenchen.de
+     * (Einzelfahrkarte, "Zone von / Zone bis"). Der Preis hängt nur an der
+     * ANZAHL der Zonen, und die Zone M zählt dabei wie zwei: M kostet so viel
+     * wie 1–2, M–1 so viel wie 1–3. Zum 1.1.2027 hebt der MVV im Schnitt um
+     * 4,9 % an (Zone M bleibt 4,20 €) - dann diese Zeile neu ablesen.
+     */
+    private const MVV_SINGLE = [
+        1 => 2.70, 2 => 4.20, 3 => 6.40, 4 => 8.60, 5 => 10.70, 6 => 12.90, 7 => 15.10,
+        8 => 16.80, 9 => 18.70, 10 => 20.40, 11 => 22.20, 12 => 23.80, 13 => 25.50, 14 => 27.10,
+    ];
+
+    /** Zonen wie die MVG sie nennt (0 = M) als Zonenzahl im Sinne des Tarifs. */
+    public static function mvvZoneCount(array $zones): ?int
+    {
+        $z = array_values(array_unique(array_map('intval', $zones)));
+        if ($z === []) {
+            return null;
+        }
+        $lo = min($z);
+        $hi = max($z);
+        return $lo === 0 ? $hi + 2 : $hi - $lo + 1;
+    }
+
+    /** "Zone M", "Zonen M–2", "Zonen 1–3" - wie zonesLabel() im Frontend. */
+    public static function mvvZonesLabel(array $zones): string
+    {
+        $z = array_values(array_unique(array_map('intval', $zones)));
+        sort($z);
+        if ($z === []) {
+            return 'MVV';
+        }
+        $name = static fn(int $n): string => $n === 0 ? 'M' : (string) $n;
+        return count($z) === 1
+            ? 'Zone ' . $name($z[0])
+            : 'Zonen ' . $name($z[0]) . '–' . $name($z[count($z) - 1]);
+    }
+
+    /**
+     * Der Preis einer Fahrt im MVV, aus ihren Tarifzonen.
+     *
+     * WOZU: In München mischt die Suche Verbindungen der DB und der MVG.
+     * Die einen bekamen den geschätzten Entfernungspreis ("ca. 4,48–4,72 €"),
+     * die anderen nur "MVV Zone M" - für dieselbe Fahrt zu einer anderen
+     * Uhrzeit. Im MVV gilt aber ein Tarif nach Zonen, für U-Bahn, Bus und
+     * S-Bahn gleich. Den kennen wir, sobald die Zonen bekannt sind.
+     *
+     * Die Kurzstrecke (2,10 €, bis zur vierten Haltestelle) bleibt außen vor:
+     * ob sie gilt, hängt an der Zahl der Halte je Verkehrsmittel.
+     *
+     * @param string[] $discounts
+     */
+    public static function mvvPrice(array $zones, array $discounts): ?array
+    {
+        $n = self::mvvZoneCount($zones);
+        if ($n === null || !isset(self::MVV_SINGLE[$n])) {
+            return null;
+        }
+        // Im ganzen MVV gilt das Deutschlandticket.
+        $dTicket = in_array('deutschlandticket', $discounts, true);
+        return [
+            'amount'      => $dTicket ? 0.0 : self::MVV_SINGLE[$n],
+            'currency'    => 'EUR',
+            'type'        => $dTicket ? 'Durch Abo gedeckt' : 'MVV-Einzelfahrkarte',
+            'source'      => 'mvv',
+            'label'       => 'MVV · ' . self::mvvZonesLabel($zones),
+            'estimated'   => false,
+            'basedOnReal' => false,
+            'covered'     => $dTicket,
+            'appliedAbos' => $dTicket ? [self::DISCOUNTS['deutschlandticket']['label']] : [],
+        ];
+    }
+
+    /** Fährt die Verbindung nur mit Nahverkehr (S, U, Tram, Bus, RB …)? */
+    public static function isLocalOnly(array $journey): bool
+    {
+        $zuege = array_filter($journey['legs'] ?? [], static fn($l) => ($l['mode'] ?? '') === 'train');
+        if ($zuege === []) {
+            return false;
+        }
+        foreach ($zuege as $l) {
+            if (!in_array(strtoupper(trim((string) ($l['category'] ?? ''))), self::LOCAL_CATEGORIES, true)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * Ergänzt eine Verbindung um Preisinformationen.
      *
      * @param string[] $discounts Abo-IDs
