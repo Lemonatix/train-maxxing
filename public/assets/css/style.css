@@ -4908,7 +4908,7 @@ details.live__msg .live__msg-text {
   :is(.journey__details, .fares, .xfer, .leg__stops, details.section, .live__msgs)::details-content {
     block-size: 0;
     overflow-y: clip;
-    transition: block-size 300ms var(--ease-out), content-visibility 300ms allow-discrete;
+    transition: block-size 420ms var(--ease-out), content-visibility 420ms allow-discrete;
   }
   :is(.journey__details, .fares, .xfer, .leg__stops, details.section, .live__msgs)[open]::details-content {
     block-size: auto;
@@ -4916,7 +4916,7 @@ details.live__msg .live__msg-text {
 }
 
 details.is-opening[open] > :not(summary) {
-  animation: tm-reveal 300ms var(--ease-out) both;
+  animation: tm-reveal 420ms var(--ease-out) both;
 }
 @keyframes tm-reveal {
   from { opacity: 0; transform: translateY(-6px); }
@@ -4929,7 +4929,7 @@ details.is-opening[open] > :not(summary) {
   content: '▸';
   display: inline-block;
   width: 1.1em;
-  transition: transform 260ms var(--ease-out);
+  transition: transform 360ms var(--ease-out);
 }
 :is(.journey__details, details.section)[open] > summary::before { transform: rotate(90deg); }
 

@@ -134,7 +134,8 @@ document.addEventListener('toggle', (e) => {
   const d = e.target;
   if (!(d instanceof HTMLDetailsElement) || !d.open) return;
   d.classList.add('is-opening');
-  setTimeout(() => d.classList.remove('is-opening'), 400);
+  // Länger als die Einblendung (420 ms in style.css) - sonst bräche sie ab.
+  setTimeout(() => d.classList.remove('is-opening'), 600);
 }, true);
 
 document.addEventListener('DOMContentLoaded', () => {
