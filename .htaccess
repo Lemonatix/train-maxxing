@@ -1,0 +1,18 @@
+# Der Projektordner auf dem Server: https://mika-riesterer.de/train-maxxing/
+#
+# Die Web-App liegt in public/. Unter /train-maxxing/ selbst zeigte der
+# Server bisher "403 Forbidden" - genau die Adresse, die man (und Google)
+# zuerst aufruft. Jetzt leitet sie dauerhaft dorthin weiter.
+#
+# BEWUSST mod_alias und nicht mod_rewrite: RedirectMatch vergleicht die
+# vollständige Adresse und trifft deshalb nur genau /train-maxxing/. Eine
+# RewriteRule hier gälte auch in jedem Unterordner, gemessen am jeweiligen
+# Unterordner - "^$ -> public/" hätte /train-maxxing/public/ selbst auf
+# /train-maxxing/public/public/ geschickt.
+#
+# Liegt das Projekt in einem anderen Ordner, beide Pfade anpassen.
+<IfModule mod_alias.c>
+    RedirectMatch 301 ^/train-maxxing/?$ /train-maxxing/public/
+</IfModule>
+
+# Gesperrt ist bin/ - mit eigener .htaccess dort, wie public/api/data/.

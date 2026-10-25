@@ -11,6 +11,14 @@
  */
 require __DIR__ . '/../public/api/lib/WebPush.php';
 
+// Nur auf der Kommandozeile - wie import_ch_istdaten.php. Liegt bin/ auf
+// dem Server, sperrt bin/.htaccess den Zugriff; das hier ist die zweite
+// Sicherung, falls die einmal fehlt.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit("Nur auf der Kommandozeile.\n");
+}
+
 $k = WebPush::generateKeys();
 $pem = str_replace("\n", '\n', trim($k['private_pem']));
 $tick = bin2hex(random_bytes(16));

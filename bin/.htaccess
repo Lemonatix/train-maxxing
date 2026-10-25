@@ -1,0 +1,10 @@
+# Bau- und Testskripte für die Kommandozeile - nie über den Browser.
+# Einige laden Daten herunter und überschreiben Dateien unter
+# public/api/data/. Siehe auch die .htaccess im Projektordner darüber.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

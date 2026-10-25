@@ -17,6 +17,14 @@
 
 declare(strict_types=1);
 
+// Nur auf der Kommandozeile - wie import_ch_istdaten.php. Liegt bin/ auf
+// dem Server, sperrt bin/.htaccess den Zugriff; das hier ist die zweite
+// Sicherung, falls die einmal fehlt.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit("Nur auf der Kommandozeile.\n");
+}
+
 $lib = __DIR__ . '/../public/api/lib';
 require $lib . '/Health.php';
 require $lib . '/Http.php';
