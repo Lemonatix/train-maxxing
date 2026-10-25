@@ -100,6 +100,10 @@ self.addEventListener('fetch', (event) => {
   const scope = new URL(self.registration.scope);
   if (!url.pathname.startsWith(scope.pathname)) return;
 
+  // Downloads (das Android-APK) nicht anfassen: der Shell-Cache legte sonst
+  // jedes heruntergeladene APK - 6 MB - im Speicher des Browsers ab.
+  if (url.pathname.startsWith(new URL('downloads/', scope).pathname)) return;
+
   const isApi = url.pathname.startsWith(new URL('api/', scope).pathname);
   if (isApi) {
     if (!CACHED_ACTIONS.has(url.searchParams.get('action') || '')) return;
@@ -153,8 +157,10 @@ self.addEventListener('push', (event) => {
     body: d.body || '',
     tag: d.tag || 'train-maxxing',
     renotify: true,
-    icon: '/assets/pictures/MMR_v2.png?v=2',
-    badge: '/assets/pictures/MMR_v2.png?v=2',
+    // Relativ zu sw.js, also zum Ordner der App. Das Abzeichen ist der
+    // einfarbige Umriss - Android färbt es selbst (make-icons.sh).
+    icon: 'assets/icons/icon-192.png',
+    badge: 'assets/icons/badge-96.png',
     vibrate: [180, 90, 180],
     data: { url: d.url || './' },
   }));

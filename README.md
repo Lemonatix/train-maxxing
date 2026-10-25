@@ -834,20 +834,23 @@ Ziel steht in `index.html` und zeigt standardmäßig auf `/`:
 Liegt das Tool in einem Unterordner einer größeren Seite, trag dort die
 gewünschte Adresse ein.
 
-**Tab-Icon anpassen:** In `index.html` stehen drei `<link rel="icon">`-Zeilen
-mit absoluten Pfaden auf die Icons der Hauptseite:
+**Symbol:** train-maxxing hat ein eigenes Symbol — eine Zugfront auf Schienen
+im Farbverlauf der Oberfläche —, dasselbe in Browser-Tab, auf dem
+Home-Bildschirm, in Benachrichtigungen und in der Android-App. Die Vorlagen sind
+zwei SVGs in `app/resources/` (Motiv und Hintergrund, getrennt für Androids
+adaptive Symbole); `app/scripts/make-icons.sh` erzeugt daraus alles, für die
+Website nach `public/assets/icons/`:
 
-```html
-<link rel="icon" type="image/svg+xml" href="/assets/pictures/MMR_v2.svg?v=2">
-<link rel="icon" type="image/png" sizes="192x192" href="/assets/pictures/MMR_v2.png?v=2">
-<link rel="apple-touch-icon" href="/assets/pictures/MMR_v2.png?v=2">
-```
+| Datei | wofür |
+|---|---|
+| `favicon.svg`, `favicon-32.png` | Browser-Tab (das PNG für Browser ohne SVG-Favicons) |
+| `apple-touch-icon.png` | iPhone-Home-Bildschirm — randlos, iOS rundet selbst |
+| `icon-192.png`, `icon-512.png`, `icon-maskable-512.png` | Web-App-Manifest; „maskable" randlos für Android |
+| `badge-96.png` | Benachrichtigung in der Android-Statusleiste: nur der weiße Umriss, Scheibe und Lichter durchsichtig — ein farbiges Logo würde dort ein Klecks |
 
-Absolut, damit sie auch aus einem Unterordner heraus stimmen — die Dateien
-liegen ja bei der Hauptseite, nicht beim Tool. Läuft das Tool auf einer eigenen
-Domain, leg die Icons dort ab und trag den passenden Pfad ein. Das PNG ist
-Absicht: SVG-Favicons zeichnen nicht alle Browser, unter Windows blieb der Tab
-sonst leer.
+Eingebunden sind sie relativ, das Tool läuft in jedem Unterordner. Nach einer
+Änderung an den SVGs: `app/scripts/make-icons.sh`, dann `public/assets/icons/`
+hochladen.
 
 **Als Teilseite einbetten:** Übernimm den Inhalt von `<div class="wrap">` in deine
 Seite und binde `style.css` sowie `<script type="module" src="assets/js/app.js">`

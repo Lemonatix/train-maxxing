@@ -8,3 +8,7 @@ public/api/cache/*
 
 # API-Schlüssel - nie ins öffentliche Repository (siehe public/api/config.php)
 public/api/config.local.php
+
+# Das Android-APK zum Herunterladen: wird gebaut (app/README.md) und direkt
+# auf den Server gelegt, nicht ins Repository.
+public/downloads/

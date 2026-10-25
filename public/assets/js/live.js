@@ -868,8 +868,8 @@ ${url.href}`);
       // Eine Sorte ersetzt die vorige, statt sich zu stapeln.
       tag: `train-maxxing-${kind}`,
       renotify: true,
-      icon: '/assets/pictures/MMR_v2.png?v=2',
-      badge: '/assets/pictures/MMR_v2.png?v=2',
+      icon: siteUrl('assets/icons/icon-192.png'),
+      badge: siteUrl('assets/icons/badge-96.png'),
     };
     try { navigator.vibrate?.([180, 90, 180]); } catch { /* egal */ }
     try {

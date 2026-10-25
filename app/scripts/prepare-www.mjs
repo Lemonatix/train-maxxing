@@ -39,6 +39,7 @@ const OHNE = [
   /^check\.php$/,        // Prüfseite des Servers
   /(^|\/)\.htaccess$/,   // Apache
   /^sw\.js$/,            // Service Worker: in der App unnötig, siehe site.js
+  /^downloads(\/|$)/,    // das APK selbst - sonst steckte das alte in der neuen App
 ];
 
 await rm(ziel, { recursive: true, force: true });

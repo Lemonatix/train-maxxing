@@ -87,12 +87,17 @@ JAVA_HOME=/usr/lib/jvm/java-21-openjdk npm run apk:release
 ```
 
 Ergebnis: `android/app/build/outputs/apk/release/app-release.apk`. Diese
-Datei kommt auf die Website, z. B. als `train-maxxing.apk`. Damit der Browser sie
-als App erkennt und nicht als Text anzeigt, in der `.htaccess` daneben:
+Datei kommt als `train-maxxing.apk` in den Ordner `downloads/` neben der
+Web-App — auf dem Server also `train-maxxing/public/downloads/train-maxxing.apk`,
+erreichbar unter `https://mika-riesterer.de/train-maxxing/public/downloads/train-maxxing.apk`.
 
-```apache
-AddType application/vnd.android.package-archive .apk
-```
+- Den richtigen Dateityp (`application/vnd.android.package-archive`) setzt
+  schon `public/.htaccess` — ohne ihn zeigen manche Browser die Datei als Text.
+- `public/downloads/` steht in `.gitignore` (das APK gehört nicht ins
+  Repository), wird nicht in die App kopiert (`prepare-www.mjs`) und vom
+  Service Worker nicht zwischengespeichert (`sw.js`).
+- Wer `public/` hochlädt und dabei auf dem Server löscht, was lokal fehlt,
+  nimmt `downloads/` davon aus.
 
 Auf dem Telefon: Datei öffnen, beim ersten Mal „Installation aus dieser
 Quelle zulassen" für den Browser erlauben.

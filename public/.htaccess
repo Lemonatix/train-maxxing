@@ -23,6 +23,11 @@
 
 # Web-App-Manifest mit dem richtigen Typ - manche Apache-Installationen
 # kennen die Endung nicht und liefern text/plain.
+#
+# Dasselbe für das Android-APK in downloads/ (siehe app/README.md): ohne
+# den Typ zeigen manche Browser die Datei als Text an, statt sie
+# herunterzuladen, und Android bietet die Installation nicht an.
 <IfModule mod_mime.c>
     AddType application/manifest+json .webmanifest
+    AddType application/vnd.android.package-archive .apk
 </IfModule>

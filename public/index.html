@@ -14,18 +14,18 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 
-  <!-- Tab-Icon. Dieselben Dateien wie auf der Hauptseite; die Pfade sind
-       bewusst absolut, damit das Icon auch dann stimmt, wenn das Tool in
-       einem Unterordner liegt. Läuft es auf einer eigenen Domain, hier den
-       dortigen Pfad eintragen.
+  <!-- Tab-Icon: das eigene Symbol von train-maxxing (Zugfront auf Schienen),
+       dasselbe wie in der Android-App. Erzeugt von app/scripts/make-icons.sh
+       aus app/resources/icon-*.svg - dort ändern, nicht hier. Relativ
+       eingebunden, das Tool läuft in jedem Unterordner.
 
        Drei Zeilen statt einer: Firefox und Chrome nehmen das SVG, unter
        Windows blieb der Tab ohne die PNG-Rückfallebene leer (nicht jeder
        Browser zeichnet SVG-Favicons), und iOS braucht für den
        Startbildschirm ohnehin ein apple-touch-icon. -->
-  <link rel="icon" type="image/svg+xml" href="/assets/pictures/MMR_v2.svg?v=2">
-  <link rel="icon" type="image/png" sizes="192x192" href="/assets/pictures/MMR_v2.png?v=2">
-  <link rel="apple-touch-icon" href="/assets/pictures/MMR_v2.png?v=2">
+  <link rel="icon" type="image/svg+xml" href="assets/icons/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/apple-touch-icon.png">
 
   <!-- Immer über HTTPS. Über http:// geöffnet - von Hand getippt oder so
        auf den Home-Bildschirm gelegt - verweigert der Browser den Standort
