@@ -51,8 +51,13 @@ Website ist damit auch in der App, sobald neu gebaut wird.
 Andere Website-Adresse: in `package.json` unter `trainMaxxing.site`, oder
 einmalig `TRAIN_MAXXING_SITE=https://…/ npm run apk`.
 
-Symbol und Startbild kommen aus `resources/icon.png` (das MMR-Logo der
-Website). Neu erzeugen nach einem Tausch: `scripts/make-icons.sh`.
+Symbol und Startbild kommen aus zwei Vorlagen: `resources/icon-foreground.svg`
+(die Zugfront auf Schienen im Farbverlauf der Oberfläche) und
+`resources/icon-background.svg` (der dunkle Grund mit leichtem Schein). Getrennt,
+weil Android daraus ein adaptives Symbol macht und es je nach Hersteller rund,
+eckig oder als Tropfen zuschneidet. Nach einer Änderung: `scripts/make-icons.sh`
+(braucht `rsvg-convert` und ImageMagick). Das fertige Symbol liegt danach auch
+als `resources/icon-512.png` bereit, z. B. für den Download-Link auf der Website.
 
 ## Veröffentlichen (auf der eigenen Website)
 
@@ -105,8 +110,8 @@ app/
 ├── capacitor.config.json   App-Kennung (de.mikariesterer.trainmaxxing), Name
 ├── scripts/
 │   ├── prepare-www.mjs     public/ -> www/, ohne PHP, mit App-Kennung
-│   └── make-icons.sh       Symbol und Startbild aus resources/icon.png
-├── resources/icon.png      Vorlage für Symbol und Startbild
+│   └── make-icons.sh       Symbol und Startbild aus den beiden SVG-Vorlagen
+├── resources/              icon-foreground.svg, icon-background.svg, icon-512.png
 ├── android/                Android-Projekt (Android Studio: npm run open)
 └── www/                    erzeugt, nicht im Repository
 ```

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="432" height="432">
+  <!-- Vordergrund des App-Symbols: Zugfront auf Schienen, im Farbverlauf
+       der Oberfläche (Cyan -> Violett -> Grün). 108 x 108 wie ein adaptives
+       Android-Symbol; das Motiv bleibt im sicheren Kreis (Radius 33 um die
+       Mitte), den jeder Launcher zeigt. Hintergrund: icon-background.svg.
+
+       Der Verlauf liegt über der ganzen Fläche (userSpaceOnUse) - an der
+       Form selbst gemessen fiele er bei der waagrechten Schwelle aus, weil
+       eine Linie keine Höhe hat. -->
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="34" y1="22" x2="76" y2="88">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.55" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Wagenkasten: oben spitz zulaufend wie eine Schnellzugnase -->
+  <path d="M36.5 69 V46 C36.5 31 44 22.5 54 22.5 C64 22.5 71.5 31 71.5 46 V69 Q71.5 72.5 68 72.5 H40 Q36.5 72.5 36.5 69 Z"
+        fill="url(#g)"/>
+  <!-- Frontscheibe -->
+  <path d="M41.5 46.5 C41.5 35 47 29.5 54 29.5 C61 29.5 66.5 35 66.5 46.5 V49.5 Q66.5 51.5 64.5 51.5 H43.5 Q41.5 51.5 41.5 49.5 Z"
+        fill="#0a0e17"/>
+  <!-- Zierlinie und Lichter -->
+  <path d="M41.5 57 H66.5" stroke="#0a0e17" stroke-width="1.6" stroke-linecap="round"/>
+  <circle cx="44" cy="64.5" r="2.6" fill="#0a0e17"/>
+  <circle cx="64" cy="64.5" r="2.6" fill="#0a0e17"/>
+
+  <!-- Schienen, nach unten auseinanderlaufend, mit zwei Schwellen -->
+  <g stroke="url(#g)" stroke-linecap="round" fill="none">
+    <path d="M42.5 76.5 L37.5 86.5" stroke-width="2.8"/>
+    <path d="M65.5 76.5 L70.5 86.5" stroke-width="2.8"/>
+    <path d="M42 80 H66" stroke-width="2" opacity="0.75"/>
+    <path d="M40 84.5 H68" stroke-width="2" opacity="0.75"/>
+  </g>
+</svg>

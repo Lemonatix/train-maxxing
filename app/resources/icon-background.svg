@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="432" height="432">
+  <!-- Hintergrund des App-Symbols: der dunkle Grund der App mit einem
+       leichten Schein hinter dem Zug - wie die Radialverläufe hinter der
+       Oberfläche (body::before in style.css). Füllt die ganze Fläche; die
+       Form schneidet der Launcher zu. -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="62%">
+      <stop offset="0" stop-color="#1b2140"/>
+      <stop offset="0.6" stop-color="#0d1222"/>
+      <stop offset="1" stop-color="#0a0e17"/>
+    </radialGradient>
+  </defs>
+  <rect width="108" height="108" fill="url(#glow)"/>
+</svg>
