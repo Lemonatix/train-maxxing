@@ -416,6 +416,43 @@ export function walkText(leg) {
   return teile.join(' · ');
 }
 
+/**
+ * Das eigene Teilstück aus dem Streckenverlauf eines ganzen Zuglaufs.
+ *
+ * Der Zuglauf (`traindetails`) bringt die Linie von Anfang bis Ende des
+ * Zuges mit; man selbst fährt meist nur ein Stück davon. Die Halte liegen
+ * darauf als Stützpunkte (siehe OebbHafas::thin()), also schneidet der
+ * jeweils nächste Punkt an Ein- und Ausstieg sauber.
+ *
+ * @returns {?Array<[number, number]>} null, wenn es nicht passt
+ */
+export function legGeometryFromRun(leg, run) {
+  const g = run?.geometry;
+  if (!Array.isArray(g) || g.length < 2) return null;
+  const halte = (leg.stops || []).filter((s) => s.lat != null && s.lon != null);
+  const a = halte[0] ?? leg.from;
+  const b = halte[halte.length - 1] ?? leg.to;
+  if (a?.lat == null || a?.lon == null || b?.lat == null || b?.lon == null) return null;
+
+  const kx = Math.cos((a.lat * Math.PI) / 180);
+  const naechster = (p, ab) => {
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = ab; i < g.length; i++) {
+      const d = (g[i][0] - p.lat) ** 2 + ((g[i][1] - p.lon) * kx) ** 2;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    // Rund drei Kilometer: weiter weg ist es nicht dieser Halt, sondern
+    // ein anderer Zuglauf.
+    return Math.sqrt(bestD) * 111 > 3 ? -1 : best;
+  };
+  const i = naechster(a, 0);
+  if (i < 0) return null;
+  const j = naechster(b, i + 1);
+  if (j < 0) return null;
+  return g.slice(i, j + 1);
+}
+
 export function geometryOf(journey) {
   const parts = [];
   for (const leg of journey.legs || []) {
@@ -649,6 +686,13 @@ export class RouteMap {
       // setPointerCapture den Pointer und der Klick erreicht den Knopf nie.
       if (e.target.closest?.('.map__controls, .map__attr')) return;
 
+      // Der erste Finger einer neuen Berührung (bzw. jede Maus) beginnt
+      // frisch. Ging vorher ein pointerup verloren - der angetippte Zug wurde
+      // beim Nachladen neu gezeichnet und aus dem DOM genommen, oder der
+      // Finger verließ die Karte -, bliebe sonst ein "Geisterfinger" in
+      // der Liste: jede neue Berührung zählte als zweiter Finger, und die
+      // Karte ließ sich nur noch zoomen, nicht mehr verschieben.
+      if (e.isPrimary) pointers.clear();
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 1) {
         dragging = true;
@@ -696,8 +740,16 @@ export class RouteMap {
     });
 
     const end = (e) => {
-      pointers.delete(e.pointerId);
+      if (!pointers.delete(e.pointerId)) return;
       if (pointers.size < 2) pinchDist = 0;
+      if (pointers.size === 1) {
+        // Ein Finger vom Zoomen gehoben: mit dem anderen weiter verschieben,
+        // statt bis zum Loslassen festzustecken.
+        const [rest] = pointers.values();
+        dragging = true;
+        last = { x: rest.x, y: rest.y };
+        moved = Math.max(moved, 7);
+      }
       if (pointers.size === 0) {
         dragging = false;
         last = null;
@@ -706,8 +758,11 @@ export class RouteMap {
         if (moved > 6) this.onViewChange && this.onViewChange();
       }
     };
-    vp.addEventListener('pointerup', end);
-    vp.addEventListener('pointercancel', end);
+    // Am Fenster statt am Viewport: endet die Berührung außerhalb der Karte
+    // oder auf einem inzwischen entfernten Element, erreicht das Ereignis den
+    // Viewport nie - das Fenster schon.
+    window.addEventListener('pointerup', end, true);
+    window.addEventListener('pointercancel', end, true);
 
     // Zoom auf den Mauszeiger — gedrosselt, damit Trackpads mit hoher
     // Event-Rate nicht durch die Zoomstufen rasen. Zwei Kniffe:
@@ -814,13 +869,26 @@ export class RouteMap {
     this.renderSoon();
   }
 
-  /** Höchstens ein render() je Animationsframe. */
+  /**
+   * Höchstens ein render() je Animationsframe.
+   *
+   * Mit Rückfallebene: geht der Frame verloren - Seite im Hintergrund, App
+   * pausiert, WebView zeichnet nach dem Zurückkehren nicht neu -, blieb
+   * `_renderRaf` für immer gesetzt. Jedes weitere Verschieben kehrte dann
+   * hier sofort um, nur das Zoomen (das direkt zeichnet) ging noch. Genau
+   * so sah der Fehler auf dem Telefon aus.
+   */
   renderSoon() {
     if (this._renderRaf) return;
-    this._renderRaf = requestAnimationFrame(() => {
+    const jetzt = () => {
+      cancelAnimationFrame(this._renderRaf);
+      clearTimeout(this._renderTimer);
       this._renderRaf = null;
+      this._renderTimer = null;
       this.render();
-    });
+    };
+    this._renderRaf = requestAnimationFrame(jetzt);
+    this._renderTimer = setTimeout(jetzt, 150);
   }
 
   zoomBy(delta, px, py) {

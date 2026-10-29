@@ -135,10 +135,29 @@ function write(list) {
   for (const fn of listeners) fn();
 }
 
-/** Ankunft einer gemerkten Reise als Zeitstempel. */
+/**
+ * Ankunft einer gemerkten Reise als Zeitstempel - die späteste, die bekannt
+ * ist. Die Ist-Zeit aus der Suche ist oft Stunden alt; eine Stunde
+ * Verspätung, die erst unterwegs dazukam, kennt nur die Echtzeit, die
+ * noteArrival() nachträgt.
+ */
 export function arrivalOf(trip) {
-  const t = Date.parse(trip.journey.arrivalReal || trip.journey.arrival || '');
-  return Number.isFinite(t) ? t : 0;
+  const plan = Date.parse(trip.journey.arrival || '');
+  const real = Date.parse(trip.journey.arrivalReal || '');
+  const t = Math.max(Number.isFinite(plan) ? plan : 0, Number.isFinite(real) ? real : 0);
+  return t;
+}
+
+/**
+ * So lange nach der (bekannten) Ankunft gilt eine Reise noch als laufend.
+ * Ohne Echtzeit weiß niemand, ob der Zug nicht doch später ist - und wer
+ * noch drinsitzt, soll seine Reise nicht unter "Vergangen" suchen müssen.
+ */
+export const PAST_GRACE_MS = 20 * 60_000;
+
+/** Ist die Reise vorbei? */
+export function isPast(trip, now = Date.now()) {
+  return arrivalOf(trip) + PAST_GRACE_MS < now;
 }
 
 export const trips = {
@@ -185,6 +204,21 @@ export const trips = {
     });
     write(list.slice(-MAX_TRIPS));
     return true;
+  },
+
+  /**
+   * Die Ist-Ankunft einer gemerkten Reise nachtragen - aus der
+   * Live-Verfolgung oder der Echtzeit in der Reisen-Ansicht. Ändert
+   * `savedAt` nicht: das ist der Zeitpunkt des Merkens, nach dem der
+   * Abgleich entscheidet.
+   */
+  noteArrival(key, iso) {
+    if (!key || !Number.isFinite(Date.parse(iso || ''))) return;
+    const list = read();
+    const t = list.find((x) => x.key === key);
+    if (!t || t.journey.arrivalReal === iso) return;
+    t.journey.arrivalReal = iso;
+    write(list);
   },
 
   remove(key) {

@@ -196,6 +196,10 @@ XML;
             'platform'        => $neu !== '' ? $neu : ($geplant !== '' ? $geplant : null),
             'platformPlanned' => $geplant !== '' ? $geplant : null,
             'cancelled'       => $txt($c, 'o:NotServicedStop') === 'true',
+            // Außerplanmäßiger Halt - etwa nach einem Personenunfall, wenn
+            // der Zug Fahrgäste eines ausgefallenen mitnimmt. HAFAS und die
+            // DB kennen ihn nicht, die SBB schon.
+            'extra'           => $txt($c, 'o:UnplannedStop') === 'true',
         ];
     }
 
@@ -265,6 +269,7 @@ XML;
                 'arrival' => $c['arrival']['planned'] ?? null, 'arrivalReal' => $c['arrival']['estimated'] ?? null,
                 'departure' => $c['departure']['planned'] ?? null, 'departureReal' => $c['departure']['estimated'] ?? null,
                 'platform' => $c['platform'], 'cancelled' => $c['cancelled'],
+                'extra' => $c['extra'],
             ];
             if ($c['uic'] === $leg['to']) {
                 $aus = $c;

@@ -424,6 +424,68 @@ console.log('\nFahrgastrechte — ab wann, wie viel');
   pruefe('OJP: Zwischenhalt mit eigener Ist-Zeit und Gleis',
     [ojp.stops[1].arrivalReal, ojp.stops[1].platform, ojp.realtimeSource],
     ['2026-09-24T09:14:30+02:00', '7', 'OJP (SBB)']);
+
+  // Hat HAFAS schon eine Ist-Zeit und die SBB nichts Genaueres, bleibt sie.
+  const mitHafas = { stops: lauf.stops.map((st, i) => (i === 1 ? { ...st, arrivalReal: '2026-09-24T09:20:00+02:00' } : st)) };
+  pruefe('Ist-Zeit von HAFAS wird nicht durch Verschieben überschrieben',
+    LiveTracker.withPrognosis(mitHafas, leg, { delay: 4 }).stops[1].arrivalReal, '2026-09-24T09:20:00+02:00');
+
+  // Der ECE 199 hielt nach einem Personenunfall in Wil SG - im Fahrplan
+  // steht der Halt nicht, nur die SBB kennt ihn.
+  const ece = { stops: [
+    { id: '8506302', name: 'St. Gallen', departure: '2026-09-24T09:00:00+02:00' },
+    { id: '8506000', name: 'Winterthur', arrival: '2026-09-24T09:40:00+02:00', departure: '2026-09-24T09:42:00+02:00' },
+    { id: '8503000', name: 'Zürich HB', arrival: '2026-09-24T10:00:00+02:00' },
+  ], messages: [{ text: 'Meldung ab Winterthur', from: 1, to: 2 }] };
+  const sg = zug({ from: { id: '8506302' }, to: { id: '8503000' } });
+  const mitWil = LiveTracker.withPrognosis(ece, sg, {
+    delay: 6, source: 'ojp',
+    stops: [{ id: '8506109', name: 'Wil SG', arrival: '2026-09-24T09:21:00+02:00',
+      arrivalReal: '2026-09-24T09:27:00+02:00', departureReal: '2026-09-24T09:29:00+02:00', extra: true }],
+  });
+  pruefe('Zusatzhalt der SBB erscheint an seiner Stelle',
+    mitWil.stops.map((st) => `${st.name}${st.extra ? '*' : ''}`), ['St. Gallen', 'Wil SG*', 'Winterthur', 'Zürich HB']);
+  pruefe('Meldungen rücken mit dem eingefügten Halt weiter', [mitWil.messages[0].from, mitWil.messages[0].to], [2, 3]);
+
+  // ECE München-Zürich: Einstieg in Deutschland, der Schweizer Teil
+  // beginnt erst in St. Margrethen.
+  const muenchen = { stops: [
+    { id: '8000261', name: 'München Hbf', departure: 'x' },
+    { id: '8000230', name: 'Lindau-Reutin', arrival: 'x', departure: 'x' },
+    { id: '8506121', name: 'St. Margrethen', arrival: 'x', departure: 'x' },
+    { id: '8506302', name: 'St. Gallen', arrival: 'x', departure: 'x' },
+    { id: '8503000', name: 'Zürich HB', arrival: 'x' },
+  ] };
+  const teil = LiveTracker.swissSection(zug({ from: { id: '8000261' }, to: { id: '8503000' } }), muenchen);
+  pruefe('Schweizer Teil eines ECE ab München', [teil?.from.name, teil?.to.name], ['St. Margrethen', 'Zürich HB']);
+  pruefe('rein deutscher Abschnitt: kein Schweizer Teil',
+    LiveTracker.swissSection(zug({ from: { id: '8000261' }, to: { id: '8000230' } }), muenchen), null);
+}
+
+// ---------------------------------------------------------------------
+console.log('\nStreckenverlauf aus dem Zuglauf');
+{
+  const { legGeometryFromRun } = await import('../public/assets/js/map.js');
+  const run = { geometry: [[48.0, 11.6], [48.1, 11.5], [48.14, 11.56], [48.2, 11.3], [48.3, 11.0], [48.365, 10.886], [48.5, 10.5]] };
+  const leg = zug({ stops: [{ lat: 48.14, lon: 11.558 }, { lat: 48.365, lon: 10.885 }] });
+  pruefe('Teilstück München-Augsburg aus dem ganzen Lauf', legGeometryFromRun(leg, run),
+    [[48.14, 11.56], [48.2, 11.3], [48.3, 11.0], [48.365, 10.886]]);
+  pruefe('Halt weit neben der Linie: kein Schnitt',
+    legGeometryFromRun(zug({ stops: [{ lat: 47.0, lon: 8.5 }, { lat: 48.365, lon: 10.885 }] }), run), null);
+}
+
+// ---------------------------------------------------------------------
+console.log('\nGemerkte Reisen - wann ist eine vorbei?');
+{
+  const { isPast, arrivalOf } = await import('../public/assets/js/trips.js');
+  const jetzt = Date.parse('2026-09-24T12:00:00+02:00');
+  const reise = (arrival, arrivalReal) => ({ journey: { arrival, arrivalReal } });
+  pruefe('vor einer Minute angekommen: noch nicht vorbei', isPast(reise('2026-09-24T11:59:00+02:00'), jetzt), false);
+  pruefe('vor einer Stunde angekommen: vorbei', isPast(reise('2026-09-24T11:00:00+02:00'), jetzt), true);
+  pruefe('nach Plan vorbei, mit einer Stunde Verspätung unterwegs: nicht vorbei',
+    isPast(reise('2026-09-24T11:00:00+02:00', '2026-09-24T12:00:00+02:00'), jetzt), false);
+  pruefe('früher angekommen zählt nicht als später',
+    arrivalOf(reise('2026-09-24T11:00:00+02:00', '2026-09-24T10:55:00+02:00')), Date.parse('2026-09-24T11:00:00+02:00'));
 }
 
 // ---------------------------------------------------------------------

@@ -6,7 +6,7 @@
  * ersten Zuges - dieselbe Abfrage wie die Live-Verfolgung (fetchRun) -, damit
  * "fährt mein Zug pünktlich?" ohne weiteren Tipp beantwortet ist.
  */
-import { trips, arrivalOf } from './trips.js';
+import { trips, arrivalOf, isPast } from './trips.js';
 import { LiveTracker } from './live.js';
 import { trainLabel } from './map.js';
 import { formatPrice } from './scoring.js';
@@ -18,6 +18,47 @@ import { createSyncPanel } from './syncView.js';
 const LIVE_WINDOW_MS = 12 * 3600_000;
 /** Echtzeit gilt so lange, dann wird beim nächsten Öffnen neu gefragt. */
 const LIVE_TTL_MS = 60_000;
+/**
+ * So lange nach der geplanten Ankunft wird noch nachgefragt, ob die Reise
+ * wirklich vorbei ist. Eine Stunde Verspätung stand sonst schon als
+ * "Vergangen" da, während man noch im Zug saß.
+ */
+const RECHECK_AFTER_MS = 6 * 3600_000;
+
+/**
+ * Die Ist-Zeiten der nachgeladenen Zugläufe in die gemerkte Verbindung
+ * einsetzen - eine Kopie, die gespeicherte bleibt, wie sie war. Danach zeigt
+ * der Streckenverlauf an jedem Halt Plan- und Ist-Zeit.
+ */
+function withRuns(journey, runs) {
+  if (!runs?.size) return journey;
+  const legs = journey.legs.map((leg) => {
+    const run = runs.get(leg);
+    if (!run?.stops?.length) return leg;
+    const byId = new Map(run.stops.filter((s) => s.id).map((s) => [String(s.id), s]));
+    const live = (s) => byId.get(String(s?.id || '')) || run.stops.find((x) => x.name === s?.name);
+    const stops = (leg.stops || []).map((s) => {
+      const r = live(s);
+      return r ? {
+        ...s,
+        arrivalReal: r.arrivalReal ?? s.arrivalReal,
+        departureReal: r.departureReal ?? s.departureReal,
+        platform: r.platform ?? s.platform,
+        cancelled: r.cancelled || s.cancelled,
+      } : s;
+    });
+    const ein = live(leg.from);
+    const aus = live(leg.to);
+    return {
+      ...leg,
+      stops,
+      departureReal: ein?.departureReal ?? leg.departureReal,
+      arrivalReal: aus?.arrivalReal ?? leg.arrivalReal,
+      cancelled: leg.cancelled || Boolean(run.cancelled),
+    };
+  });
+  return { ...journey, legs };
+}
 
 const el = (tag, className, text) => {
   const n = document.createElement(tag);
@@ -65,13 +106,29 @@ export function initTrips(root, actions) {
   async function ladeEchtzeit(t) {
     const alt = live.get(t.key);
     if (alt && Date.now() - alt.at < LIVE_TTL_MS) return;
-    const leg = LiveTracker.trackableLegs(t.journey)[0];
+    const legs = LiveTracker.trackableLegs(t.journey);
+    const leg = legs[0];
     const src = leg ? LiveTracker.sourceOf(leg) : null;
     if (!src) return;
-    live.set(t.key, { at: Date.now(), loading: true });
+    live.set(t.key, { ...alt, at: Date.now(), loading: true });
     try {
       const res = await LiveTracker.fetchRun({ leg, jid: leg.jid, src });
       const entry = { leg, data: res.train };
+      // Je Zug der Zuglauf, in der Reihenfolge von trackableLegs().
+      const runs = legs.map((l, i) => (i === 0 ? res.train : null));
+      // Unterwegs: auch die übrigen Züge, damit jeder Halt seine Ist-Zeit
+      // hat und die Ankunft am Ziel stimmt.
+      if (Date.parse(t.journey.departure) < Date.now() + 3600_000) {
+        await Promise.all(legs.map(async (l, i) => {
+          const s = LiveTracker.sourceOf(l);
+          if (i === 0 || !s) return;
+          try { runs[i] = (await LiveTracker.fetchRun({ leg: l, jid: l.jid, src: s })).train; } catch { /* dann ohne */ }
+        }));
+      }
+      // Die echte Ankunft festhalten: an ihr hängt, ob die Reise schon
+      // unter "Vergangen" gehört.
+      const an = LiveTracker.stopTime(runs[runs.length - 1], legs[legs.length - 1].to, 'arrival');
+      if (an?.live) trips.noteArrival(t.key, new Date(an.at).toISOString());
       // Beginnt der Zug am Einstieg und hat dort keine Ist-Zeit, sagt nur
       // der einfahrende Zug etwas - siehe inbound.js.
       const zubringer = wantsInbound(leg, res.train) ? await inboundFor(leg) : null;
@@ -81,6 +138,7 @@ export function initTrips(root, actions) {
         delay: res.train?.hasRealtime ? LiveTracker.liveDelay(entry) : null,
         cancelled: LiveTracker.isCancelled(entry),
         label: trainLabel(leg),
+        runs,
       });
     } catch {
       live.set(t.key, { at: Date.now(), error: true });
@@ -89,13 +147,25 @@ export function initTrips(root, actions) {
   }
 
   function renderTrip(t) {
-    const j = t.journey;
+    const s = live.get(t.key);
+    // trips.all() liest bei jedem Zeichnen neu - die Zugläufe hängen
+    // deshalb am Index, nicht am Objekt.
+    const runs = new Map(LiveTracker.trackableLegs(t.journey).map((l, i) => [l, s?.runs?.[i]]));
+    const j = withRuns(t.journey, runs);
     const li = el('li', 'trip');
-    const vorbei = arrivalOf(t) < Date.now();
+    const vorbei = isPast(t);
     if (vorbei) li.classList.add('is-past');
 
     const kopf = el('div', 'trip__head');
-    kopf.append(el('span', 'trip__time', `${hhmm(j.departure)} → ${hhmm(j.arrival)}`));
+    const zeit = el('span', 'trip__time', `${hhmm(j.departure)} → ${hhmm(j.arrival)}`);
+    // Kommt sie später an als geplant, steht die erwartete Ankunft daneben.
+    const spaet = Math.round((arrivalOf(t) - Date.parse(j.arrival)) / 60000);
+    if (spaet > 0) {
+      const z = el('span', 'trip__late' + (spaet >= 5 ? ' is-bad' : ''), ` ${hhmm(new Date(arrivalOf(t)).toISOString())}`);
+      z.title = `Ankunft voraussichtlich ${spaet} min später`;
+      zeit.append(z);
+    }
+    kopf.append(zeit);
     const von = t.from?.name || j.legs[0]?.from?.name || '?';
     const nach = t.to?.name || j.legs[j.legs.length - 1]?.to?.name || '?';
     kopf.append(el('span', 'trip__route', `${von} → ${nach}`));
@@ -109,11 +179,12 @@ export function initTrips(root, actions) {
     ].filter(Boolean);
     li.append(el('p', 'trip__info', info.join(' · ')));
 
-    // Echtzeit des ersten Zuges, wenn die Reise bald losgeht.
+    // Echtzeit des ersten Zuges, wenn die Reise bald losgeht - und solange
+    // sie noch laufen könnte, auch wenn sie nach Fahrplan schon vorbei ist.
     const ab = Date.parse(j.departure);
+    const laufend = ab - Date.now() < LIVE_WINDOW_MS && arrivalOf(t) + RECHECK_AFTER_MS > Date.now();
+    if (laufend && (!s || Date.now() - s.at > LIVE_TTL_MS)) ladeEchtzeit(t);
     if (!vorbei && ab - Date.now() < LIVE_WINDOW_MS) {
-      const s = live.get(t.key);
-      if (!s) ladeEchtzeit(t);
       let text = 'Echtzeit wird geladen …';
       let cls = 'is-unknown';
       if (s?.cancelled) { text = `${s.label} fällt aus`; cls = 'is-bad'; }
@@ -172,8 +243,8 @@ export function initTrips(root, actions) {
   function render() {
     const alle = trips.all();
     const jetzt = Date.now();
-    const kommend = alle.filter((t) => arrivalOf(t) >= jetzt);
-    const vorbei = alle.filter((t) => arrivalOf(t) < jetzt).reverse();
+    const kommend = alle.filter((t) => !isPast(t, jetzt));
+    const vorbei = alle.filter((t) => isPast(t, jetzt)).reverse();
 
     const out = [];
     if (alle.length === 0) {

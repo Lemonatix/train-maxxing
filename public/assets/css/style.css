@@ -2336,12 +2336,35 @@ details.live__msg .live__msg-text {
 }
 
 .live__stop.is-past { opacity: 0.45; }
-.live__stop.is-cancelled { text-decoration: line-through; color: var(--rose); }
+.live__stop.is-cancelled .live__stop-name,
+.live__stop.is-cancelled .live__stop-time { text-decoration: line-through; color: var(--rose); }
 
+/* Ankunft und Abfahrt untereinander, je mit Plan und Erwartung. Feste
+   Breite, damit die Namen eine Flucht bilden. */
+.live__stop-times {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 8.6em;
+}
+.live__stop-tline { display: flex; gap: 0.35rem; align-items: baseline; }
+.live__stop-kind { color: var(--text-muted); font-size: 0.66rem; width: 1.3em; }
 .live__stop-time { font-variant-numeric: tabular-nums; color: var(--text-dim); }
 .live__stop-time.is-shifted { text-decoration: line-through; opacity: 0.6; }
+.live__stop-time.is-live { color: var(--green); }
 .live__stop-real { font-variant-numeric: tabular-nums; color: var(--rose); }
-.live__stop-name { color: var(--text); }
+.live__stop-real.is-minor { color: var(--amber); }
+.live__stop-name { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.live__stop-badge {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.64rem;
+  white-space: nowrap;
+}
+.live__stop-badge.is-bad { background: transparent; color: var(--rose); }
 .live__stop-platform { margin-left: auto; color: var(--text-muted); font-size: 0.7rem; }
 
 /* Verfolgte Verbindung, die nicht in der Trefferliste steht. */
@@ -3053,6 +3076,41 @@ details.live__msg .live__msg-text {
   .xfer__map .map__viewport { height: 230px; }
 }
 
+/* --- Route der gewählten Verbindung ---------------------------------
+   Klappt beim Antippen einer Verbindung in ihr auf (showRoutePreview() in
+   app.js). Dieselbe Karte wie im Tab, nur flacher und nur mit dieser Route.
+   ------------------------------------------------------------------- */
+.journey__route { margin-top: 0.6rem; }
+
+.journey__map {
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.3rem;
+  box-shadow: none;
+  cursor: auto;
+}
+
+.journey__map .map__viewport { height: 260px; }
+.journey__map .map__hint { display: none; }
+
+@media (max-width: 640px) {
+  .journey__map .map__viewport { height: 220px; }
+}
+
+.journey__map-open {
+  display: block;
+  margin: 0 0 0.4rem auto;
+  padding: 0.35rem 0.2rem;
+  min-height: 44px;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.journey__map-open:hover { text-decoration: underline; }
+
 /* --- Gleise auf der Karte -------------------------------------------
    Nur Punkte. Umrisse standen hier einmal als Linien; sie sagten, wo der
    Bahnsteig liegt, nicht wo der Zug hält, und gingen mit den Gleisflächen
@@ -3523,9 +3581,13 @@ details.live__msg .live__msg-text {
   white-space: nowrap;
 }
 
-.stop__delay { margin-left: 0.2rem; font-size: 0.68rem; color: var(--green, var(--accent)); }
-.stop__delay.is-warn { color: var(--amber, var(--accent)); }
-.stop__delay.is-bad { color: var(--rose); }
+/* Weicht die Echtzeit ab, steht der Plan durchgestrichen und die
+   erwartete Zeit darunter. */
+.stop__time.is-shifted .stop__plan { text-decoration: line-through; opacity: 0.7; }
+.stop__time.is-live .stop__plan { color: var(--green); }
+.stop__real { display: block; color: var(--green); }
+.stop__real.is-warn { color: var(--amber, var(--accent)); }
+.stop__real.is-bad { color: var(--rose); }
 
 .stop__name { min-width: 0; overflow-wrap: anywhere; }
 
@@ -4796,6 +4858,8 @@ details.live__msg .live__msg-text {
 .trip.is-past { opacity: 0.7; }
 .trip__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.7rem; }
 .trip__time { font-family: var(--font-mono); font-size: 0.95rem; font-weight: 500; }
+.trip__late { color: var(--amber); }
+.trip__late.is-bad { color: var(--rose); }
 .trip__route { color: var(--text-dim); font-size: 0.85rem; }
 .trip__info { margin: 0.2rem 0 0; font-size: 0.78rem; color: var(--text-muted); }
 .trip__live { margin: 0.3rem 0 0; font-family: var(--font-mono); font-size: 0.76rem; }

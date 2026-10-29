@@ -1421,7 +1421,11 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
   // Bahnhof voraus — den gibt es fast nirgends, und die Meter- und
   // Minutenangaben waren dadurch genauer, als sie sein konnten. Wie weit die
   // beiden Bahnsteige auseinanderliegen, zeigt die Karte darunter.
-  if (res?.samePlatform) {
+  if (a && fromTrack && String(fromTrack) === String(toTrack)) {
+    // Derselbe Bahnsteig im Sinne des Servers ist auch dasselbe Gleis -
+    // "die Seite wechseln" schickte einen dann vom richtigen Gleis weg.
+    line.textContent = 'Abfahrt am selben Gleis, an dem der Zug ankommt — am Bahnsteig bleiben.';
+  } else if (res?.samePlatform) {
     // Auch hier die Karte: „gegenüber" ist eine gute Nachricht, aber man
     // will trotzdem sehen, wo im Bahnhof man steht — und an einem
     // Bahnsteig mit vier Abschnitten ist „gegenüber" auch nicht überall
@@ -1619,11 +1623,18 @@ function stopRow(s, nerd, land) {
   // gibt es nur die Abfahrt.
   const plan = s.arrival || s.departure;
   const real = s.arrival ? s.arrivalReal : s.departureReal;
-  const zeit = el('span', 'stop__time', formatTime(plan));
+  const zeit = el('span', 'stop__time');
+  zeit.append(el('span', 'stop__plan', formatTime(plan)));
   const spaet = lateBy(plan, real);
   if (spaet != null && spaet !== 0) {
-    zeit.append(el('span', 'stop__delay' + (spaet >= 5 ? ' is-bad' : spaet > 0 ? ' is-warn' : ''),
-      spaet > 0 ? `+${spaet}` : `${spaet}`));
+    // Plan UND erwartete Zeit: "+7" allein hieß Kopfrechnen am Bahnsteig.
+    zeit.classList.add('is-shifted');
+    const ist = el('span', 'stop__real' + (spaet >= 5 ? ' is-bad' : spaet > 0 ? ' is-warn' : ''), formatTime(real));
+    ist.title = spaet > 0 ? `${spaet} min später als geplant` : `${-spaet} min früher als geplant`;
+    zeit.append(ist);
+  } else if (spaet === 0) {
+    zeit.classList.add('is-live');
+    zeit.title = 'pünktlich laut Echtzeit';
   }
   li.append(zeit);
   const name = el('span', 'stop__name', s.name || '?');

@@ -22,6 +22,9 @@ final class OebbHafas
     /** Stützpunkte je Abschnitt für die Karte - hält die Antwort klein. */
     private const MAX_GEOMETRY_POINTS = 60;
 
+    /** Dasselbe für einen ganzen Zuglauf - er ist oft fünfmal so lang. */
+    private const MAX_RUN_GEOMETRY_POINTS = 400;
+
     /** Länder, deren Baustellen hier interessieren. */
     private const DACH = ['de', 'at', 'ch'];
 
@@ -765,7 +768,11 @@ final class OebbHafas
     {
         $res = $this->call('JourneyDetails', [
             'jid'         => $jid,
-            'getPolyline' => false,
+            // Mit Streckenverlauf: gemerkte und geteilte Reisen tragen keinen
+            // (er machte sie zehnmal größer), und Treffer der DB hatten nie
+            // einen. Ohne ihn zog die Karte Geraden zwischen den Halten -
+            // München-Augsburg im ICE, ohne Halt dazwischen, als ein Strich.
+            'getPolyline' => true,
             'getPasslist' => true,
         ]);
         if (!$res['ok']) {
@@ -914,6 +921,9 @@ final class OebbHafas
                 'hasRealtime' => $hasRealtime,
                 'cancelled'   => (bool) ($jny['isCncl'] ?? false),
                 'stops'       => $stops,
+                // Der ganze Zuglauf; das eigene Teilstück schneidet die App
+                // heraus (legGeometryFromRun() in map.js).
+                'geometry'    => $this->geometryOf($jny, $common, self::MAX_RUN_GEOMETRY_POINTS),
                 // Grosszügiger als das, was am Ende dasteht: gefiltert wird
                 // erst in der Anzeige, und zwar auf das eigene Teilstück.
                 // Würden wir hier schon deckeln, fiele womöglich die
@@ -1140,7 +1150,7 @@ final class OebbHafas
      *
      * @return array<int,array{0:float,1:float}>
      */
-    private function geometryOf(array $jny, array $common): array
+    private function geometryOf(array $jny, array $common, int $max = self::MAX_GEOMETRY_POINTS): array
     {
         $polyL = $common['polyL'] ?? [];
         $idx   = $jny['polyG']['polyXL'] ?? [];
@@ -1176,7 +1186,7 @@ final class OebbHafas
             }
         }
 
-        return $this->thin($points, self::MAX_GEOMETRY_POINTS, $anker);
+        return $this->thin($points, $max, $anker);
     }
 
     /**

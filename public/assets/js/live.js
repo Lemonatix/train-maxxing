@@ -29,7 +29,7 @@ import { api } from './api.js';
 import { siteUrl } from './site.js';
 import { wantsInbound, inboundFor, inboundText } from './inbound.js';
 // sameTrain war benutzt, aber nie importiert — siehe trainPosition().
-import { geometryOf, trainLabel, sameTrain, snapToLine, geoErrorText, nextOnLine, lineKey } from './map.js';
+import { geometryOf, legGeometryFromRun, trainLabel, sameTrain, snapToLine, geoErrorText, nextOnLine, lineKey } from './map.js';
 import { spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
 import { typeOf } from './data/trains.js';
 import { affectsWindow } from './mvgTicker.js';
@@ -413,22 +413,27 @@ ${url.href}`);
           if (db.train?.hasRealtime) return db;
         } catch { /* dann eben der Fahrplan von HAFAS */ }
       }
-      // Schweizer Abschnitt ohne Ist-Zeit: die Prognose der SBB - über OJP,
-      // wenn der Server einen Schlüssel hat, sonst über opendata.ch -,
-      // eingesetzt in den Zuglauf von HAFAS. Die Zugnummer findet den Zug
-      // auf der Tafel sicherer als Gattung und Minute.
-      const ch = (id) => /^85\d{5}$/.test(String(id || ''));
-      if (!res.train?.hasRealtime && ch(leg.from?.id) && ch(leg.to?.id)) {
+      // DER SCHWEIZER TEIL: die Prognose der SBB - über OJP, wenn der Server
+      // einen Schlüssel hat, sonst über opendata.ch -, eingesetzt in den
+      // Zuglauf von HAFAS. Die Zugnummer findet den Zug auf der Tafel
+      // sicherer als Gattung und Minute.
+      //
+      // Vorher nur, wenn HAFAS gar keine Echtzeit hatte UND Ein- wie
+      // Ausstieg in der Schweiz lagen. Ein ECE München-Zürich fiel damit
+      // durch - und mit ihm der Zusatzhalt in Wil SG, den er nach einem
+      // Personenunfall einlegte: die SBB kannte ihn, HAFAS und die DB nicht.
+      const teil = LiveTracker.swissSection(leg, res.train);
+      if (teil) {
         try {
           const sbb = await api.trainRun({
-            chFrom: leg.from.id, chTo: leg.to.id, cat: leg.category || '',
+            chFrom: teil.from.id, chTo: teil.to.id, cat: leg.category || '',
             num: /^\d{1,6}$/.test(String(leg.trainNumber || '')) ? leg.trainNumber : '',
-            dir: leg.direction || '', dep: leg.departure, arr: leg.arrival,
+            dir: leg.direction || '', dep: teil.from.departure, arr: teil.to.arrival,
           });
           if (sbb.train?.hasRealtime) {
-            res.train = LiveTracker.withPrognosis(res.train, leg, sbb.train);
+            res.train = LiveTracker.withPrognosis(res.train, teil, sbb.train);
           }
-        } catch { /* dann eben der Fahrplan */ }
+        } catch { /* dann eben der Stand von HAFAS */ }
       }
       return res;
     }
@@ -447,6 +452,28 @@ ${url.href}`);
   }
 
   /**
+   * Der Teil des eigenen Abschnitts, der in der Schweiz liegt: vom ersten
+   * Schweizer Halt mit Abfahrt bis zum letzten mit Ankunft. null, wenn der
+   * Zug dort nicht mindestens zweimal hält.
+   *
+   * @returns {?{from: object, to: object}} Halte aus `run.stops`
+   */
+  static swissSection(leg, run) {
+    const stops = run?.stops || [];
+    const ch = (s) => /^85\d{5}$/.test(String(s?.id || ''));
+    let [von, bis] = LiveTracker.ownSection(leg, stops);
+    if (von < 0) [von, bis] = [0, stops.length - 1];
+    let a = -1;
+    let b = -1;
+    for (let i = von; i <= bis; i++) {
+      if (!ch(stops[i]) || stops[i].cancelled) continue;
+      if (a < 0 && stops[i].departure && i < bis) a = i;
+      if (stops[i].arrival && i > von) b = i;
+    }
+    return a >= 0 && b > a ? { from: stops[a], to: stops[b] } : null;
+  }
+
+  /**
    * Einen Zuglauf von HAFAS um die Schweizer Prognose ergänzen.
    *
    * Die Prognose gilt für Ein- und Ausstieg; die Halte dazwischen werden
@@ -462,20 +489,60 @@ ${url.href}`);
     const delay = Number.isFinite(sbb.delay) ? sbb.delay : null;
     const shift = (iso) => (iso && delay !== null ? new Date(Date.parse(iso) + delay * 60000).toISOString() : null);
     const genau = new Map((sbb.stops || []).filter((s) => s.id).map((s) => [String(s.id), s]));
+    // Was HAFAS schon an Ist-Zeit hat, bleibt, wo die SBB nichts Genaueres
+    // weiß - verschoben wird nur, was sonst leer bliebe.
     const neu = stops.map((s, i) => {
       const g = genau.get(String(s.id));
-      if (i === a) return { ...s, departureReal: sbb.departureReal ?? shift(s.departure), platform: sbb.platformFrom ?? s.platform };
-      if (i === b) return { ...s, arrivalReal: sbb.arrivalReal ?? shift(s.arrival), platform: sbb.platformTo ?? s.platform };
+      if (i === a) {
+        return { ...s, departureReal: sbb.departureReal ?? s.departureReal ?? shift(s.departure),
+          platform: sbb.platformFrom ?? s.platform };
+      }
+      if (i === b) {
+        return { ...s, arrivalReal: sbb.arrivalReal ?? g?.arrivalReal ?? s.arrivalReal ?? shift(s.arrival),
+          platform: sbb.platformTo ?? s.platform };
+      }
       if (a >= 0 && b > a && i > a && i < b) {
         return g
-          ? { ...s, departureReal: g.departureReal ?? shift(s.departure), arrivalReal: g.arrivalReal ?? shift(s.arrival),
+          ? { ...s, departureReal: g.departureReal ?? s.departureReal ?? shift(s.departure),
+            arrivalReal: g.arrivalReal ?? s.arrivalReal ?? shift(s.arrival),
             platform: g.platform ?? s.platform, cancelled: g.cancelled || s.cancelled }
-          : { ...s, departureReal: shift(s.departure), arrivalReal: shift(s.arrival) };
+          : { ...s, departureReal: s.departureReal ?? shift(s.departure), arrivalReal: s.arrivalReal ?? shift(s.arrival) };
       }
       return s;
     });
+    // HALTE, DIE NUR DIE SBB KENNT: außerplanmäßige Halte stehen in keinem
+    // Fahrplan, also auch nicht im Zuglauf von HAFAS. Sie kommen nach der
+    // Zeit an ihre Stelle zwischen Ein- und Ausstieg des Schweizer Teils.
+    let messages = run?.messages;
+    if (a >= 0 && b > a) {
+      const bekannt = new Set(stops.map((s) => String(s.id || '')));
+      const zeitVon = (s) => Date.parse(s.arrival || s.departure || s.arrivalReal || s.departureReal || '');
+      for (const g of sbb.stops || []) {
+        if (!g.id || bekannt.has(String(g.id))) continue;
+        const t = zeitVon(g);
+        if (!Number.isFinite(t)) continue;
+        const ende = neu.findIndex((s) => String(s.id) === String(leg.to?.id));
+        let pos = neu.findIndex((s, i) => i > a && i <= ende && zeitVon(s) > t);
+        if (pos < 0) pos = ende;
+        if (pos <= a) continue;
+        neu.splice(pos, 0, {
+          id: String(g.id), name: g.name, country: 'ch', lat: null, lon: null,
+          arrival: g.arrival ?? null, arrivalReal: g.arrivalReal ?? null,
+          departure: g.departure ?? null, departureReal: g.departureReal ?? null,
+          platform: g.platform ?? null, cancelled: Boolean(g.cancelled), extra: true,
+        });
+        bekannt.add(String(g.id));
+        // Meldungen tragen Haltindizes - die dahinter rücken eins weiter.
+        messages = (messages || []).map((m) => (typeof m === 'object' && m ? {
+          ...m,
+          from: Number.isInteger(m.from) && m.from >= pos ? m.from + 1 : m.from,
+          to: Number.isInteger(m.to) && m.to >= pos ? m.to + 1 : m.to,
+        } : m));
+      }
+    }
+
     return {
-      ...run, stops: neu, hasRealtime: true, delay: delay ?? run?.delay,
+      ...run, stops: neu, messages, hasRealtime: true, delay: delay ?? run?.delay,
       cancelled: Boolean(run?.cancelled || sbb.cancelled),
       realtimeSource: sbb.source === 'ojp' ? 'OJP (SBB)' : 'opendata.ch',
     };
@@ -577,8 +644,13 @@ ${url.href}`);
 
   /** Ist die Verbindung längst angekommen, hört das Auffrischen auf. */
   isOver() {
-    const arr = Date.parse(this.journey?.arrival || '');
-    return Number.isFinite(arr) && Date.now() > arr + STALE_AFTER_ARRIVAL_MS;
+    // Die späteste bekannte Ankunft - refresh() schreibt die erwartete ans
+    // Ziel nach. Nach Fahrplan allein endete die Verfolgung bei einer Stunde
+    // Verspätung mitten in der Fahrt.
+    const plan = Date.parse(this.journey?.arrival || '');
+    const real = Date.parse(this.journey?.arrivalReal || '');
+    const arr = Math.max(Number.isFinite(plan) ? plan : 0, Number.isFinite(real) ? real : 0);
+    return arr > 0 && Date.now() > arr + STALE_AFTER_ARRIVAL_MS;
   }
 
   async refresh() {
@@ -608,6 +680,13 @@ ${url.href}`);
       (res) => {
         if (res.fromCache) ausCache = true;
         entry.data = res.train;
+        // Gemerkte und geteilte Reisen kommen ohne Streckenverlauf - der
+        // Zuglauf bringt ihn mit. Sonst zeigte die Karte Geraden zwischen
+        // den Halten.
+        if (!(entry.leg.geometry?.length > 1)) {
+          const linie = legGeometryFromRun(entry.leg, res.train);
+          if (linie) entry.leg.geometry = linie;
+        }
         if (!this.journey) return;
         this.risk = this.assessRisk();
         this.pushToMap();
@@ -628,6 +707,18 @@ ${url.href}`);
       : null;
 
     this.risk = this.assessRisk();
+    // Die erwartete Ankunft am Ziel an der Verbindung festhalten: daran
+    // hängen isOver(), das Wiederherstellen nach einem Neuladen und ob eine
+    // gemerkte Reise schon unter "Vergangen" steht.
+    const ziel = this.legs[this.legs.length - 1];
+    const an = ziel ? LiveTracker.legTime(ziel, 'arrival') : null;
+    if (an?.live) {
+      const iso = new Date(an.at).toISOString();
+      if (Date.parse(this.journey.arrivalReal || '') !== an.at) {
+        this.journey.arrivalReal = iso;
+        this.onJourneyChange?.(this.journey);
+      }
+    }
     // OFFLINE: Der Service Worker hat den letzten Stand geliefert, oder es
     // ging gar nichts. Dann bleibt die Uhrzeit des letzten echten Standes
     // stehen - "Stand 14:32" soll nicht behaupten, es sei 14:32 frisch.
@@ -2045,28 +2136,57 @@ ${url.href}`);
     const list = el('ol', 'live__stops');
     const now = Date.now();
 
-    for (const s of slice) {
+    slice.forEach((s, i) => {
       const li = el('li', 'live__stop');
       if (s.cancelled) li.classList.add('is-cancelled');
-
-      const plan = fmtTime(s.departure || s.arrival);
-      const real = fmtTime(s.departureReal || s.arrivalReal);
+      if (s.extra) li.classList.add('is-extra');
 
       // Bereits passierte Halte treten zurück - der Blick soll nach vorn gehen.
-      const t = Date.parse(s.departureReal || s.departure || s.arrival || '');
+      const t = Date.parse(s.departureReal || s.departure || s.arrivalReal || s.arrival || '');
       if (Number.isFinite(t) && t < now) li.classList.add('is-past');
 
-      const time = el('span', 'live__stop-time', plan || '--:--');
-      li.append(time);
-      if (real && real !== plan) {
-        time.classList.add('is-shifted');
-        li.append(el('span', 'live__stop-real', real));
-      }
+      // JE HALT ANKUNFT UND ABFAHRT, jeweils Plan und Erwartung. Vorher
+      // stand nur eine Zeit da, an Zwischenhalten die Abfahrt - wann man
+      // ankommt, musste man sich denken. Am Einstieg zählt nur die Abfahrt,
+      // am Ausstieg nur die Ankunft.
+      const zeiten = el('span', 'live__stop-times');
+      const zeile = (art, plan, real) => {
+        const p = fmtTime(plan);
+        if (!p) return;
+        const z = el('span', 'live__stop-tline');
+        z.append(el('span', 'live__stop-kind', art));
+        const time = el('span', 'live__stop-time', p);
+        z.append(time);
+        const r = fmtTime(real);
+        if (r && r !== p) {
+          time.classList.add('is-shifted');
+          const spaet = Math.round((Date.parse(real) - Date.parse(plan)) / 60000);
+          const ist = el('span', 'live__stop-real' + (spaet < 5 ? ' is-minor' : ''), r);
+          ist.title = spaet > 0 ? `${spaet} min später als geplant` : `${-spaet} min früher als geplant`;
+          z.append(ist);
+        } else if (r) {
+          // Echtzeit da und pünktlich: das ist eine Auskunft, kein Fahrplan.
+          time.classList.add('is-live');
+          time.title = 'pünktlich laut Echtzeit';
+        }
+        zeiten.append(z);
+      };
+      if (i > 0) zeile('an', s.arrival, s.arrivalReal);
+      if (i < slice.length - 1 || slice.length === 1) zeile('ab', s.departure, s.departureReal);
+      if (!zeiten.childElementCount) zeiten.append(el('span', 'live__stop-time', '--:--'));
+      li.append(zeiten);
 
-      li.append(el('span', 'live__stop-name', s.name));
+      const name = el('span', 'live__stop-name', s.name);
+      if (s.extra) {
+        const b = el('span', 'live__stop-badge', 'Zusatzhalt');
+        b.title = 'Außerplanmäßiger Halt - steht nicht im Fahrplan.';
+        name.append(b);
+      }
+      if (s.cancelled) name.append(el('span', 'live__stop-badge is-bad', 'entfällt'));
+      li.append(name);
       if (s.platform) li.append(el('span', 'live__stop-platform', `Gl. ${s.platform}`));
       list.append(li);
-    }
+    });
     return list;
   }
 }

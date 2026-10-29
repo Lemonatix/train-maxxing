@@ -9,7 +9,7 @@
 import { api } from './api.js';
 import { rank, highlights, setFxRates, spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
 import { renderResults, renderNotices, renderTripPair } from './render.js';
-import { RouteMap, setMapTheme, trainLabel, lineKey, nextOnLine, geoErrorText } from './map.js';
+import { RouteMap, setMapTheme, trainLabel, lineKey, nextOnLine, geoErrorText, legGeometryFromRun } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
 import { pendingLoads } from './prefetch.js';
 import { ROUTES, ratingsBySpeed } from './data/routes.js';
@@ -19,7 +19,7 @@ import { LiveTracker } from './live.js';
 import { setupAutocomplete, renderFavoriteChips, isStation } from './autocomplete.js';
 import { places } from './favorites.js';
 import { initBoard } from './board.js';
-import { trips, arrivalOf, tripKey } from './trips.js';
+import { trips, isPast, tripKey } from './trips.js';
 import { initTrips } from './tripsView.js';
 import { sync } from './sync.js';
 import { IN_APP, siteUrl } from './site.js';
@@ -116,6 +116,10 @@ const $ = (sel) => document.querySelector(sel);
 let searchAbort = null;
 let map = null;
 let live = null;
+/** Die kleine Karte in der gewählten Verbindung, siehe showRoutePreview(). */
+let routePreview = null;
+/** Für welche Verbindung sie gerade steht - überlebt das Neuzeichnen der Liste. */
+let previewJourney = null;
 
 // ======================================================================
 // Start
@@ -173,7 +177,11 @@ document.addEventListener('DOMContentLoaded', () => {
     discounts: state.discounts,
     products: state.products,
   });
-  live.onJourneyChange = saveTracked;
+  live.onJourneyChange = (journey) => {
+    saveTracked(journey);
+    // Ist die verfolgte Fahrt gemerkt, gilt ihre erwartete Ankunft auch dort.
+    if (journey?.arrivalReal) trips.noteArrival(tripKey(journey), journey.arrivalReal);
+  };
   live.onShowMap = () => showLiveMap();
 
   setupTabs();
@@ -387,7 +395,7 @@ function setupTabs() {
   // Zahl der kommenden Reisen am Tab.
   const zaehler = $('#trips-count');
   const zaehle = () => {
-    const n = trips.all().filter((t) => arrivalOf(t) >= Date.now()).length;
+    const n = trips.all().filter((t) => !isPast(t)).length;
     zaehler.textContent = String(n);
     zaehler.hidden = n === 0;
   };
@@ -596,8 +604,10 @@ function restoreTracked() {
   }
   if (!journey?.legs?.length) return;
 
-  const arrived = Date.parse(journey.arrival || '');
-  if (Number.isFinite(arrived) && Date.now() > arrived + 15 * 60_000) {
+  // Die späteste bekannte Ankunft - die Verfolgung schreibt die erwartete
+  // mit, siehe refresh() in live.js.
+  const arrived = Math.max(Date.parse(journey.arrival || '') || 0, Date.parse(journey.arrivalReal || '') || 0);
+  if (arrived > 0 && Date.now() > arrived + 15 * 60_000) {
     saveTracked(null);
     return;
   }
@@ -962,6 +972,8 @@ function applyTheme(theme, { persist }) {
 
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = t === 'dark' ? '#0a0e17' : '#f5f7fb';
+  const scheme = document.querySelector('meta[name="color-scheme"]');
+  if (scheme) scheme.content = t;
 
   const btn = $('#theme-toggle');
   if (btn) {
@@ -979,6 +991,7 @@ function applyTheme(theme, { persist }) {
 
   setMapTheme(t);
   if (map) map.applyTheme();
+  routePreview?.applyTheme();
 
   if (persist) localStorage.setItem(THEME_KEY, t);
 }
@@ -1705,6 +1718,13 @@ function draw() {
   scheduleLiveTrains();
   ensureFallbacks();
   loadWalks(ranked[state.selectedIndex]?.journey);
+  loadLines(ranked[state.selectedIndex]?.journey);
+  // Die Liste ist neu gebaut, die Vorschau hing an der alten Karte.
+  if (previewJourney) {
+    const i = ranked.findIndex((e) => e.journey === previewJourney);
+    if (i >= 0 && i < state.visible) showRoutePreview(i);
+    else hideRoutePreview();
+  }
   // Zuletzt, weil es die Sichtbarkeit von Liste und Sortierleiste
   // überschreibt - und weil es die aktuelle Auswahl braucht.
   drawTripTabs();
@@ -1757,6 +1777,39 @@ async function loadWalks(journey) {
     }
   }));
   if (geaendert) map.render();
+}
+
+/**
+ * Streckenverlauf für Zugabschnitte nachladen, die keinen mitbringen.
+ *
+ * Treffer, die nur die DB kennt, und Verbindungen aus einem geteilten Link
+ * kommen ohne Linie; die Karte zog dann Geraden zwischen den Halten - bei
+ * München-Augsburg im ICE ohne Halt dazwischen ein einziger Strich. Der
+ * Zuglauf von HAFAS bringt den Verlauf mit, siehe legGeometryFromRun().
+ */
+async function loadLines(journey) {
+  if (!journey) return;
+  const offen = (journey.legs || []).filter((l) => l.mode === 'train' && l.jid
+    && !(l.geometry?.length > 1) && !l.lineTried);
+  if (offen.length === 0) return;
+
+  let geaendert = false;
+  await Promise.all(offen.slice(0, 6).map(async (leg) => {
+    leg.lineTried = true;
+    try {
+      const res = await api.trainDetails(leg.jid);
+      const linie = legGeometryFromRun(leg, res.train);
+      if (!linie) return;
+      leg.geometry = linie;
+      geaendert = true;
+    } catch {
+      // Dann bleibt es bei den Geraden zwischen den Halten.
+    }
+  }));
+  if (geaendert) {
+    map.render();
+    routePreview?.render();
+  }
 }
 
 /** Luftlinie zwischen zwei Punkten in Metern. */
@@ -2768,7 +2821,11 @@ function select(index) {
   // Dieselbe noch einmal: nichts umzuschalten, aber der Ausschnitt soll
   // trotzdem zu ihr zurückfinden - man hat inzwischen vielleicht
   // weggeschoben.
-  if (index === state.selectedIndex) { map.focusJourney(index); return; }
+  if (index === state.selectedIndex) {
+    map.focusJourney(index);
+    showRoutePreview(index);
+    return;
+  }
   state.selectedIndex = index;
   // Auswahl per Karte oder geteiltem Link kann hinter dem Ausklapppunkt
   // liegen - dann klappen wir so weit auf, dass die Karte sichtbar wird.
@@ -2787,15 +2844,94 @@ function select(index) {
     }
     map.setData(state.ranked.slice(0, state.visible), state.selectedIndex, select);
     loadWalks(state.ranked[index]?.journey);
+    loadLines(state.ranked[index]?.journey);
     drawTripTabs();
   }
 
   // Auf die gewählte Route zoomen. Der Ausschnitt über allen Treffern zeigt
   // sie als eine Linie unter vielen; gewählt hat man sie, um sie anzusehen.
   map.focusJourney(index);
+  showRoutePreview(index);
 
   const card = $('#results-list').querySelector(`.journey[data-index="${index}"]`);
   if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/**
+ * Die Route der gewählten Verbindung gleich in ihrer Karte zeigen.
+ *
+ * Seit die große Karte im eigenen Tab liegt, schaltete ein Tipp auf eine
+ * Verbindung nur die Hervorhebung dort um - zu sehen war davon nichts, bis
+ * man den Tab wechselte. Jetzt klappt in der Verbindung eine kleine Karte
+ * mit genau dieser Route auf. Es gibt nur eine: sie wandert mit der Auswahl.
+ */
+function showRoutePreview(index) {
+  const entry = state.ranked[index];
+  const card = $('#results-list')?.querySelector(`.journey[data-index="${index}"]`);
+  if (!entry || !card) return;
+
+  if (!routePreview) {
+    // AUSKLAPPBAR, wie der Streckenverlauf darunter. Wer sie zuklappt, will
+    // sie auch bei der nächsten Verbindung nicht offen sehen - der Zustand
+    // gilt für alle und übersteht ein Neuladen.
+    const huelle = document.createElement('details');
+    huelle.className = 'journey__details journey__route';
+    huelle.open = readPreviewOpen();
+    huelle.append(Object.assign(document.createElement('summary'), { textContent: 'Route auf der Karte' }));
+    // Ziehen und Tippen auf der Karte soll nicht die Verbindung neu wählen.
+    huelle.addEventListener('click', (e) => e.stopPropagation());
+
+    const box = document.createElement('div');
+    box.className = 'map journey__map';
+    const gross = document.createElement('button');
+    gross.type = 'button';
+    gross.className = 'journey__map-open';
+    gross.textContent = 'Auf der großen Karte zeigen ›';
+    gross.addEventListener('click', () => showLiveMap());
+    huelle.append(box, gross);
+
+    routePreview = new RouteMap(box);
+    routePreview.huelle = huelle;
+    huelle.addEventListener('toggle', () => {
+      writePreviewOpen(huelle.open);
+      // Zugeklappt ist die Karte null Pixel breit - erst offen passt der
+      // Ausschnitt.
+      if (huelle.open && previewJourney) {
+        routePreview.fit();
+        routePreview.render();
+      }
+    });
+  }
+
+  const huelle = routePreview.huelle;
+  const neu = previewJourney !== entry.journey || !card.contains(huelle);
+  if (!card.contains(huelle)) {
+    const vor = card.querySelector(':scope > .card-actions, :scope > .journey__details');
+    card.insertBefore(huelle, vor);
+  }
+  previewJourney = entry.journey;
+  // Erst im Dokument messen - außerhalb ist die Karte null Pixel groß.
+  routePreview.setData([entry], 0, null);
+  if (neu && huelle.open) {
+    routePreview.fit();
+    routePreview.render();
+  }
+}
+
+function hideRoutePreview() {
+  previewJourney = null;
+  routePreview?.huelle.remove();
+}
+
+const PREVIEW_OPEN_KEY = 'train-maxxing:route-preview';
+
+/** Ist die Routenkarte aufgeklappt? Ohne gespeicherte Wahl: ja. */
+function readPreviewOpen() {
+  try { return localStorage.getItem(PREVIEW_OPEN_KEY) !== 'closed'; } catch { return true; }
+}
+
+function writePreviewOpen(open) {
+  try { localStorage.setItem(PREVIEW_OPEN_KEY, open ? 'open' : 'closed'); } catch { /* dann nur bis zum Neuladen */ }
 }
 
 // ======================================================================

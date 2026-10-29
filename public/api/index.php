@@ -246,6 +246,12 @@ const SHARE_AFTER_ARRIVAL = 6 * 3600;
 /** Eine Verbindung mit Streckenverlauf ist selten über 150 kB. */
 const SHARE_MAX_BYTES = 400000;
 
+/**
+ * So weit vor dem Suchzeitpunkt schaut die Abfahrtstafel nach Zügen, die
+ * verspätet erst danach fahren. Siehe handleDepartures().
+ */
+const BOARD_LOOKBACK_MIN = 60;
+
 
 // Ab hier wird jeder Aufruf nach draußen mitgezählt - check.php zeigt es.
 Health::watch((string) $config['cache_dir']);
@@ -1138,9 +1144,20 @@ function handleDepartures(Http $http, array $config, Cache $cache): void
     $sources = [];
     $error   = null;
 
+    // VERSPÄTETE AUS DER STUNDE DAVOR. Gefragt wurde ab dem Suchzeitpunkt -
+    // ein Zug, der planmäßig um 14:50 fährt und 25 Minuten Verspätung hat,
+    // steht um 15:00 aber noch am Gleis und fehlte auf der Tafel. Also
+    // eine Stunde früher anfangen und das Davor am Ende nur behalten, wenn
+    // die Echtzeit sagt, dass der Zug noch kommt.
+    $von = strtotime($date . ' ' . $time . ' Europe/Berlin');
+    $bis = $von + $duration * 60;
+    $ab  = $von - BOARD_LOOKBACK_MIN * 60;
+    $abZeit = (new DateTimeImmutable('@' . $ab))->setTimezone(new DateTimeZone('Europe/Berlin'));
+
     if (!$isMvg) {
         $oebb = new OebbHafas($http, $config['providers']['oebb']);
-        $res  = $oebb->stationBoard($station, $date, $time, $arrivals, $duration, 60, Products::bitmask($products));
+        $res  = $oebb->stationBoard($station, $abZeit->format('Y-m-d'), $abZeit->format('H:i'), $arrivals,
+            $duration + BOARD_LOOKBACK_MIN, 120, Products::bitmask($products));
         if ($res['ok']) {
             $entries = $res['data'];
             $info    = $res['station'];
@@ -1195,13 +1212,12 @@ function handleDepartures(Http $http, array $config, Cache $cache): void
         fail('Tafel nicht verfügbar: ' . $error, 502);
     }
 
-    // Auf das Zeitfenster beschränken und nach Plan sortieren. Die MVG
-    // liefert eine feste Anzahl, nicht ein Zeitfenster.
-    $von = strtotime($date . ' ' . $time . ' Europe/Berlin');
-    $bis = $von + $duration * 60;
-    $entries = array_values(array_filter($entries, static function ($e) use ($von, $bis) {
+    // Auf das Zeitfenster beschränken - samt der Stunde davor, siehe oben -
+    // und nach Plan sortieren. Die MVG liefert eine feste Anzahl, nicht ein
+    // Zeitfenster.
+    $entries = array_values(array_filter($entries, static function ($e) use ($ab, $bis) {
         $t = strtotime((string) $e['planned']);
-        return $t !== false && $t >= $von - 60 && $t <= $bis;
+        return $t !== false && $t >= $ab - 60 && $t <= $bis;
     }));
     usort($entries, static fn($a, $b) => strcmp((string) $a['planned'], (string) $b['planned']));
 
@@ -1210,11 +1226,15 @@ function handleDepartures(Http $http, array $config, Cache $cache): void
     // von 14). Mit Schlüssel ergänzen die DB (Timetables) an deutschen und
     // OJP an Schweizer Bahnhöfen Ist-Zeit, Gleiswechsel und Ausfall.
     if (!$isMvg && $entries !== []) {
-        [$entries, $quelle] = enrichBoardRealtime($http, $config, $cache, $station, $entries, $von, $bis, $arrivals);
+        [$entries, $quelle] = enrichBoardRealtime($http, $config, $cache, $station, $entries, $ab, $bis, $arrivals);
         if ($quelle !== null) {
             $sources[] = $quelle;
         }
     }
+
+    // Erst jetzt, mit allen Ist-Zeiten: was planmäßig vor dem Suchzeitpunkt
+    // fuhr, bleibt nur, wenn es tatsächlich danach fährt.
+    $entries = array_values(array_filter($entries, static fn($e) => boardStillDue($e, $von)));
 
     $payload = [
         'station'    => $info,
@@ -1225,6 +1245,24 @@ function handleDepartures(Http $http, array $config, Cache $cache): void
     ];
     $cache->set($key, $payload);
     ok($payload + ['cached' => false]);
+}
+
+/**
+ * Gehört ein Eintrag noch auf die Tafel ab `$von`? Planmäßig ab dann immer
+ * (eine Minute Spielraum wie bisher); planmäßig davor nur, wenn die Ist-Zeit
+ * danach liegt und der Zug nicht ausfällt.
+ */
+function boardStillDue(array $e, int $von): bool
+{
+    $plan = strtotime((string) ($e['planned'] ?? ''));
+    if ($plan === false) {
+        return false;
+    }
+    if ($plan >= $von - 60) {
+        return true;
+    }
+    $real = is_string($e['real'] ?? null) ? strtotime($e['real']) : false;
+    return $real !== false && $real >= $von && empty($e['cancelled']);
 }
 
 /**

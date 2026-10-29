@@ -54,6 +54,26 @@
     }
   </script>
 
+  <!-- Design setzen, BEVOR das Stylesheet und der Körper kommen. app.js ist
+       ein Modul und läuft erst nach dem Parsen - bis dahin war die Seite
+       hell und sprang dann ins dunkle Design (Flackern beim Start, im
+       Browser wie in der App). Dieselbe Regel wie setupTheme() in app.js:
+       gespeicherte Wahl, sonst das Betriebssystem. -->
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('train-maxxing:theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.dataset.theme = t;
+      if (t === 'dark') {
+        document.querySelector('meta[name="theme-color"]').content = '#0a0e17';
+        document.querySelector('meta[name="color-scheme"]').content = 'dark';
+      }
+    })();
+  </script>
+
   <!-- Installierbar und offline nutzbar: siehe sw.js. -->
   <link rel="manifest" href="manifest.webmanifest">
 
@@ -72,7 +92,7 @@
     <div class="page-head__title">
       <!-- Zurück zur Hauptseite. Ziel hier anpassen, wenn das Tool
            woanders eingebunden wird. -->
-      <a class="back" href="/" aria-label="Zurück zur Hauptseite">
+      <a class="back" href="/#projects" aria-label="Zurück zur Hauptseite">
         <span aria-hidden="true">←</span> Hauptseite
       </a>
       <h1>train-maxxing</h1>
