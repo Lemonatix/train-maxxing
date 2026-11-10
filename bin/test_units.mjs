@@ -1008,5 +1008,33 @@ console.log('\nOrtssuche - Sofort-Vorschläge vor der Antwort des Servers');
 }
 
 // ---------------------------------------------------------------------
+console.log('\nPendelstrecken - nächster Pendeltag und Lage der Verbindung');
+{
+  const { nextCommuteDate, daysLabel } = await import('../public/assets/js/commutes.js');
+  const { commuteStatus } = await import('../public/assets/js/commuteView.js');
+  const werktags = { time: '07:30', days: [1, 2, 3, 4, 5] };
+  // Mittwoch, 12. November 2026
+  pruefe('vor der Pendelzeit: heute', nextCommuteDate(werktags, new Date(2026, 10, 12, 6, 0)), '2026-11-12');
+  pruefe('kurz danach: noch heute (der Zug kann ja verspätet sein)',
+    nextCommuteDate(werktags, new Date(2026, 10, 12, 8, 15)), '2026-11-12');
+  pruefe('abends: morgen', nextCommuteDate(werktags, new Date(2026, 10, 12, 19, 0)), '2026-11-13');
+  pruefe('Freitagabend: Montag', nextCommuteDate(werktags, new Date(2026, 10, 13, 19, 0)), '2026-11-16');
+  pruefe('ohne Tage: Werktage', nextCommuteDate({ time: '07:30', days: [] }, new Date(2026, 10, 14, 9, 0)), '2026-11-16');
+  pruefe('Tage als Text', [daysLabel([1, 2, 3, 4, 5]), daysLabel([0, 6]), daysLabel([5, 1, 3]), daysLabel([0, 1, 2, 3, 4, 5, 6])],
+    ['Mo–Fr', 'am Wochenende', 'Mo, Mi, Fr', 'täglich']);
+
+  const zug = (extra) => ({
+    mode: 'train', category: 'RE', trainNumber: '4012', name: 'RE 4012', hasRealtime: true,
+    departure: '2026-11-12T07:32:00+01:00', departureReal: '2026-11-12T07:32:00+01:00', ...extra,
+  });
+  const fahrt = (legs, an = {}) => ({ arrival: '2026-11-12T08:15:00+01:00', arrivalReal: '2026-11-12T08:15:00+01:00', legs, ...an });
+  pruefe('pünktlich', commuteStatus(fahrt([zug()])).cls, 'is-good');
+  pruefe('Abfahrt +7: rot', commuteStatus(fahrt([zug({ departureReal: '2026-11-12T07:39:00+01:00' })])), { text: '+7 min', cls: 'is-bad' });
+  pruefe('Ausfall vor Verspätung', commuteStatus(fahrt([zug({ departureReal: '2026-11-12T07:39:00+01:00' }), zug({ cancelled: true })])).text.endsWith('fällt aus'), true);
+  pruefe('ohne Echtzeit: Fahrplan', commuteStatus(fahrt([zug({ hasRealtime: false, departureReal: null })])).text, 'Fahrplan');
+  pruefe('pünktlich ab, später an', commuteStatus(fahrt([zug()], { arrivalReal: '2026-11-12T08:18:00+01:00' })).cls, 'is-warn');
+}
+
+// ---------------------------------------------------------------------
 console.log(`\n${gesamt - fehlgeschlagen} von ${gesamt} bestanden.`);
 process.exit(fehlgeschlagen === 0 ? 0 : 1);
