@@ -19,6 +19,7 @@
  *   ?action=shared&id=..                    Geteilte Verbindung abholen
  *   ?action=fxrate                          EZB-Tageskurse (für CHF neben EUR)
  *   ?action=platforms&lat=..&lon=..         Bahnsteiglage aus OSM für den Umstiegsplan
+ *   ?action=trainline&from=..&to=..&num=..&dep=..  Streckenverlauf eines DB-Abschnitts über die ÖBB
  *   ?action=works                           Bauarbeiten im Netz, mit Abschnitt und Zeitraum
  *   ?action=disruptions                     MVG-Störungsticker München
  *   ?action=walkroute&from=lat,lon&to=lat,lon  Fußweg auf der Straße (Linie, Länge, Gehzeit)
@@ -206,6 +207,8 @@ const RATE_COST = [
     'locations'      => 1,
     'livetrains'     => 2,
     'traindetails'   => 2,
+    // Eine Verbindungssuche bei der ÖBB, aber eine Woche gecacht.
+    'trainline'      => 2,
     'works'          => 4,
     'platforms'      => 4,
     'nextconnection' => 4,
@@ -284,6 +287,9 @@ try {
             break;
         case 'traindetails':
             handleTrainDetails($http, $config, $cache);
+            break;
+        case 'trainline':
+            handleTrainLine($http, $config, $cache);
             break;
         case 'bestprices':
             handleBestPrices($http, $config, $cache);
@@ -868,6 +874,56 @@ function handleNextConnection(Http $http, array $config, Cache $cache): void
     // der Liste erneut an.
     $cache->set($key, $out);
     ok(['connections' => $out, 'cached' => false]);
+}
+
+/**
+ * Streckenverlauf eines Zuges, der nicht aus HAFAS kommt.
+ *
+ * Verbindungen ab einer Adresse in München sucht die DB (oder die MVG) -
+ * ihre Abschnitte haben keine jid und die DB liefert keine Polylinie. Auf
+ * der Karte stand deshalb zwischen München Hbf und Augsburg eine Gerade.
+ * Die ÖBB kennt denselben Zug: gesucht wird die Verbindung zwischen beiden
+ * Halten zur Abfahrtszeit, und der Abschnitt mit derselben Zugnummer bringt
+ * seine Linie schon zugeschnitten mit.
+ *
+ * Eine Woche gecacht: die Schiene verlegt sich nicht, und Overpass muss
+ * dafür niemand fragen.
+ */
+function handleTrainLine(Http $http, array $config, Cache $cache): void
+{
+    $from = trim((string) ($_GET['from'] ?? ''));
+    $to   = trim((string) ($_GET['to'] ?? ''));
+    $num  = trim((string) ($_GET['num'] ?? ''));
+    $dep  = wallClock(trim((string) ($_GET['dep'] ?? '')));
+    if (!preg_match('/^\d{7}$/', $from) || !preg_match('/^\d{7}$/', $to)
+        || !preg_match('/^\d{1,6}$/', $num) || $dep === null) {
+        fail('Parameter "from", "to", "num" und "dep" sind erforderlich.', 400);
+    }
+
+    $key = 'tl:' . implode('|', [$from, $to, $num, substr($dep, 11)]);
+    $cached = $cache->get($key, 7 * 86400);
+    if ($cached !== null) {
+        ok(['geometry' => $cached, 'cached' => true]);
+    }
+
+    $res = (new OebbHafas($http, $config['providers']['oebb']))
+        ->journeys($from, $to, substr($dep, 0, 10), substr($dep, 11, 5), false, 3);
+    if (!$res['ok']) {
+        // Nicht cachen: beim nächsten Mal klappt es vielleicht.
+        ok(['geometry' => [], 'error' => $res['error']]);
+    }
+
+    $linie = [];
+    foreach ($res['data'] as $j) {
+        foreach ($j['legs'] ?? [] as $leg) {
+            if ((string) ($leg['trainNumber'] ?? '') === $num && count($leg['geometry'] ?? []) > 1) {
+                $linie = $leg['geometry'];
+                break 2;
+            }
+        }
+    }
+    $cache->set($key, $linie);
+    ok(['geometry' => $linie, 'cached' => false]);
 }
 
 /**
