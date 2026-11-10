@@ -1189,6 +1189,10 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .map__viewport.is-dragging { cursor: grabbing; }
 
 .map__tiles { position: absolute; inset: 0; }
+/* Während einer Geste verschiebt map.js beide Ebenen nur per transform
+   (renderFast) - von der linken oberen Ecke aus gerechnet, und als eigene
+   Ebene auf der Grafikkarte, damit nichts neu gezeichnet werden muss. */
+.map__tiles, .map__svg { transform-origin: 0 0; will-change: transform; }
 .map__tiles.is-off { display: none; }
 
 /* --- Die Karte ist schwarzweiß ------------------------------------
