@@ -890,6 +890,12 @@ pruefe('EFA: Linie, Plan, Prognose, Gleis, Fahrtnummer',
     [$efa[0]['line'], $efa[0]['real'] - $efa[0]['planned'], $efa[0]['platform'], $efa[0]['trip']], ['u6', 180, '2', '4711']);
 pruefe('EFA: ohne Prognose kein Ist, Ausfall erkannt', [$efa[1]['real'], $efa[1]['cancelled']], [null, true]);
 pruefe('EFA: keine Antwort ist null, keine leere Liste', MvvEfa::events(['ok' => false, 'json' => null]), null);
+$ankunft = MvvEfa::events(['ok' => true, 'json' => ['stopEvents' => [
+    ['arrivalTimePlanned' => '2026-11-10T14:30:00Z', 'arrivalTimeEstimated' => '2026-11-10T14:32:00Z',
+     'transportation' => ['number' => '28', 'destination' => ['name' => 'Sendlinger Tor']]],
+]]]);
+pruefe('EFA am Endhalt: die Ankunftstafel trägt Ankunftszeiten',
+    [$ankunft[0]['line'], $ankunft[0]['real'] - $ankunft[0]['planned']], ['28', 120]);
 
 // ---------------------------------------------------------------------
 echo "\nLaufwege im Bahnhof - aus dem gezeichneten Wegenetz\n";
