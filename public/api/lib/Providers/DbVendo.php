@@ -397,7 +397,6 @@ final class DbVendo
     public static function mapTrip(array $f): array
     {
         $stops = [];
-        $maxDelay = 0;
         $hasRealtime = false;
         foreach (($f['halte'] ?? []) as $h) {
             $eva = (string) ($h['extId'] ?? '');
@@ -416,7 +415,6 @@ final class DbVendo
             $delay = self::maxDelay([[$dep, $depR], [$arr, $arrR]]);
             if ($delay !== null) {
                 $hasRealtime = true;
-                $maxDelay = max($maxDelay, $delay);
             }
             $stops[] = [
                 'name'          => (string) ($h['name'] ?? ''),
@@ -451,7 +449,8 @@ final class DbVendo
             'name'        => $name,
             'direction'   => (string) (end($stops)['name'] ?? ''),
             'operator'    => '',
-            'delay'       => $hasRealtime ? $maxDelay : null,
+            // Die aktuelle, nicht die größte - siehe OebbHafas::currentDelay().
+            'delay'       => $hasRealtime ? OebbHafas::currentDelay($stops) : null,
             'hasRealtime' => $hasRealtime,
             'cancelled'   => !empty($f['cancelled']),
             'stops'       => $stops,
