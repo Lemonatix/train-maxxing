@@ -33,21 +33,27 @@ class Http
 
     private int $timeout;
     private bool $browserTls;
+    private int $connectTimeout;
 
     /**
      * @param bool $browserTls Browser-Cipher-Reihenfolge verwenden. Für die
      *                         DB zwingend, für andere Hosts unschädlich.
+     * @param int  $connectTimeout So lange darf allein der Verbindungsaufbau
+     *                         dauern. Kürzer, wo mehrere Server zur Wahl
+     *                         stehen: ein toter soll nicht die Zeit fressen,
+     *                         die der lebende zum Antworten braucht.
      */
-    public function __construct(int $timeout = 25, bool $browserTls = false)
+    public function __construct(int $timeout = 25, bool $browserTls = false, int $connectTimeout = 10)
     {
-        $this->timeout    = $timeout;
-        $this->browserTls = $browserTls;
+        $this->timeout        = $timeout;
+        $this->browserTls     = $browserTls;
+        $this->connectTimeout = $connectTimeout;
     }
 
     /** Liefert eine Kopie dieses Clients mit Browser-TLS-Profil. */
     public function withBrowserTls(): self
     {
-        return new self($this->timeout, true);
+        return new self($this->timeout, true, $this->connectTimeout);
     }
 
     /**
@@ -171,7 +177,7 @@ class Http
             CURLOPT_CUSTOMREQUEST  => $method,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT        => $this->timeout,
-            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_CONNECTTIMEOUT => $this->connectTimeout,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 3,
             CURLOPT_ENCODING       => '', // gzip/deflate automatisch
@@ -313,7 +319,7 @@ class Http
                     CURLOPT_URL            => $url,
                     CURLOPT_RETURNTRANSFER => true,
                     CURLOPT_TIMEOUT        => $this->timeout,
-                    CURLOPT_CONNECTTIMEOUT => 10,
+                    CURLOPT_CONNECTTIMEOUT => $this->connectTimeout,
                     CURLOPT_FOLLOWLOCATION => true,
                     CURLOPT_MAXREDIRS      => 3,
                     CURLOPT_ENCODING       => '',
