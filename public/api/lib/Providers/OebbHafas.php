@@ -793,7 +793,6 @@ final class OebbHafas
         $locL = $common['locL'] ?? [];
 
         $stops       = [];
-        $maxDelay    = 0;
         $hasRealtime = false;
 
         foreach (($jny['stopL'] ?? []) as $st) {
@@ -816,7 +815,6 @@ final class OebbHafas
             }
             if ($delay !== null) {
                 $hasRealtime = true;
-                $maxDelay = max($maxDelay, $delay);
             }
 
             $stops[] = [
@@ -917,7 +915,7 @@ final class OebbHafas
                 'name'        => $name,
                 'direction'   => trim((string) ($jny['dirTxt'] ?? '')),
                 'operator'    => trim((string) ($ctx['admin'] ?? '')),
-                'delay'       => $hasRealtime ? $maxDelay : null,
+                'delay'       => $hasRealtime ? self::currentDelay($stops) : null,
                 'hasRealtime' => $hasRealtime,
                 'cancelled'   => (bool) ($jny['isCncl'] ?? false),
                 'stops'       => $stops,
@@ -936,6 +934,35 @@ final class OebbHafas
     // ------------------------------------------------------------------
     // Mapping HAFAS -> unser normalisiertes Format
     // ------------------------------------------------------------------
+
+    /**
+     * Die Verspätung, die ein Zug JETZT hat: die am nächsten Halt, den er
+     * noch nicht erreicht hat - sonst die am letzten mit Echtzeit.
+     *
+     * Vorher war es die größte über den ganzen Lauf. Ein Nacht-ICE, der in
+     * Hamburg mit +40 losfuhr und bis München auf +5 aufholte, stand auf
+     * der Karte weiter mit +40 - der Wert eines Bahnhofs, an dem er seit
+     * Stunden vorbei ist.
+     *
+     * @param array<int,array> $stops Halte mit 'delay' und den vier Zeiten
+     */
+    public static function currentDelay(array $stops, ?int $now = null): ?int
+    {
+        $now ??= time();
+        $zuletzt = null;
+        foreach ($stops as $st) {
+            if (!isset($st['delay']) || $st['delay'] === null) {
+                continue;
+            }
+            $zuletzt = (int) $st['delay'];
+            $wann = strtotime((string) ($st['arrivalReal'] ?? $st['departureReal']
+                ?? $st['arrival'] ?? $st['departure'] ?? ''));
+            if ($wann !== false && $wann > $now) {
+                return $zuletzt;
+            }
+        }
+        return $zuletzt;
+    }
 
     /**
      * Anzeigename eines Produkts, z.B. "ICE 516".
