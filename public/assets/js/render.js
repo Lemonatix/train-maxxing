@@ -1452,6 +1452,20 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
       + platforms.map((x) => x.tracks.join('/')).slice(0, 8).join(', ') + '.';
   }
 
+  // DER LAUFWEG, wo es ihn gibt - nur an Bahnhöfen mit gezeichnetem und
+  // abgenommenem Wegenetz (StationWalks.php). Sonst bleibt es bei der Lage
+  // der beiden Bahnsteige, siehe oben.
+  const walk = res?.walk;
+  if (walk && !res?.samePlatform) {
+    const NAMEN = { steps: 'Treppe', escalator: 'Rolltreppe', elevator: 'Aufzug' };
+    const wechsel = (walk.changes || []).map((c) => `${NAMEN[c.kind] || 'Treppe'} ${c.to > c.from ? 'hoch' : 'runter'}`);
+    line.textContent = `Etwa ${walk.meters} m zu Fuß, gut ${walk.minutes} min ab dem Bahnsteigzugang`
+      + (wechsel.length ? ` · ${wechsel.join(', ')}` : '') + ' — der Weg ist eingezeichnet.';
+    if (!walk.reviewed) {
+      line.append(el('span', 'xfer__level', ' Prüfmodus: dieser Weg ist noch nicht abgenommen.'));
+    }
+  }
+
   // Geschätzte Lage kenntlich machen — sie stammt aus den Nachbargleisen,
   // nicht aus OpenStreetMap selbst.
   const unsichereLage = [a, b].filter((p) => p?.estimated).map((p) => p.tracks.join('/'));
@@ -1493,6 +1507,7 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
       toTrack: String(toTrack || ''),
       trackPoints: res?.trackPoints || {},
       connectors: res?.connectors || [],
+      walk: res?.walk || null,
     });
   });
 
