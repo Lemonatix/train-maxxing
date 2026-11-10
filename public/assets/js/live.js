@@ -45,10 +45,10 @@ const REFRESH_MS = 30_000;
  */
 const SAFE_TRANSFER_MIN = 2;
 /**
- * So kurz vor der Abfahrt wird bei der MVG nachgefragt, wenn die DB für
- * einen Münchner Abschnitt keine Ist-Zeiten hat. Die MVG-Tafel kennt die
- * Echtzeit nur für die nächsten Minuten - weiter vorher wäre jede Abfrage
- * umsonst.
+ * So kurz vor der Abfahrt wird in München nachgefragt, wenn die DB für
+ * einen Abschnitt keine Ist-Zeiten hat. Der Server fragt die Auskunft des
+ * MVV, sonst die MVG-Tafel (siehe MvvEfa.php). Weiter voraus ist auch
+ * deren Prognose nur der Fahrplan.
  */
 const MVG_FALLBACK_MIN = 30;
 
@@ -447,7 +447,7 @@ ${url.href}`);
     if (entry.src === 'db') {
       const res = await api.trainRun({ db: leg.dbJourneyId });
       // DIE U6 UND ANDERE OHNE PROGNOSE BEI DER DB: kurz vor der Abfahrt
-      // weiß die MVG-Tafel am Einstieg oft mehr. Zugeordnet wird über die
+      // wissen MVV und MVG am Einstieg mehr. Zugeordnet wird über die
       // Koordinaten - der Abschnitt kennt nur DB-Halte.
       if (!res.train?.hasRealtime && LiveTracker.wantsMvgFallback(leg)) {
         try {
@@ -548,6 +548,7 @@ ${url.href}`);
       stops,
       hasRealtime: true,
       delay,
+      realtimeSource: mvg.source === 'mvv' ? 'MVV' : 'MVG',
       cancelled: Boolean(run?.cancelled || mvg.cancelled),
       messages: [...(run?.messages || []), ...(mvg.messages || [])],
     };
