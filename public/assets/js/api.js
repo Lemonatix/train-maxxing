@@ -79,6 +79,27 @@ async function post(action, body) {
   return data;
 }
 
+/**
+ * Prüfmodus für die gezeichneten Laufwege: ?wegpruefung in der Adresse.
+ *
+ * Beim Laden gelesen und für den Tab gemerkt - app.js schreibt die Adresse
+ * gleich nach dem Start mit den Suchparametern neu, und danach wäre der
+ * Schalter weg. Ein neuer Tab ohne den Parameter ist wieder normal.
+ */
+const REVIEW_WALKS = (() => {
+  const KEY = 'train-maxxing:wegpruefung';
+  try {
+    if (new URLSearchParams(location.search).has('wegpruefung')) sessionStorage.setItem(KEY, '1');
+    return sessionStorage.getItem(KEY) === '1';
+  } catch {
+    return false;
+  }
+})();
+
+export function reviewWalks() {
+  return REVIEW_WALKS;
+}
+
 export const api = {
   health: (opts) => call('health', {}, opts),
 
@@ -224,6 +245,9 @@ export const api = {
       // Mit EVA-Nummer kommt an deutschen Bahnhöfen der Zustand der Aufzüge
       // und Rolltreppen von der DB dazu (FaSta).
       eva: /^\d{7}$/.test(String(eva || '')) ? String(eva) : '',
+      // Prüfmodus für die gezeichneten Laufwege (?wegpruefung in der
+      // Adresse): dann kommen auch noch nicht abgenommene Wege mit.
+      review: reviewWalks() ? '1' : '',
     }, opts),
 
   bestPrices: (params, opts) =>
