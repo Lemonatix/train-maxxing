@@ -39,6 +39,7 @@ final class Health
         'www.bahn.de'       => 'db',
         'bahn.expert'       => 'wagenreihung',
         'www.mvg.de'        => 'mvg',
+        'efa.mvv-muenchen.de' => 'mvv',
         'strecken-info.de'  => 'streckeninfo',
         'www.strecken-info.de' => 'streckeninfo',
         // Schweizer Prognosen: der Dienst drosselt (HTTP 429) - das soll
