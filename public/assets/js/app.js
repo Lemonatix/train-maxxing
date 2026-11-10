@@ -21,6 +21,7 @@ import { places } from './favorites.js';
 import { initBoard } from './board.js';
 import { trips, isPast, tripKey } from './trips.js';
 import { initTrips } from './tripsView.js';
+import { commutes } from './commutes.js';
 import { sync } from './sync.js';
 import { IN_APP, siteUrl } from './site.js';
 
@@ -283,12 +284,21 @@ const TAB_HASH = { search: '', trips: '#reisen', map: '#karte', board: '#abfahrt
 let showTab = () => {};
 /** Der offene Tab - die Karte fragt danach, ob sie Züge holen soll. */
 let currentTab = 'search';
+/** Wo das Live-Panel in der Suche hingehört - siehe setupTabs(). */
+let livePanelPlatz = null;
 
 function setupTabs() {
   const namen = Object.keys(TAB_HASH);
   const tabs = Object.fromEntries(namen.map((n) => [n, $(`#tab-${n}`)]));
   const views = Object.fromEntries(namen.map((n) => [n, $(`#view-${n}`)]));
   if (namen.some((n) => !tabs[n] || !views[n])) return;
+
+  // Der angestammte Platz des Live-Panels in der Suche, als Marke im DOM.
+  const panel = $('#live-panel');
+  if (panel) {
+    livePanelPlatz = document.createComment('live-panel');
+    panel.before(livePanelPlatz);
+  }
 
   // Die gleitende Linie unter dem aktiven Tab - siehe .tabs__indicator.
   const leiste = tabs[namen[0]].parentElement;
@@ -329,11 +339,23 @@ function setupTabs() {
     } else {
       board?.deactivate();
     }
+    // DIE VERFOLGUNG WANDERT MIT IN DEN REISEN-TAB. Das Panel steht in der
+    // Suche - auf dem Handy liegt man während der Fahrt aber meist bei den
+    // gemerkten Reisen, und dort war von der Verfolgung nichts zu sehen.
+    // Umgehängt statt doppelt gezeichnet: es bleibt ein und dasselbe Panel,
+    // mit offenen Abschnitten und GPS. Vor die Liste, nicht hinein - die
+    // zeichnet tripsView bei jeder Änderung komplett neu.
+    const panel = $('#live-panel');
+    if (livePanelPlatz && panel) {
+      if (name === 'trips') views.trips.before(panel);
+      else if (livePanelPlatz.nextSibling !== panel) livePanelPlatz.after(panel);
+    }
     if (name === 'trips') {
       tripsView ??= initTrips(views.trips, {
         track: (journey) => live.start(journey),
         isTracking: (journey) => live.isTracking(journey),
         search: searchTrip,
+        searchCommute,
         state,
         loadPlatforms,
         loadSequence,
@@ -753,6 +775,14 @@ function setupSort() {
     map.focusJourney(state.selectedIndex);
     showLiveMap();
   });
+  commutes.onChange(updateCommuteButton);
+  $('#save-commute')?.addEventListener('click', () => {
+    if (!state.from || !state.to || state.from.here || state.to.here) return;
+    if (!commutes.has(state.from, state.to, state.time)) {
+      commutes.add({ from: state.from, to: state.to, time: state.time });
+    }
+    showTab('trips');
+  });
   const sel = $('#sort');
   if (!sel) return;
   sel.value = state.sort;
@@ -908,6 +938,21 @@ function drawTripTabs() {
 function showSortBar(show) {
   const bar = $('#results-bar');
   if (bar) bar.hidden = !show;
+  updateCommuteButton();
+}
+
+/**
+ * "Pendelstrecke" zeigt, ob die gesuchte Strecke schon eine ist. Mit dem
+ * eigenen Standort als Start ergibt sie keinen Sinn - der wandert mit.
+ */
+function updateCommuteButton() {
+  const b = $('#save-commute');
+  if (!b) return;
+  const fester = state.from && state.to && !state.from.here && !state.to.here && !state.arrival;
+  b.hidden = !fester;
+  const schon = fester && commutes.has(state.from, state.to, state.time);
+  b.textContent = schon ? 'Pendelstrecke ✓' : 'Pendelstrecke';
+  b.classList.toggle('is-on', Boolean(schon));
 }
 
 /**
@@ -1207,6 +1252,25 @@ function searchTrip(t) {
   state.arrival = false;
   state.travelClass = t.travelClass || state.travelClass;
   state.pendingTrip = zukunft ? t.key : null;
+  applyStateToForm();
+  saveSettings();
+  showTab('search');
+  runSearch();
+}
+
+/**
+ * "Alle Verbindungen" an einer Pendelstrecke: die Strecke in der Suche, am
+ * nächsten Pendeltag, kurz vor der Pendelzeit.
+ */
+function searchCommute(c, date) {
+  state.from = c.from;
+  state.to = c.to;
+  const heute = localDateTime(Date.now());
+  state.date = date || heute.date;
+  const [h, m] = c.time.split(':').map(Number);
+  state.time = localDateTime(new Date(2000, 0, 1, h, m - 10).getTime()).time;
+  state.arrival = false;
+  state.pendingTrip = null;
   applyStateToForm();
   saveSettings();
   showTab('search');
@@ -1789,7 +1853,13 @@ async function loadWalks(journey) {
  */
 async function loadLines(journey) {
   if (!journey) return;
-  const offen = (journey.legs || []).filter((l) => l.mode === 'train' && l.jid
+  // OHNE JID: Verbindungen ab einer Adresse in München kommen von der DB,
+  // und die liefert keine Linie. Für Züge zwischen zwei Bahnhöfen mit
+  // Zugnummer sucht der Server denselben Zug bei der ÖBB (trainline).
+  // U-Bahn, Tram und Bus haben keine Nummer im Sinne der ÖBB.
+  const perNummer = (l) => !l.jid && /^\d{1,6}$/.test(l.trainNumber || '')
+    && /^\d{7}$/.test(l.from?.id || '') && /^\d{7}$/.test(l.to?.id || '') && l.departure;
+  const offen = (journey.legs || []).filter((l) => l.mode === 'train' && (l.jid || perNummer(l))
     && !(l.geometry?.length > 1) && !l.lineTried);
   if (offen.length === 0) return;
 
@@ -1797,6 +1867,13 @@ async function loadLines(journey) {
   await Promise.all(offen.slice(0, 6).map(async (leg) => {
     leg.lineTried = true;
     try {
+      if (!leg.jid) {
+        const res = await api.trainLine({ from: leg.from.id, to: leg.to.id, num: leg.trainNumber, dep: leg.departure });
+        if (!(res.geometry?.length > 1)) return;
+        leg.geometry = res.geometry;
+        geaendert = true;
+        return;
+      }
       const res = await api.trainDetails(leg.jid);
       const linie = legGeometryFromRun(leg, res.train);
       if (!linie) return;
