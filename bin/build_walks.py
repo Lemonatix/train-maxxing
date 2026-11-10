@@ -2,7 +2,7 @@
 Wegenetz eines Bahnhofs für den Umstiegsplan (lib/StationWalks.php), aus
 den Fußwegen, Treppen und Rolltreppen in OpenStreetMap.
 
-    python3 bin/build_walks.py <overpass.json> <EVA> "<Name>"
+    python3 bin/build_walks.py <overpass.json> <EVA> "<Name>" [--neu]
 
 <overpass.json> ist die Antwort von Overpass auf diese Abfrage (R = 450 m
 um den Bahnhof, `out body geom`, damit die Wege ihre Knotennummern tragen):
@@ -35,6 +35,13 @@ HBF, EVA, NAME = sys.argv[1:4]
 _root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'public', 'api', 'data')
 PLAT = os.path.join(_root, 'platforms', f'{EVA}.json')
 OUT = os.path.join(_root, 'walks', f'{EVA}.json')
+
+# Ein abgenommenes Netz nicht stillschweigend durch einen neuen Entwurf
+# ersetzen - die Abnahme wäre weg, und mit ihr jeder Weg in der App.
+if os.path.exists(OUT) and '--neu' not in sys.argv:
+    alt = json.load(open(OUT, encoding='utf8'))
+    if any(e.get('reviewed') for e in alt.get('edges', [])):
+        sys.exit(f'{OUT} ist schon abgenommen. Mit --neu trotzdem neu rechnen (alles wieder ungeprüft).')
 d = json.load(open(HBF))
 st = json.load(open(PLAT))
 
