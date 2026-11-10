@@ -1,7 +1,8 @@
 /**
  * Ansicht "Reisen": die gemerkten Verbindungen.
  *
- * Kommende zuerst, nach Tag gruppiert, darunter zugeklappt die vergangenen.
+ * Ganz oben die Pendelstrecken (commuteView.js), dann die kommenden Reisen
+ * nach Tag gruppiert, darunter zugeklappt die vergangenen.
  * Für Reisen der nächsten zwölf Stunden holt die Ansicht die Echtzeit des
  * ersten Zuges - dieselbe Abfrage wie die Live-Verfolgung (fetchRun) -, damit
  * "fährt mein Zug pünktlich?" ohne weiteren Tipp beantwortet ist.
@@ -13,6 +14,8 @@ import { formatPrice } from './scoring.js';
 import { wantsInbound, inboundFor, inboundText } from './inbound.js';
 import { renderJourneyLegs } from './render.js';
 import { createSyncPanel } from './syncView.js';
+import { commutes } from './commutes.js';
+import { createCommuteView } from './commuteView.js';
 
 /** Nur für bald abfahrende Reisen lohnt die Echtzeit - und sie kostet je Reise eine Abfrage. */
 const LIVE_WINDOW_MS = 12 * 3600_000;
@@ -92,6 +95,7 @@ function dayLabel(iso) {
  *   search(trip)      dieselbe Strecke neu suchen (zur Abfahrtszeit)
  *   state             App-Zustand (Modus, Klasse) für den Streckenverlauf
  *   loadPlatforms, loadSequence  wie in der Trefferliste: Lageplan, Wagenreihung
+ *   searchCommute(c, date)       eine Pendelstrecke in der Suche öffnen
  */
 export function initTrips(root, actions) {
   const live = new Map(); // key -> {at, delay, cancelled, error}
@@ -102,6 +106,14 @@ export function initTrips(root, actions) {
   let aktiv = false;
 
   trips.onChange(() => { if (aktiv) render(); });
+  commutes.onChange(() => { if (aktiv) render(); });
+  const pendeln = createCommuteView({
+    track: actions.track,
+    isTracking: actions.isTracking,
+    search: actions.searchCommute,
+    state: actions.state,
+    onUpdate: () => { if (aktiv) render(); },
+  });
 
   async function ladeEchtzeit(t) {
     const alt = live.get(t.key);
@@ -246,11 +258,13 @@ export function initTrips(root, actions) {
     const kommend = alle.filter((t) => !isPast(t, jetzt));
     const vorbei = alle.filter((t) => isPast(t, jetzt)).reverse();
 
-    const out = [];
+    const out = [...pendeln.render()];
     if (alle.length === 0) {
+      // Den Hinweis aufs Pendeln nur, solange es keine Pendelstrecke gibt.
       out.push(el('p', 'trips__empty',
         'Noch keine Reisen gemerkt. In der Trefferliste merkt der Stern ☆ an einer Verbindung sie hier vor — '
-        + 'mit Zügen und Gleisen, und am Reisetag direkt zum Verfolgen.'));
+        + 'mit Zügen und Gleisen, und am Reisetag direkt zum Verfolgen.'
+        + (out.length ? '' : ' Eine Strecke, die du regelmäßig fährst, merkt „Pendelstrecke“ über der Trefferliste.')));
     }
 
     let tag = null;
