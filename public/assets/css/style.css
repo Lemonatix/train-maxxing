@@ -1236,6 +1236,10 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   transition: opacity 220ms ease;
 }
 .map__tile.is-loaded { opacity: 1; }
+/* Kacheln der vorigen Zoomstufe, bis die neue geladen ist: darunter und
+   ohne Übergang, sonst blenden sie beim Wegnehmen sichtbar aus. */
+.map__tile { z-index: 1; }
+.map__tile.is-old { z-index: 0; transition: none; }
 
 .map__tile.is-error { display: none; }
 
@@ -1978,6 +1982,14 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 }
 
 /* Rechtsbündig: der Weg zur Live-Karte, wo die Routen jetzt liegen. */
+.results-bar__commute {
+  margin-left: auto;
+  min-height: 34px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+.results-bar__commute.is-on { color: var(--green); border-color: var(--green); }
+.results-bar__commute:not([hidden]) + .results-bar__map { margin-left: 0; }
 .results-bar__map {
   margin-left: auto;
   min-height: 34px;
@@ -4875,6 +4887,49 @@ details.live__msg .live__msg-text {
 .trips__past { margin-top: 1rem; }
 .trips__past summary { cursor: pointer; font-size: 0.85rem; color: var(--text-dim); }
 .trips__past .trips__list { margin-top: 0.5rem; }
+/* --- Pendelstrecken (commuteView.js) --------------------------------
+   Dieselbe Karte wie eine gemerkte Reise, darin je Verbindung eine Zeile:
+   Zeit, Züge, Lage und rechts der Knopf zum Verfolgen. */
+.commute__list { list-style: none; margin: 0.45rem 0 0; padding: 0; display: grid; gap: 0.35rem; }
+.commute__conn {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "zeit zuege knopf" "lage lage knopf";
+  align-items: center;
+  gap: 0.1rem 0.6rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
+}
+.commute__time { grid-area: zeit; font-family: var(--font-mono); font-size: 0.88rem; }
+.commute__trains { grid-area: zuege; min-width: 0; font-size: 0.78rem; color: var(--text-dim); overflow-wrap: anywhere; }
+.commute__status { grid-area: lage; margin: 0; }
+.commute__track { grid-area: knopf; min-height: 34px; padding: 0.25rem 0.6rem; font-size: 0.78rem; }
+.commute__edit { margin-top: 0.5rem; }
+.commute__edit summary { cursor: pointer; font-size: 0.8rem; color: var(--text-dim); }
+.commute__days { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin-top: 0.4rem; }
+.commute__day {
+  min-width: 2.4rem;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.commute__day.is-on { border-color: var(--accent); color: var(--text); background: var(--surface); }
+.commute__clock {
+  min-height: 34px;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
 .trips__empty, .trips__note { margin: 0.6rem 0 0; font-size: 0.8rem; color: var(--text-muted); }
 
 /* --- Zubringer am Startbahnhof (inbound.js) ------------------------
