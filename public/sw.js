@@ -22,7 +22,7 @@
 
 // Bei jeder Änderung an dieser Datei hochzählen - dann räumt activate()
 // die alten Caches weg.
-const VERSION = 'train-maxxing-v12';
+const VERSION = 'train-maxxing-v13';
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 
@@ -39,6 +39,8 @@ const SHELL_FILES = [
   'assets/js/api.js',
   'assets/js/autocomplete.js',
   'assets/js/board.js',
+  'assets/js/commutes.js',
+  'assets/js/commuteView.js',
   'assets/js/favorites.js',
   'assets/js/inbound.js',
   'assets/js/live.js',
@@ -65,7 +67,7 @@ const SHELL_FILES = [
  */
 const CACHED_ACTIONS = new Set([
   'journeys', 'traindetails', 'departures', 'locations', 'catalogue',
-  'platforms', 'works', 'offers', 'fxrate', 'disruptions', 'nextconnection', 'localroute',
+  'platforms', 'works', 'offers', 'fxrate', 'disruptions', 'nextconnection', 'localroute', 'trainline',
   // Eine geteilte Fahrt soll sich auch im Funkloch wieder öffnen lassen.
   'shared',
   // Fußwege ändern sich nicht - der von vorhin taugt auch offline.
