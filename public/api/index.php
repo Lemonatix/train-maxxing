@@ -128,6 +128,7 @@ require __DIR__ . '/lib/Punctuality.php';
 require __DIR__ . '/lib/Fleet.php';
 require __DIR__ . '/lib/Health.php';
 require __DIR__ . '/lib/Walks.php';
+require __DIR__ . '/lib/StationWalks.php';
 require __DIR__ . '/lib/MvgRail.php';
 require __DIR__ . '/lib/WebPush.php';
 require __DIR__ . '/lib/PushWatch.php';
@@ -1953,7 +1954,23 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
         // Damit die Anzeige "gleicher Bahnsteig" von "andere Seite der Halle"
         // unterscheiden kann.
         'samePlatform' => $a !== null && $a === $b,
+        // AUSNAHME vom "kein Laufweg": wo das Wegenetz eines Bahnhofs von
+        // Hand gezeichnet und abgenommen ist (StationWalks), gibt es den Weg
+        // doch - nur dort, und nur aus abgenommenen Abschnitten. Mit
+        // review=1 auch die übrigen, für die Prüfung.
+        'walk' => stationWalk(trim((string) ($_GET['eva'] ?? '')), $from, $to,
+            ($_GET['review'] ?? '') === '1', $a !== null && $a === $b),
     ]);
+}
+
+/** Der Laufweg aus dem gezeichneten Wegenetz des Bahnhofs, sonst null. */
+function stationWalk(string $eva, string $from, string $to, bool $review, bool $same): ?array
+{
+    if ($same || $from === $to) {
+        return null;
+    }
+    $netz = StationWalks::load(__DIR__ . '/data/walks', $eva);
+    return $netz?->route($from, $to, $review);
 }
 
 /**
