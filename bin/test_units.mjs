@@ -460,6 +460,39 @@ console.log('\nFahrgastrechte — ab wann, wie viel');
   pruefe('Schweizer Teil eines ECE ab München', [teil?.from.name, teil?.to.name], ['St. Margrethen', 'Zürich HB']);
   pruefe('rein deutscher Abschnitt: kein Schweizer Teil',
     LiveTracker.swissSection(zug({ from: { id: '8000261' }, to: { id: '8000230' } }), muenchen), null);
+
+  // U6 ohne Prognose bei der DB, die MVG-Tafel meldet +2 am Einstieg.
+  const u6 = {
+    mode: 'train', category: 'U', line: 'U6', name: 'U6',
+    from: { id: '624759', name: 'Kieferngarten', lat: 48.2039, lon: 11.6131 },
+    to: { id: '638145', name: 'Odeonsplatz', lat: 48.1427, lon: 11.5779 },
+    departure: '2026-11-10T12:17:00+01:00', arrival: '2026-11-10T12:30:00+01:00',
+  };
+  const ab = Date.parse(u6.departure);
+  pruefe('MVG fragen: zehn Minuten vorher ja, zwei Stunden vorher nein, in Augsburg nie', [
+    LiveTracker.wantsMvgFallback(u6, ab - 10 * 60_000),
+    LiveTracker.wantsMvgFallback(u6, ab - 120 * 60_000),
+    LiveTracker.wantsMvgFallback({ ...u6, to: { lat: 48.365, lon: 10.885 } }, ab - 10 * 60_000),
+  ], [true, false, false]);
+  pruefe('Linie für die MVG: "Bus 182" wird "182"',
+    [LiveTracker.mvgLine(u6), LiveTracker.mvgLine({ name: 'Bus 182', line: '' })], ['U6', '182']);
+  const dbLauf = { hasRealtime: false, stops: [
+    { id: '700001', name: 'Garching', departure: '2026-11-10T12:06:00+01:00' },
+    { id: '624759', name: 'Kieferngarten', arrival: '2026-11-10T12:17:00+01:00', departure: '2026-11-10T12:17:00+01:00' },
+    { id: '638143', name: 'Freimann', arrival: '2026-11-10T12:19:00+01:00', departure: '2026-11-10T12:19:00+01:00' },
+    { id: '638145', name: 'Odeonsplatz', arrival: '2026-11-10T12:30:00+01:00', departure: '2026-11-10T12:30:00+01:00' },
+    { id: '700009', name: 'Goetheplatz', arrival: '2026-11-10T12:36:00+01:00' },
+  ] };
+  const mvgLauf = { hasRealtime: true, delay: 2, stops: [
+    { departureReal: '2026-11-10T12:19:00+01:00', platform: '2' }, { arrivalReal: null },
+  ] };
+  const zusammen = LiveTracker.withMvgRealtime(dbLauf, u6, mvgLauf);
+  const hm = (iso) => (iso ? new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' }) : null);
+  pruefe('MVG-Echtzeit im DB-Lauf: Einstieg gemeldet, dazwischen verschoben, davor und danach Fahrplan', [
+    zusammen.hasRealtime, hm(zusammen.stops[1].departureReal), zusammen.stops[1].platform,
+    hm(zusammen.stops[2].arrivalReal), hm(zusammen.stops[3].arrivalReal),
+    zusammen.stops[0].departureReal ?? null, zusammen.stops[4].arrivalReal ?? null,
+  ], [true, '12:19', '2', '12:21', '12:32', null, null]);
 }
 
 // ---------------------------------------------------------------------
