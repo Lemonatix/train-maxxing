@@ -341,8 +341,12 @@ auch den Entwurf, bernsteinfarben gestrichelt und als „noch nicht abgenommen"
 beschriftet. Abgenommen wird das Netz, nicht jedes Gleispaar: stimmt jeder
 Abschnitt, stimmt jeder Weg daraus. Der Weg beginnt am Bahnsteigzugang — wo
 man aus dem Zug steigt, hängt am Wagen und wird nur blass gepunktet. Erster
-Bahnhof: München Hbf, Gleise 5–36 (U-Bahn und S-Bahn tief sind bei der DB
-eigene Halte).
+Bahnhof: München Hbf, Gleise 5–36, abgenommen am 10. November 2026 (U-Bahn
+und S-Bahn tief sind bei der DB eigene Halte; die Flügelbahnhöfe „Gl.5-10"
+und „Gl.27-36" mit eigener Nummer verweist `walks/aliases.json` auf dasselbe
+Netz). Zwei Dinge, die die Abnahme dabei gefunden hat: die Suche darf nicht
+durch einen fremden Bahnsteig hindurch (sonst wurden aus 300 m Gang 30 m), und
+kleine Haken an den Bahnsteigköpfen werden geglättet.
 
 #### Treppen, Rolltreppen und Aufzüge je Ebene
 
