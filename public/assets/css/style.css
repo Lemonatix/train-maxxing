@@ -1338,7 +1338,9 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   stroke: var(--accent);
   stroke-width: 3.4;
   opacity: 1;
-  filter: drop-shadow(0 0 5px var(--accent-soft));
+  /* Kein drop-shadow mehr: der Weichzeichner wurde bei jedem Neuzeichnen
+     über die ganze Route gerechnet, und abgehoben ist sie durch den hellen
+     Rand darunter (.map__casing) ohnehin. */
 }
 
 /* Beim Klicken keinen Rahmen zeichnen - der Browser umrandet sonst die
@@ -1437,7 +1439,11 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .map__train-halo {
   fill: var(--green);
   opacity: 0.22;
-  animation: trainPulse 2.4s ease-in-out infinite;
+  /* STILL, NICHT PULSIEREND. Der Puls animierte den Radius jedes Kreises -
+     das kann keine Grafikkarte übernehmen, der Browser musste die ganze
+     SVG-Ebene sechzigmal je Sekunde neu zeichnen. Mit sechzig Zügen im Bild
+     lief das dauerhaft, auch während des Ziehens, und auf schwächeren
+     Rechnern (Linux ohne Grafikbeschleunigung) wurde die Karte zäh. */
 }
 
 .map__train-dot {
@@ -1498,11 +1504,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   stroke-width: 3px;
   stroke-linejoin: round;
   pointer-events: none;
-}
-
-@keyframes trainPulse {
-  0%, 100% { opacity: 0.1; r: 6; }
-  50%      { opacity: 0.28; r: 9; }
 }
 
 /* --- Eigener Standort ---------------------------------------------- */
