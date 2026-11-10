@@ -52,7 +52,7 @@ export function createSyncPanel() {
       await sync.connect(code);
       angebot = null;
       eingabe = '';
-      if (sync.status().state === 'ok') melde('Verbunden — Reisen und Lieblingsorte beider Geräte sind zusammengeführt, Abos und Lieblingszüge übernommen.');
+      if (sync.status().state === 'ok') melde('Verbunden — Reisen, Lieblingsorte und Pendelstrecken beider Geräte sind zusammengeführt, Abos und Lieblingszüge übernommen.');
       else render();
     } catch (err) {
       melde(err.message, true);
@@ -71,7 +71,7 @@ export function createSyncPanel() {
   function renderAus() {
     box.append(el('h3', 'sync__title', 'Auf mehreren Geräten'));
     box.append(el('p', 'sync__text',
-      'Gemerkte Reisen, Lieblingsorte, Abos und Lieblingszüge liegen bisher nur in diesem Browser. Mit einem '
+      'Gemerkte Reisen, Lieblingsorte, Pendelstrecken, Abos und Lieblingszüge liegen bisher nur in diesem Browser. Mit einem '
       + 'Sync-Code gleichen Handy und Laptop sie ab — ohne Konto. Verschlüsselt: der Server kann sie nicht lesen.'));
 
     const reihe = el('div', 'sync__row');
@@ -112,7 +112,7 @@ export function createSyncPanel() {
     box.append(el('h3', 'sync__title', 'Mit diesem Sync-Code verbinden?'));
     box.append(el('code', 'sync__code-text', formatCode(angebot)));
     box.append(el('p', 'sync__text',
-      'Deine gemerkten Reisen und Lieblingsorte werden mit allen Geräten zusammengeführt, die diesen Code '
+      'Deine gemerkten Reisen, Lieblingsorte und Pendelstrecken werden mit allen Geräten zusammengeführt, die diesen Code '
       + 'nutzen, und sind dort sichtbar. Bei Abos und Lieblingszügen gilt die zuletzt geänderte Fassung. '
       + 'Verbinde nur Codes, die von dir selbst stammen.'));
     const reihe = el('div', 'sync__row');
@@ -168,7 +168,7 @@ export function createSyncPanel() {
       'Auf dem anderen Gerät unter „Reisen" eingeben. In der App vom iPhone-Home-Bildschirm bitte '
       + 'eintippen: ein Link öffnet Safari, und Safari hat einen eigenen Speicher.'));
     det.append(el('p', 'sync__hint',
-      'Wer den Code hat, sieht deine gemerkten Reisen, Lieblingsorte und Abos. Nicht öffentlich teilen.'));
+      'Wer den Code hat, sieht deine gemerkten Reisen, Lieblingsorte, Pendelstrecken und Abos. Nicht öffentlich teilen.'));
     box.append(det);
 
     const knoepfe = el('div', 'sync__row');
