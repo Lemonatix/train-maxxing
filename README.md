@@ -325,6 +325,25 @@ die beiden Bahnsteige nebeneinander oder an entgegengesetzten Enden?* Wo beide
 Gleisnummern bekannt sind, sind sie hervorgehoben; ein Ebenenwechsel wird
 dazugesagt, denn der kostet mehr Zeit, als die Entfernung vermuten lässt.
 
+**Die Ausnahme: abgenommene Wegenetze.** Im November 2026 wurde nachgemessen
+(20 große Bahnhöfe, jeder Weg auf der Karte angesehen): an den meisten
+deutschen Bahnhöfen findet die Rechnung zu jedem Gleispaar einen Weg — aber
+von sechs Stichproben war nur einer richtig. Frankfurt ordnete die
+Gleisnummern falsch zu, Ulm lief bis ans Bahnsteigende, Berlin wurde über die
+Ebenen hinweg zum Haken, Zürich ging 900 m außen herum. Eine automatische
+Prüfung fängt nur den letzten Fall. Deshalb gilt jetzt: **ein Weg erscheint nur
+dort, wo das Wegenetz des Bahnhofs ein Mensch abgenommen hat.**
+`bin/build_walks.py` rechnet aus OSM einen Entwurf
+(`public/api/data/walks/<EVA>.json`, jeder Abschnitt `reviewed: false`);
+`lib/StationWalks.php` setzt daraus den Weg zusammen, aber nur aus
+abgenommenen Abschnitten. Mit `?wegpruefung` an der Adresse zeigt die App
+auch den Entwurf, bernsteinfarben gestrichelt und als „noch nicht abgenommen"
+beschriftet. Abgenommen wird das Netz, nicht jedes Gleispaar: stimmt jeder
+Abschnitt, stimmt jeder Weg daraus. Der Weg beginnt am Bahnsteigzugang — wo
+man aus dem Zug steigt, hängt am Wagen und wird nur blass gepunktet. Erster
+Bahnhof: München Hbf, Gleise 5–36 (U-Bahn und S-Bahn tief sind bei der DB
+eigene Halte).
+
 #### Treppen, Rolltreppen und Aufzüge je Ebene
 
 Zwischen „nur die Lage" und „ein berechneter Weg, den es so nicht gibt" liegt
@@ -3031,6 +3050,7 @@ public/
     ├── push_worker.php           Minutentakt für Push (Cronjob, nur Kommandozeile)
     ├── data/mvg_rail.json        U-Bahn/Tram-Fahrplan (bin/build_mvg_rail.php)
     ├── data/platforms/           Bahnsteige der großen Bahnhöfe für den Umstiegsplan (bin/build_platforms.php)
+    ├── data/walks/               Wegenetze für Laufwege im Bahnhof (bin/build_walks.py, von Hand abgenommen)
     └── lib/
         ├── Http.php              cURL-Wrapper inkl. Browser-TLS-Profil
         ├── Cache.php             Dateicache, degradiert still
@@ -3047,6 +3067,7 @@ public/
         ├── PushWatch.php         Server-Verfolgung: was wann gemeldet wird
         ├── TripSync.php          Verschlüsselte Reisen-Blöcke für den Abgleich
         ├── MvgRail.php           U-Bahn/Tram-Positionen München aus dem Fahrplan
+        ├── StationWalks.php      Laufwege im Bahnhof aus abgenommenen Wegenetzen
         └── Providers/
             ├── OebbHafas.php     Fahrplan, Zuggattungen, Ländercodes, Geometrie, Tafel
             ├── DbVendo.php       Echtpreise, alle Tarife, Auslastung, Ausstattung
