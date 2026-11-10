@@ -109,8 +109,54 @@ final class MvvEfa
         ]];
     }
 
-    /** Die Abfahrtstafel einer Haltestelle ab einem Zeitpunkt (Ortszeit München). */
-    private function boardUrl(string $globalId, int $ab): string
+    /**
+     * Die Lage EINER Fahrt an einer Haltestelle: Verspätung, Ausfall, Gleis -
+     * für die U-Bahnen und Trams der Live-Karte, deren Position nur nach
+     * Fahrplan gerechnet ist (MvgRail).
+     *
+     * Wiedergefunden über Linie, Planzeit (±90 s) und Richtung: an einem
+     * Halt fahren dieselbe Linie und Minute oft in beide Richtungen.
+     *
+     * VERKÜRZTE FAHRTEN: Fährt die U3 wegen einer Sperrung nur bis Sendlinger
+     * Tor, steht sie auf der Tafel mit diesem Ziel, der Fahrplan sagt aber
+     * Fürstenried West. Passt keine Fahrt zur Richtung, gilt deshalb die
+     * EINZIGE dieser Linie zur Planzeit - ihr Ziel kommt mit zurück.
+     *
+     * @param bool $arrival Endhalt: dort steht die Fahrt nur auf der
+     *                      Ankunftstafel.
+     * @return ?array{delay:int, cancelled:bool, platform:?string, direction:string}
+     *         null, wenn die Fahrt nicht auf der Tafel steht oder keine
+     *         Prognose hat
+     */
+    public function delayAt(string $globalId, string $line, int $planned, string $direction = '', bool $arrival = false): ?array
+    {
+        $res = $this->http->getJson($this->boardUrl($globalId, $planned - 120, $arrival),
+            ['User-Agent' => (string) ($this->cfg['user_agent'] ?? 'train-maxxing')]);
+        $linie = self::norm($line);
+        $ziel = mb_strtolower(trim($direction));
+        $passt = static function (array $e) use ($ziel): bool {
+            $hin = mb_strtolower($e['direction']);
+            return $ziel === '' || $hin === '' || str_contains($hin, mb_substr($ziel, 0, 8))
+                || str_contains($ziel, mb_substr($hin, 0, 8));
+        };
+        $kandidaten = array_values(array_filter(self::events($res) ?? [],
+            static fn(array $e): bool => $e['line'] === $linie && abs($e['planned'] - $planned) <= 90));
+        $richtig = array_values(array_filter($kandidaten, $passt));
+        usort($richtig, static fn($a, $b) => abs($a['planned'] - $planned) <=> abs($b['planned'] - $planned));
+        $best = $richtig[0] ?? (count($kandidaten) === 1 ? $kandidaten[0] : null);
+        if ($best === null || ($best['real'] === null && !$best['cancelled'])) {
+            return null;
+        }
+        return [
+            'delay'     => $best['real'] === null ? 0 : (int) round(($best['real'] - $best['planned']) / 60),
+            'cancelled' => $best['cancelled'],
+            'platform'  => $best['platform'],
+            'direction' => $best['direction'],
+        ];
+    }
+
+    /** Die Abfahrts- (oder Ankunfts-)tafel einer Haltestelle ab einem Zeitpunkt (Ortszeit München). */
+    private function boardUrl(string $globalId, int $ab, bool $arrival = false): string
     {
         $t = (new DateTimeImmutable('@' . $ab))->setTimezone(new DateTimeZone('Europe/Berlin'));
         return rtrim((string) $this->cfg['endpoint'], '/') . '?' . http_build_query([
@@ -119,7 +165,7 @@ final class MvvEfa
             'name_dm'      => $globalId,
             'mode'         => 'direct',
             'useRealtime'  => 1,
-            'itdDateTimeDepArr' => 'dep',
+            'itdDateTimeDepArr' => $arrival ? 'arr' : 'dep',
             'itdDate'      => $t->format('Ymd'),
             'itdTime'      => $t->format('Hi'),
             'limit'        => 40,
@@ -140,11 +186,13 @@ final class MvvEfa
         $out = [];
         foreach ($res['json']['stopEvents'] as $e) {
             $tr = $e['transportation'] ?? [];
-            $plan = strtotime((string) ($e['departureTimePlanned'] ?? ''));
+            // Auf der Ankunftstafel stehen die Ankunftszeiten.
+            $plan = strtotime((string) ($e['departureTimePlanned'] ?? $e['arrivalTimePlanned'] ?? ''));
             if ($plan === false) {
                 continue;
             }
-            $est = isset($e['departureTimeEstimated']) ? strtotime((string) $e['departureTimeEstimated']) : false;
+            $schaetzung = $e['departureTimeEstimated'] ?? $e['arrivalTimeEstimated'] ?? null;
+            $est = $schaetzung !== null ? strtotime((string) $schaetzung) : false;
             $status = array_map('strval', (array) ($e['realtimeStatus'] ?? []));
             $out[] = [
                 'line'      => self::norm((string) ($tr['number'] ?? $tr['disassembledName'] ?? '')),
