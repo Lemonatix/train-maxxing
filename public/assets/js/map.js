@@ -16,6 +16,11 @@
 
 import { typeOf } from './data/trains.js';
 
+/** So oft wird während einer Geste höchstens voll gezeichnet - siehe renderFast(). */
+const FULL_RENDER_MS = 250;
+/** So lange muss eine Geste ruhen, bis voll gezeichnet wird. */
+const SETTLE_MS = 140;
+
 const NS = 'http://www.w3.org/2000/svg';
 
 /**
@@ -886,11 +891,11 @@ export class RouteMap {
       lat: yToLat(latToY(lat, z) + dy, z),
       lon: xToLon(lonToX(lon, z) + dx, z),
     };
-    // Beim Ziehen NICHT sofort zeichnen: pointermove feuert auf schnellen
+    // Beim Ziehen NICHT neu zeichnen: pointermove feuert auf schnellen
     // Mäusen und Trackpads über hundertmal pro Sekunde, und jedes render()
-    // baut Kachelgitter und SVG-Overlay komplett neu auf. Gebündelt auf
-    // einen Frame bleibt das Ziehen auch auf schwacher Hardware flüssig.
-    this.renderSoon();
+    // baut Kachelgitter und SVG-Overlay komplett neu auf. renderFast()
+    // verschiebt nur die fertigen Ebenen.
+    this.renderFast();
   }
 
   /**
@@ -983,7 +988,9 @@ export class RouteMap {
 
     this.zoom = z1;
     this.center = { lat: yToLat(ny, z1), lon: xToLon(nx, z1) };
-    this.render();
+    // Zoomen kommt fast immer in vielen kleinen Schritten - Mausrad, zwei
+    // Finger, die Animation der Knöpfe. Auch hier nur transformieren.
+    this.renderFast();
     if (!quiet) this.onViewChange && this.onViewChange();
   }
 
@@ -1698,6 +1705,64 @@ export class RouteMap {
     this.renderTiles(w, h, cx, cy);
     this.renderOverlay(w, h, toPx);
     this.renderScale();
+
+    // Stand der Ebenen merken: bis zum nächsten vollen Zeichnen verschiebt
+    // renderFast() sie nur noch. Die Transformation von eben ist damit
+    // eingerechnet und fällt weg.
+    this._base = { zoom: z, cx, cy, w, h };
+    this._fullAt = performance.now();
+    this.tileLayer.style.transform = '';
+    this.svg.style.transform = '';
+  }
+
+  /**
+   * Zeichnen während einer Geste: die fertigen Ebenen per CSS-Transformation
+   * verschieben und skalieren, statt sie neu aufzubauen.
+   *
+   * WARUM: render() setzt jede Kachel neu und baut das SVG mit allen Routen
+   * und Zügen komplett neu auf. Bei jedem Zwischenschritt einer Geste - beim
+   * Ziehen über hundertmal pro Sekunde - kostete das Layout und Zeichnen,
+   * und gerade Firefox unter Linux kam dabei sichtbar ins Stocken. Eine
+   * Transformation erledigt die Grafikkarte, ohne dass sich am Dokument
+   * etwas ändert.
+   *
+   * Voll gezeichnet wird trotzdem: höchstens alle FULL_RENDER_MS, damit am
+   * Rand neue Kacheln nachkommen, und noch einmal, sobald die Bewegung
+   * SETTLE_MS lang ruht - dann stimmen Linienbreiten und Beschriftungen
+   * wieder.
+   */
+  renderFast() {
+    const b = this._base;
+    const { w, h } = this.size();
+    if (!b || b.w !== w || b.h !== h || !this.built || !this.active) {
+      this.renderSoon();
+      return;
+    }
+    if (!this._fastRaf) {
+      const anwenden = () => {
+        cancelAnimationFrame(this._fastRaf?.raf);
+        clearTimeout(this._fastRaf?.timer);
+        this._fastRaf = null;
+        const base = this._base;
+        if (!base) return;
+        const z = this.zoom;
+        const s = 2 ** (z - base.zoom);
+        const cx = lonToX(this.center.lon, z);
+        const cy = latToY(this.center.lat, z);
+        // Ein Punkt p der Ebene von damals liegt jetzt bei s·p + t.
+        const tx = w / 2 - s * (w / 2) + s * base.cx - cx;
+        const ty = h / 2 - s * (h / 2) + s * base.cy - cy;
+        const t = `translate(${tx}px, ${ty}px) scale(${s})`;
+        this.tileLayer.style.transform = t;
+        this.svg.style.transform = t;
+        this.renderScale();
+      };
+      // Mit Zeitgeber als Rückfall - siehe renderSoon().
+      this._fastRaf = { raf: requestAnimationFrame(anwenden), timer: setTimeout(anwenden, 50) };
+    }
+    clearTimeout(this._settleTimer);
+    this._settleTimer = setTimeout(() => this.render(), SETTLE_MS);
+    if (performance.now() - (this._fullAt || 0) > FULL_RENDER_MS) this.renderSoon();
   }
 
   /**
