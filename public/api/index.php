@@ -622,6 +622,33 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
             'fromName' => trim((string) ($_GET['fromName'] ?? '')),
             'toName'   => trim((string) ($_GET['toName'] ?? '')),
         ];
+        if (($config['providers']['mvg']['enabled'] ?? false) !== true) {
+            fail('MVG-Provider ist abgeschaltet.', 400);
+        }
+        // STATT DER KENNUNG EIN PUNKT ("@48.2,11.6"): ein Abschnitt aus der
+        // DB-Suche kennt nur DB-Halte. Hat die DB für ihn keine Ist-Zeiten -
+        // bei der U6 der Normalfall -, fragt die Live-Verfolgung die MVG-Tafel
+        // der nächstgelegenen Haltestelle. Die Zuordnung Punkt -> Haltestelle
+        // ändert sich nie und wird eine Woche gemerkt.
+        foreach (['from', 'to'] as $k) {
+            if (preg_match('/^@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)$/', $leg[$k], $m)) {
+                $lat = (float) $m[1];
+                $lon = (float) $m[2];
+                if (!Mvg::inArea($lat, $lon)) {
+                    fail('Der Halt liegt nicht im MVG-Netz.', 400);
+                }
+                $nkey = sprintf('mvgnear:%.4f,%.4f', $lat, $lon);
+                $id = $cache->get($nkey, 7 * 86400);
+                if ($id === null) {
+                    $id = (new Mvg($http, $config['providers']['mvg']))->nearestStation($lat, $lon)['globalId'] ?? '';
+                    $cache->set($nkey, $id);
+                }
+                if ($id === '') {
+                    fail('Keine MVG-Haltestelle in der Nähe.', 404);
+                }
+                $leg[$k] = $id;
+            }
+        }
         foreach (['from', 'to'] as $k) {
             if (!preg_match('/^[A-Za-z0-9:_-]{3,60}$/', $leg[$k])) {
                 fail('MVG-Halt ungültig.', 400);
@@ -629,9 +656,6 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
         }
         if ($leg['line'] === '' || $leg['dep'] === '' || $leg['arr'] === '') {
             fail('Parameter "line", "dep" und "arr" sind erforderlich.', 400);
-        }
-        if (($config['providers']['mvg']['enabled'] ?? false) !== true) {
-            fail('MVG-Provider ist abgeschaltet.', 400);
         }
         $key = 'jdmvg:' . md5(json_encode($leg));
         $cached = $cache->get($key, 30);
