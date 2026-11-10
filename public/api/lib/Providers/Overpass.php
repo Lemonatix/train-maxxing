@@ -56,10 +56,21 @@ final class Overpass
     private Http $http;
     private array $cfg;
 
-    public function __construct(Http $http, array $cfg)
+    /** So lange gilt eine Instanz als tot, nachdem sie nicht geantwortet hat. */
+    private const DEAD_FOR_S = 600;
+    /** So lange wird die Instanz gemerkt, die zuletzt geantwortet hat. */
+    private const GOOD_FOR_S = 6 * 3600;
+    /** Verbindungsaufbau - wer in fünf Sekunden nicht antwortet, ist weg. */
+    private const CONNECT_S = 5;
+
+    private ?Cache $cache;
+
+    /** @param ?Cache $cache Merkt sich, welche Instanz gerade lebt - siehe ask(). */
+    public function __construct(Http $http, array $cfg, ?Cache $cache = null)
     {
-        $this->http = $http;
-        $this->cfg  = $cfg;
+        $this->http  = $http;
+        $this->cfg   = $cfg;
+        $this->cache = $cache;
     }
 
     /**
@@ -78,18 +89,31 @@ final class Overpass
      */
     private function ask(string $query, ?string &$error = null): ?array
     {
-        $endpoints = self::endpoints($this->cfg);
+        $endpoints = self::ordered(self::endpoints($this->cfg), $this->cache);
         if ($endpoints === []) {
             $error = 'Overpass: keine Instanz konfiguriert';
             return null;
         }
 
+        // DIE ZEIT GEHT AN DIE, DIE LEBT. Vorher bekam jede Instanz ein
+        // Viertel des Budgets, der Reihe nach. Im November 2026 antwortete
+        // nur noch eine von vieren, und die brauchte schon für eine kleine
+        // Abfrage elf Sekunden: die drei anderen verbrauchten zusammen 45
+        // Sekunden, der lebenden blieben fünfzehn - zu wenig, und jeder
+        // Umstiegsplan scheiterte. Jetzt steht die zuletzt erfolgreiche
+        // vorn und bekommt den Großteil, tote kommen zehn Minuten lang ans
+        // Ende, und ein toter Server kostet nur noch den Verbindungsaufbau.
         $budget = max(20, (int) ($this->cfg['timeout'] ?? 60));
-        $jeInstanz = max(12, (int) floor($budget / count($endpoints)));
+        $ende = time() + $budget;
 
         $letzter = 0;
-        foreach ($endpoints as $url) {
-            $res = (new Http($jeInstanz))->request(
+        foreach ($endpoints as $i => $url) {
+            $rest = $ende - time();
+            if ($rest < 8) {
+                break;
+            }
+            $zeit = $i === 0 ? (int) max(15, floor($rest * 0.7)) : $rest;
+            $res = (new Http($zeit, false, self::CONNECT_S))->request(
                 'POST',
                 rtrim($url, '/'),
                 [
@@ -99,13 +123,45 @@ final class Overpass
                 'data=' . rawurlencode($query)
             );
             if ($res['ok'] && is_array($res['json'])) {
+                $this->cache?->set('overpass:good', $url);
                 return $res['json'];
             }
             $letzter = (int) $res['status'];
+            // Nicht erreichbar, Zeit um oder überlastet: eine Weile meiden.
+            if ($letzter === 0 || $letzter === 429 || $letzter >= 500) {
+                $this->cache?->set('overpass:dead:' . md5($url), time());
+            }
         }
 
         $error = 'Overpass: HTTP ' . $letzter;
         return null;
+    }
+
+    /**
+     * Die Instanzen in der Reihenfolge, in der es sich lohnt: die zuletzt
+     * erfolgreiche zuerst, dann die übrigen wie konfiguriert, die gerade
+     * toten zuletzt - nicht weggelassen, denn vielleicht leben sie wieder.
+     *
+     * @param string[] $endpoints
+     * @return string[]
+     */
+    public static function ordered(array $endpoints, ?Cache $cache, ?int $now = null): array
+    {
+        if ($cache === null) {
+            return $endpoints;
+        }
+        $now ??= time();
+        $gut = $cache->get('overpass:good', self::GOOD_FOR_S);
+        $rang = static function (string $url) use ($cache, $gut, $now): int {
+            $tot = $cache->get('overpass:dead:' . md5($url), self::DEAD_FOR_S);
+            if ($tot !== null && $now - (int) $tot < self::DEAD_FOR_S) {
+                return 2;
+            }
+            return $url === $gut ? 0 : 1;
+        };
+        $mit = array_map(static fn(string $u, int $i): array => [$rang($u), $i, $u], $endpoints, array_keys($endpoints));
+        usort($mit, static fn(array $a, array $b): int => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
+        return array_column($mit, 2);
     }
 
     /**
