@@ -36,6 +36,7 @@ require $lib . '/Providers/OebbHafas.php';
 require $lib . '/Providers/DbVendo.php';
 require $lib . '/Providers/Mvg.php';
 require $lib . '/Providers/MvvEfa.php';
+require $lib . '/StationWalks.php';
 require $lib . '/CityTrips.php';
 require $lib . '/Inbound.php';
 require $lib . '/Providers/Overpass.php';
@@ -889,6 +890,42 @@ pruefe('EFA: Linie, Plan, Prognose, Gleis, Fahrtnummer',
     [$efa[0]['line'], $efa[0]['real'] - $efa[0]['planned'], $efa[0]['platform'], $efa[0]['trip']], ['u6', 180, '2', '4711']);
 pruefe('EFA: ohne Prognose kein Ist, Ausfall erkannt', [$efa[1]['real'], $efa[1]['cancelled']], [null, true]);
 pruefe('EFA: keine Antwort ist null, keine leere Liste', MvvEfa::events(['ok' => false, 'json' => null]), null);
+
+// ---------------------------------------------------------------------
+echo "\nLaufwege im Bahnhof - aus dem gezeichneten Wegenetz\n";
+
+// Kopfbahnhof im Kleinen: zwei Bahnsteigköpfe am Querbahnsteig, ein
+// Aufgang zur Ebene darunter. Rund 11 m je 0,0001 Grad Breite.
+$wdir = sys_get_temp_dir() . '/tm-test-walks-' . getmypid();
+@mkdir($wdir);
+file_put_contents("$wdir/8000001.json", json_encode([
+    'nodes' => [
+        'G1@0' => [48.0000, 11.0000, 0], 'k1@0' => [48.0000, 11.0010, 0],
+        'G2@0' => [48.0005, 11.0000, 0], 'k2@0' => [48.0005, 11.0010, 0],
+        'q@0'  => [48.0003, 11.0012, 0], 'q@-1' => [48.0003, 11.0013, -1],
+        'G9@-1' => [48.0003, 11.0020, -1],
+    ],
+    'tracks' => ['1' => 'G1@0', '2' => 'G2@0', '9' => 'G9@-1'],
+    'edges' => [
+        ['a' => 'G1@0', 'b' => 'k1@0', 'kind' => 'board', 'reviewed' => true],
+        ['a' => 'G2@0', 'b' => 'k2@0', 'kind' => 'board', 'reviewed' => true],
+        ['a' => 'G9@-1', 'b' => 'q@-1', 'kind' => 'board', 'reviewed' => true],
+        ['a' => 'k1@0', 'b' => 'q@0', 'via' => [[48.0001, 11.0012]], 'kind' => 'walk', 'reviewed' => true],
+        ['a' => 'k2@0', 'b' => 'q@0', 'kind' => 'walk', 'reviewed' => true],
+        ['a' => 'q@0', 'b' => 'q@-1', 'kind' => 'steps', 'reviewed' => false],
+    ],
+]));
+$netz = StationWalks::load($wdir, '8000001');
+$r = $netz->route('1', '2');
+pruefe('Weg von Kopf zu Kopf, ohne das Stück am Bahnsteig', [count($r['points']), $r['points'][0], $r['reviewed']],
+    [4, [48.0, 11.001, 0], true]);
+pruefe('Länge über den Zwischenpunkt, auf 10 m gerundet (18,6 + 22,3 + 26,8 m)', $r['meters'], 70);
+pruefe('über einen ungeprüften Abschnitt: kein Weg', $netz->route('1', '9'), null);
+$p = $netz->route('1', '9', true);
+pruefe('im Prüfmodus doch, mit Ebenenwechsel und als ungeprüft markiert',
+    [$p['changes'], $p['reviewed']], [[['kind' => 'steps', 'from' => 0, 'to' => -1]], false]);
+pruefe('unbekanntes Gleis oder Bahnhof ohne Netz: null',
+    [$netz->route('1', '77'), StationWalks::load($wdir, '8000002')], [null, null]);
 
 // ---------------------------------------------------------------------
 echo "\nOverpass - welche Instanz zuerst\n";
