@@ -25,6 +25,13 @@
  */
 final class StationWalks
 {
+    /**
+     * So weit darf der gezeichnete Weg von den OSM-Abschnitten abweichen.
+     * Die Bahnsteigköpfe hängen über kurze Stichwege am Querbahnsteig; der
+     * kürzeste Weg nahm einen davon mit und schlug an einem fremden
+     * Bahnsteigkopf einen Haken, den niemand läuft (München, 15 -> 11).
+     */
+    private const SMOOTH_M = 6.0;
     /** Gehgeschwindigkeit mit Gepäck im Gedränge, in m/s. */
     private const SPEED = 1.1;
     /** Zuschlag je Ebenenwechsel, in Sekunden: Warten am Aufzug, Treppe hoch. */
@@ -37,11 +44,22 @@ final class StationWalks
         $this->data = $data;
     }
 
-    /** Das Wegenetz eines Bahnhofs, oder null, wenn es keins gibt. */
+    /**
+     * Das Wegenetz eines Bahnhofs, oder null, wenn es keins gibt.
+     *
+     * Manche Bahnhöfe führt die DB unter mehreren Nummern: in München die
+     * Flügelbahnhöfe als "München Hbf Gl.5-10" (8098262) und "Gl.27-36"
+     * (8098261). Gleise und Wege sind dieselben - aliases.json verweist sie
+     * auf das Netz unter 8000261.
+     */
     public static function load(string $dir, string $eva): ?self
     {
         if (!preg_match('/^\d{7}$/', $eva)) {
             return null;
+        }
+        if (!is_file("$dir/$eva.json")) {
+            $alias = json_decode((string) @file_get_contents("$dir/aliases.json"), true);
+            $eva = is_array($alias) && preg_match('/^\d{7}$/', (string) ($alias[$eva] ?? '')) ? (string) $alias[$eva] : $eva;
         }
         $roh = @file_get_contents("$dir/$eva.json");
         $d = $roh === false ? null : json_decode($roh, true);
@@ -78,10 +96,18 @@ final class StationWalks
         $prev = [];
         $offen = new SplPriorityQueue();
         $offen->insert($a, 0);
+        // GLEISE SIND KEINE ABKÜRZUNG. Ein- und Aussteigen kostet nichts
+        // (board) - durfte die Suche durch einen fremden Gleispunkt hindurch,
+        // stieg sie vorn an Gleis 11 ein und hinten wieder aus und sparte
+        // sich so den Gang: München 13 -> 9 kam mit 30 statt 300 m heraus.
+        $gleise = array_flip(array_values($tracks));
         while (!$offen->isEmpty()) {
             $u = $offen->extract();
             if ($u === $b) {
                 break;
+            }
+            if ($u !== $a && isset($gleise[$u])) {
+                continue;
             }
             foreach ($nachbarn[$u] ?? [] as [$v, $s, $i, $rueck]) {
                 $nd = $dist[$u] + $s;
@@ -137,12 +163,66 @@ final class StationWalks
             return null;
         }
         return [
-            'points'   => $punkte,
+            'points'   => self::smooth($punkte),
             'meters'   => (int) round($meter / 10) * 10,
             'minutes'  => max(1, (int) ceil($dist[$b] / 60)),
             'changes'  => $wechsel,
             'reviewed' => $alleGeprueft,
         ];
+    }
+
+    /**
+     * Kleine Haken aus dem Weg nehmen (Douglas-Peucker je Ebene). Die Stellen,
+     * an denen die Ebene wechselt, bleiben, wo sie sind.
+     *
+     * @param array<int,array{0:float,1:float,2:float|int}> $punkte
+     */
+    public static function smooth(array $punkte, float $eps = self::SMOOTH_M): array
+    {
+        $out = [];
+        $start = 0;
+        $n = count($punkte);
+        for ($i = 1; $i <= $n; $i++) {
+            if ($i < $n && $punkte[$i][2] == $punkte[$start][2]) {
+                continue;
+            }
+            // $start .. $i-1 liegen auf einer Ebene.
+            $stueck = self::douglasPeucker(array_slice($punkte, $start, $i - $start), $eps);
+            foreach ($stueck as $p) {
+                $out[] = $p;
+            }
+            $start = $i;
+        }
+        return $out;
+    }
+
+    private static function douglasPeucker(array $ps, float $eps): array
+    {
+        if (count($ps) < 3) {
+            return $ps;
+        }
+        $a = $ps[0];
+        $b = $ps[count($ps) - 1];
+        $kx = cos(deg2rad((float) $a[0]));
+        $xy = static fn(array $p): array => [((float) $p[1] - (float) $a[1]) * 111320 * $kx, ((float) $p[0] - (float) $a[0]) * 111320];
+        [$bx, $by] = $xy($b);
+        $len = hypot($bx, $by);
+        $weit = 0.0;
+        $idx = 0;
+        for ($i = 1; $i < count($ps) - 1; $i++) {
+            [$px, $py] = $xy($ps[$i]);
+            $d = $len < 0.01 ? hypot($px, $py) : abs($bx * $py - $by * $px) / $len;
+            if ($d > $weit) {
+                $weit = $d;
+                $idx = $i;
+            }
+        }
+        if ($weit <= $eps) {
+            return [$a, $b];
+        }
+        $links = self::douglasPeucker(array_slice($ps, 0, $idx + 1), $eps);
+        $rechts = self::douglasPeucker(array_slice($ps, $idx), $eps);
+        return array_merge(array_slice($links, 0, -1), $rechts);
     }
 
     /** Alle Knoten und Abschnitte - für die Prüfansicht. */
