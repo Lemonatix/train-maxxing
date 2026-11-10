@@ -1,5 +1,5 @@
 /**
- * Gemerkte Reisen, Lieblingsorte, Abos und Lieblingszüge auf mehreren
+ * Gemerkte Reisen, Lieblingsorte, Pendelstrecken, Abos und Lieblingszüge auf mehreren
  * Geräten - mit einem Sync-Code statt Konto.
  *
  * DER CODE ist das Einzige, was die Geräte teilen: 20 Zeichen, rund 100 Bit
@@ -18,8 +18,8 @@
  * WANN: beim Start, beim Zurückkehren in die App, wenn wieder Netz da ist,
  * und kurz nach jeder Änderung.
  *
- * DREI TEILE, zwei Regeln:
- *   - Reisen und Lieblingsorte sind Listen. Zusammengeführt wird, was beide
+ * VIER TEILE, zwei Regeln:
+ *   - Reisen, Lieblingsorte und Pendelstrecken sind Listen. Zusammengeführt wird, was beide
  *     Seiten haben; was eine Seite nach dem Merken gelöscht hat, ist weg.
  *   - Abos und Lieblingszüge sind Einstellungen. Dort gewinnt die zuletzt
  *     geänderte Fassung als Ganzes (mergePrefs) - zwei Abo-Listen zu
@@ -27,7 +27,7 @@
  *     Geräten los sein.
  *
  * FORMAT: Die Reisen stehen weiter oben im Block (trips, removed), wo
- * Version 1 sie erwartet; Lieblingsorte und Einstellungen kommen als eigene
+ * Version 1 sie erwartet; Lieblingsorte, Pendelstrecken und Einstellungen kommen als eigene
  * Felder dazu. Ein noch nicht neu geladenes Gerät verliert so keine Reisen -
  * es lässt nur die neuen Felder weg, bis es neu lädt.
  */
@@ -35,6 +35,7 @@ import { api } from './api.js';
 import { siteUrl } from './site.js';
 import { trips, mergeTrips, tripsSignature } from './trips.js';
 import { places, mergeFavorites, favoritesSignature } from './favorites.js';
+import { commutes, mergeCommutes, commutesSignature } from './commutes.js';
 
 const KEY = 'train-maxxing:sync';
 /** Ohne I, L, O, U: nichts, was man beim Abtippen verwechselt. */
@@ -124,6 +125,7 @@ export async function encryptState(key, state) {
     trips: state.trips,
     removed: state.removed,
     ...(state.favorites ? { favorites: state.favorites } : {}),
+    ...(state.commutes ? { commutes: state.commutes } : {}),
     ...(state.prefs ? { prefs: state.prefs } : {}),
   }));
   let format = 0;
@@ -159,6 +161,11 @@ export async function decryptState(key, data) {
     favorites: {
       items: Array.isArray(v.favorites?.items) ? v.favorites.items : [],
       removed: obj(v.favorites?.removed) || {},
+    },
+    // Ältere Blöcke kennen keine Pendelstrecken: dann eben leer.
+    commutes: {
+      items: Array.isArray(v.commutes?.items) ? v.commutes.items : [],
+      removed: obj(v.commutes?.removed) || {},
     },
     prefs: obj(v.prefs),
   };
@@ -207,28 +214,35 @@ let prefsSource = null;
 
 function snapshotAll() {
   const t = trips.snapshot();
-  return { trips: t.trips, removed: t.removed, favorites: places.snapshot(), prefs: prefsSource?.snapshot() ?? null };
+  return {
+    trips: t.trips, removed: t.removed, favorites: places.snapshot(), commutes: commutes.snapshot(),
+    prefs: prefsSource?.snapshot() ?? null,
+  };
 }
 
-/** @returns {{trips, removed, favorites, prefs}} */
+/** @returns {{trips, removed, favorites, commutes, prefs}} */
 export function mergeAll(lokal, fern) {
   const t = mergeTrips(lokal, fern);
   return {
     trips: t.trips,
     removed: t.removed,
     favorites: mergeFavorites(lokal.favorites, fern.favorites),
+    commutes: mergeCommutes(lokal.commutes, fern.commutes),
     prefs: mergePrefs(lokal.prefs, fern.prefs),
   };
 }
 
 export function signatureAll(st) {
-  return JSON.stringify([tripsSignature(st), favoritesSignature(st.favorites), prefsSignature(st.prefs)]);
+  return JSON.stringify([
+    tripsSignature(st), favoritesSignature(st.favorites), commutesSignature(st.commutes), prefsSignature(st.prefs),
+  ]);
 }
 
 /** Nur übernehmen, was sich wirklich geändert hat - jede Übernahme zeichnet neu. */
 function adoptAll(merged, lokal) {
   if (tripsSignature(merged) !== tripsSignature(lokal)) trips.adopt(merged);
   if (favoritesSignature(merged.favorites) !== favoritesSignature(lokal.favorites)) places.adopt(merged.favorites);
+  if (commutesSignature(merged.commutes) !== commutesSignature(lokal.commutes)) commutes.adopt(merged.commutes);
   if (prefsSource && merged.prefs && prefsSignature(merged.prefs) !== prefsSignature(lokal.prefs)) {
     prefsSource.adopt(merged.prefs);
   }
@@ -276,7 +290,7 @@ async function runOnce() {
   for (let runde = 0; runde < 4; runde++) {
     const fern = remote.data
       ? await decryptState(key, remote.data)
-      : { trips: [], removed: {}, favorites: { items: [], removed: {} }, prefs: null };
+      : { trips: [], removed: {}, favorites: { items: [], removed: {} }, commutes: { items: [], removed: {} }, prefs: null };
     const lokal = snapshotAll();
     const merged = mergeAll(lokal, fern);
     const sig = signatureAll(merged);
@@ -382,6 +396,7 @@ export const sync = {
   start() {
     trips.onChange(() => { if (!adopting) schedule(DEBOUNCE_MS); });
     places.onChange(() => { if (!adopting) schedule(DEBOUNCE_MS); });
+    commutes.onChange(() => { if (!adopting) schedule(DEBOUNCE_MS); });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && Date.now() - lastRun > RESUME_MIN_MS) schedule(0);
     });
