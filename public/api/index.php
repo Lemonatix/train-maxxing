@@ -135,6 +135,7 @@ require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
 require __DIR__ . '/lib/Providers/CoachSequence.php';
 require __DIR__ . '/lib/Providers/Mvg.php';
+require __DIR__ . '/lib/Providers/MvvEfa.php';
 require __DIR__ . '/lib/Providers/Overpass.php';
 require __DIR__ . '/lib/Providers/StreckenInfo.php';
 require __DIR__ . '/lib/Providers/SwissOpenData.php';
@@ -254,6 +255,9 @@ const SHARE_MAX_BYTES = 400000;
  * verspätet erst danach fahren. Siehe handleDepartures().
  */
 const BOARD_LOOKBACK_MIN = 60;
+
+/** So weit darf ein mitgelieferter Bahnhof von der Anfrage entfernt sein. */
+const BUNDLED_STATION_M = 400;
 
 
 // Ab hier wird jeder Aufruf nach draußen mitgezählt - check.php zeigt es.
@@ -661,6 +665,17 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
         $cached = $cache->get($key, 30);
         if ($cached !== null) {
             ok(['train' => $cached, 'cached' => true]);
+        }
+        // Erst die Auskunft des MVV: sie hat für jede Fahrt eine Prognose,
+        // die MVG-Tafel nur für einzelne (siehe MvvEfa). Die MVG bleibt der
+        // Rückfall, wenn die EFA nicht antwortet oder nichts weiß.
+        $efa = new MvvEfa($http, $config['providers']['mvv'] ?? []);
+        if ($efa->isEnabled()) {
+            $res = $efa->trip($leg);
+            if ($res['ok'] && !empty($res['data']['hasRealtime'])) {
+                $cache->set($key, $res['data']);
+                ok(['train' => $res['data'], 'cached' => false]);
+            }
         }
         $res = (new Mvg($http, $config['providers']['mvg']))->trip($leg);
         if (!$res['ok']) {
@@ -1942,6 +1957,40 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
 }
 
 /**
+ * Die mitgelieferten Bahnsteige des nächstgelegenen großen Bahnhofs, wenn
+ * er höchstens BUNDLED_STATION_M entfernt ist - sonst null.
+ *
+ * Die Koordinate der Anfrage stammt aus dem Fahrplan und liegt je nach
+ * Quelle ein paar hundert Meter neben der aus stations.js; die Abfrage
+ * dahinter fasst ohnehin 350 m um den Bahnhof.
+ */
+function bundledStation(float $lat, float $lon): ?array
+{
+    static $index = null;
+    $dir = __DIR__ . '/data/platforms';
+    if ($index === null) {
+        $roh = @file_get_contents($dir . '/index.json');
+        $index = $roh === false ? [] : (json_decode($roh, true) ?: []);
+    }
+    $best = null;
+    $bestM = BUNDLED_STATION_M;
+    $kx = cos(deg2rad($lat));
+    foreach ($index as $eva => [$la, $lo]) {
+        $m = hypot(($la - $lat) * 111320, ($lo - $lon) * 111320 * $kx);
+        if ($m < $bestM) {
+            $bestM = $m;
+            $best = (string) $eva;
+        }
+    }
+    if ($best === null || !preg_match('/^\d{7}$/', $best)) {
+        return null;
+    }
+    $roh = @file_get_contents("$dir/$best.json");
+    $daten = $roh === false ? null : json_decode($roh, true);
+    return is_array($daten) && ($daten['platforms'] ?? []) !== [] ? $daten : null;
+}
+
+/**
  * Zustand der Aufzüge und Rolltreppen eines deutschen Bahnhofs (DB FaSta).
  *
  * Die Bahnhofsnummer ändert sich nie (30 Tage Cache), der Zustand ständig
@@ -1996,11 +2045,18 @@ function stationData(Http $http, array $config, Cache $cache, float $lat, float 
     $key  = sprintf('station:%.3f,%.3f', $lat, $lon);
     $long = (int) ($config['cache_ttl']['platforms'] ?? 604800);
 
-    $cached = $cache->get($key, $long);
+    // Gelesen wird auch, was älter ist als eine Woche - als Rückfall, falls
+    // Overpass gerade nicht antwortet (siehe unten). Bahnsteige bewegen
+    // sich nicht; ein Plan von vor drei Wochen ist besser als keiner.
+    $cached = $cache->get($key, $long * 5);
     // Einträge von vor den Treppen und Aufzügen einmal neu holen - sonst
     // fehlten sie eine Woche lang an jedem schon besuchten Bahnhof.
     if ($cached !== null && !array_key_exists('connectors', $cached)) {
         $cached = null;
+    }
+    $alt = $cached !== null && ($cached['platforms'] ?? []) !== [] ? $cached : null;
+    if ($cached !== null && time() - (int) ($cached['ts'] ?? 0) > $long) {
+        $cached = null; // abgelaufen: neu fragen, $alt bleibt als Rückfall
     }
     if ($cached !== null) {
         // Ein LEERES Ergebnis darf nicht eine Woche lang gelten. Overpass
@@ -2015,9 +2071,20 @@ function stationData(Http $http, array $config, Cache $cache, float $lat, float 
         }
     }
 
-    $op  = new Overpass($http, $config['providers']['overpass']);
+    // DIE GROSSEN BAHNHÖFE STEHEN FEST IM PROJEKT (bin/build_platforms.php):
+    // Overpass war zuletzt so überlastet, dass der Plan fast nie kam.
+    $fest = bundledStation($lat, $lon);
+    if ($fest !== null) {
+        $cache->set($key, ['ts' => time()] + $fest);
+        return $fest;
+    }
+
+    $op  = new Overpass($http, $config['providers']['overpass'], $cache);
     $res = $op->stationData($lat, $lon);
     if (!$res['ok']) {
+        if ($alt !== null) {
+            return $alt;
+        }
         $error = $res['error'];
         return null;
     }
