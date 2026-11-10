@@ -980,13 +980,33 @@ console.log('\nReisen abgleichen - zusammenführen und verschlüsseln');
   pruefe('ohne Einstellungen auf einer Seite: die andere bleibt',
     [mergePrefs(null, pa)?.discounts, mergePrefs(pa, null)?.discounts], [['ga'], ['ga']]);
 
-  const voll = { ...x, favorites: fa, prefs: pb };
+  // ---- Pendelstrecken: Liste mit Löschungen wie die Favoriten --------
+  const { mergeCommutes, commutesSignature } = await import('../public/assets/js/commutes.js');
+  const strecke = (id, geaendert, time = '07:30') => ({
+    id, from: { id: '8000261', name: 'München Hbf' }, to: { id: '8000013', name: 'Augsburg Hbf' },
+    time, days: [1, 2, 3, 4, 5], savedAt: tag(geaendert),
+  });
+  pruefe('Pendelstrecken: beide Seiten zusammen',
+    ids(mergeCommutes({ items: [strecke('a', -2)], removed: {} }, { items: [strecke('b', -1)], removed: {} })), ['a', 'b']);
+  pruefe('auf dem anderen Gerät gelöscht: auch hier weg',
+    ids(mergeCommutes({ items: [strecke('a', -2)], removed: {} }, { items: [], removed: { a: tag(-1) } })), []);
+  pruefe('Uhrzeit auf dem anderen Gerät geändert: die neuere Fassung gilt',
+    mergeCommutes({ items: [strecke('a', -2)], removed: {} }, { items: [strecke('a', -1, '08:10')], removed: {} }).items[0].time,
+    '08:10');
+  const ca = { items: [strecke('a', -1, '07:30')], removed: { z: tag(-1) } };
+  const cb = { items: [strecke('a', -1, '08:10'), strecke('b', -3)], removed: {} };
+  pruefe('Pendelstrecken: beide Richtungen, dasselbe Ergebnis',
+    JSON.stringify(mergeCommutes(ca, cb)) === JSON.stringify(mergeCommutes(cb, ca)), true);
+
+  const voll = { ...x, favorites: fa, commutes: cb, prefs: pb };
   const blockNeu = await encryptState(k1.key, voll);
   const zurueckNeu = await decryptState(k1.key, blockNeu);
-  pruefe('verschlüsselt und zurück: Reisen, Favoriten und Einstellungen',
-    signatureAll(zurueckNeu) === signatureAll(voll), true);
+  pruefe('verschlüsselt und zurück: Reisen, Favoriten, Pendelstrecken und Einstellungen',
+    [signatureAll(zurueckNeu) === signatureAll(voll), commutesSignature(zurueckNeu.commutes) === commutesSignature(cb)],
+    [true, true]);
   pruefe('alter Block ohne Favoriten und Einstellungen: lesbar, Reisen da',
-    [tripsSignature(zurueck) === tripsSignature(x), zurueck.favorites.items.length, zurueck.prefs], [true, 0, null]);
+    [tripsSignature(zurueck) === tripsSignature(x), zurueck.favorites.items.length, zurueck.commutes.items.length, zurueck.prefs],
+    [true, 0, 0, null]);
   pruefe('alles zusammengeführt mit sich selbst: gleicher Fingerabdruck',
     signatureAll(mergeAll(voll, voll)) === signatureAll(voll), true);
 }
