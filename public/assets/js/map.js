@@ -1010,6 +1010,9 @@ export class RouteMap {
       for (const gl of gleise) {
         if (gl.rolle) pts.push(gl.pos);
       }
+      // Ein eingezeichneter Laufweg gehört ganz ins Bild - er kann weiter
+      // ausholen als die beiden Gleispunkte, etwa über den Querbahnsteig.
+      for (const p of this.station?.walk?.points || []) pts.push([p[0], p[1]]);
       if (pts.length < 2) {
         for (const gl of gleise) pts.push(gl.pos);
       }
@@ -1389,6 +1392,7 @@ export class RouteMap {
 
     // Zuerst die Verbinder, damit die Gleispunkte obenauf liegen.
     this.renderConnectors(g, w, h, toPx);
+    this.renderStationWalk(g, toPx, aufEbene);
 
     for (const gl of this.gleispunkte()) {
       const [x, y] = toPx(gl.pos);
@@ -1422,6 +1426,46 @@ export class RouteMap {
     }
 
     svg.append(g);
+  }
+
+  /**
+   * Der Laufweg von Gleis zu Gleis, wo es ein gezeichnetes Wegenetz gibt
+   * (StationWalks.php). Abschnitte auf einer anderen Ebene als der gezeigten
+   * treten zurück - wie die Gleispunkte.
+   */
+  renderStationWalk(g, toPx, aufEbene) {
+    const walk = this.station?.walk;
+    const pts = walk?.points || [];
+    if (pts.length < 2) return;
+    // In Stücke je Ebene teilen: jedes Stück eine Linie.
+    const stuecke = [];
+    for (let i = 1; i < pts.length; i++) {
+      const lv = pts[i - 1][2];
+      const letztes = stuecke[stuecke.length - 1];
+      if (letztes && letztes.lv === lv) letztes.pts.push(pts[i]);
+      else stuecke.push({ lv, pts: [pts[i - 1], pts[i]] });
+    }
+    // DAS STÜCK AM BAHNSTEIG: vom Gleispunkt bis zum Anfang des Wegs und vom
+    // Ende bis zum Gleispunkt. Wie lang es ist, hängt am Wagen - deshalb
+    // nur blass gepunktet, aber da, sonst hängen Weg und Gleise lose im Bild.
+    const rolle = Object.fromEntries(this.gleispunkte().filter((gl) => gl.rolle).map((gl) => [gl.rolle, gl.pos]));
+    for (const [pos, p] of [[rolle['is-from'], pts[0]], [rolle['is-to'], pts[pts.length - 1]]]) {
+      if (!pos) continue;
+      const pl = document.createElementNS(NS, 'polyline');
+      pl.setAttribute('points', [pos, p].map((q) => toPx([q[0], q[1]]).map((v) => v.toFixed(1)).join(',')).join(' '));
+      pl.setAttribute('class', 'map__xwalk-board' + (aufEbene(p[2]) ? '' : ' is-other-level'));
+      g.append(pl);
+    }
+    for (const s of stuecke) {
+      const d = s.pts.map((p) => toPx([p[0], p[1]]).map((v) => v.toFixed(1)).join(',')).join(' ');
+      const blass = aufEbene(s.lv) ? '' : ' is-other-level';
+      for (const cls of ['map__xwalk-casing', 'map__xwalk']) {
+        const pl = document.createElementNS(NS, 'polyline');
+        pl.setAttribute('points', d);
+        pl.setAttribute('class', cls + blass + (walk.reviewed ? '' : ' is-unreviewed'));
+        g.append(pl);
+      }
+    }
   }
 
   /**
