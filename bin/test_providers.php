@@ -856,6 +856,24 @@ pruefe('pünktlicher Zubringer: keine erwartete Verspätung',
     array_key_exists('expectedDeparture', $m['800'] ?? []) ? $m['800']['expectedDeparture'] : 'fehlt', null);
 
 // ---------------------------------------------------------------------
+echo "\nAktuelle Verspätung eines Zuglaufs\n";
+
+// Nacht-ICE: in Hamburg +40, bis Nürnberg aufgeholt, vor München +5.
+$jetzt = strtotime('2026-11-10T06:00:00+01:00');
+$lauf = [
+    ['delay' => 40, 'departure' => '2026-11-09T22:00:00+01:00', 'departureReal' => '2026-11-09T22:40:00+01:00'],
+    ['delay' => 12, 'arrival' => '2026-11-10T05:20:00+01:00', 'arrivalReal' => '2026-11-10T05:32:00+01:00'],
+    ['delay' => 5, 'arrival' => '2026-11-10T06:30:00+01:00', 'arrivalReal' => '2026-11-10T06:35:00+01:00'],
+    ['delay' => null, 'arrival' => '2026-11-10T07:10:00+01:00'],
+];
+pruefe('unterwegs: Verspätung am nächsten Halt, nicht die größte', OebbHafas::currentDelay($lauf, $jetzt), 5);
+pruefe('angekommen: die am letzten Halt mit Echtzeit',
+    OebbHafas::currentDelay($lauf, strtotime('2026-11-10T08:00:00+01:00')), 5);
+pruefe('noch nicht losgefahren: die am ersten Halt',
+    OebbHafas::currentDelay($lauf, strtotime('2026-11-09T21:00:00+01:00')), 40);
+pruefe('ohne Echtzeit: null', OebbHafas::currentDelay([['delay' => null]], $jetzt), null);
+
+// ---------------------------------------------------------------------
 echo "\nText - Fremdtexte als Klartext\n";
 
 pruefe('Absätze bleiben, Tags fallen, Entities werden Zeichen',
