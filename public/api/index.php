@@ -257,6 +257,13 @@ const SHARE_MAX_BYTES = 400000;
  */
 const BOARD_LOOKBACK_MIN = 60;
 
+/**
+ * Rastergröße für die Live-Positionen (Breite, Länge in Grad) und Züge je
+ * Feld - siehe handleLiveTrains(). Ein Feld ist rund 110 x 110 km.
+ */
+const LIVE_TRAINS_CELL_DEG = [1.0, 1.5];
+const LIVE_TRAINS_PER_CELL = 40;
+
 /** So weit darf ein mitgelieferter Bahnhof von der Anfrage entfernt sein. */
 const BUNDLED_STATION_M = 400;
 
@@ -525,20 +532,70 @@ function handleLiveTrains(Http $http, array $config, Cache $cache): void
     // Rechteck unterwegs. Mitgezählt standen sie als "21 Züge im Ausschnitt"
     // da, wo kein einziger zu sehen war. Deshalb wird unten auf den
     // Ausschnitt zugeschnitten, und die Obergrenze muss dafür Luft lassen.
+    //
+    // IM RASTER, WENN WEIT HERAUSGEZOOMT. HAFAS liefert je Abfrage höchstens
+    // `maxJny` Züge, und zwar nicht gleichmäßig über das Rechteck verteilt:
+    // bei "halb Deutschland" waren die 120 in ein paar Regionen dicht
+    // gedrängt, und dazwischen lag Land ohne einen einzigen Zug. Jetzt
+    // bekommt jedes Feld eines Rasters seine eigene Obergrenze; die Felder
+    // gehen gleichzeitig raus (Http::record/prefetch).
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
-    $res  = $oebb->liveTrains($south, $west, $north, $east, 120, Products::bitmask($products));
-
-    if (!$res['ok']) {
-        // Live-Positionen sind Beiwerk - ein Fehler darf die Karte nicht stören.
-        ok($antwort([], false, $res['error']));
+    $zellen = liveTrainCells($south, $west, $north, $east);
+    $je = count($zellen) === 1 ? 120 : LIVE_TRAINS_PER_CELL;
+    $maske = Products::bitmask($products);
+    $jetzt = time();
+    $laden = static function () use ($oebb, $zellen, $je, $maske, $jetzt): array {
+        return array_map(static fn(array $z) => $oebb->liveTrains($z[0], $z[1], $z[2], $z[3], $je, $maske, $jetzt), $zellen);
+    };
+    if (count($zellen) > 1) {
+        Http::prefetch(Http::record($laden), 8.0);
     }
+    $antworten = $laden();
 
-    $zuege = array_values(array_filter(
-        $res['data'],
-        static fn($t) => $t['lat'] >= $south && $t['lat'] <= $north && $t['lon'] >= $west && $t['lon'] <= $east
-    ));
+    $zuege = [];
+    $fehler = null;
+    foreach ($antworten as $i => $res) {
+        if (!$res['ok']) {
+            $fehler ??= $res['error'];
+            continue;
+        }
+        [$s, $w, $n, $e] = $zellen[$i];
+        foreach ($res['data'] as $t) {
+            // Je Feld nur, was darin fährt - so kommt kein Zug doppelt.
+            if ($t['lat'] < $s || $t['lat'] > $n || $t['lon'] < $w || $t['lon'] > $e) {
+                continue;
+            }
+            $zuege[($t['jid'] ?? '') !== '' ? $t['jid'] : $t['lat'] . ',' . $t['lon']] = $t;
+        }
+    }
+    if ($zuege === [] && $fehler !== null) {
+        // Live-Positionen sind Beiwerk - ein Fehler darf die Karte nicht stören.
+        ok($antwort([], false, $fehler));
+    }
+    $zuege = array_values($zuege);
     $cache->set($key, $zuege);
     ok($antwort($zuege, false));
+}
+
+/**
+ * Das Raster für die Live-Positionen: ein Feld je LIVE_TRAINS_CELL_DEG,
+ * höchstens 4 x 4. Bei Stadt- und Regionalzoom bleibt es ein Feld.
+ *
+ * @return array<int,array{0:float,1:float,2:float,3:float}> süd, west, nord, ost
+ */
+function liveTrainCells(float $south, float $west, float $north, float $east): array
+{
+    $zeilen = max(1, min(4, (int) ceil(($north - $south) / LIVE_TRAINS_CELL_DEG[0])));
+    $spalten = max(1, min(4, (int) ceil(($east - $west) / LIVE_TRAINS_CELL_DEG[1])));
+    $dLat = ($north - $south) / $zeilen;
+    $dLon = ($east - $west) / $spalten;
+    $out = [];
+    for ($r = 0; $r < $zeilen; $r++) {
+        for ($c = 0; $c < $spalten; $c++) {
+            $out[] = [$south + $r * $dLat, $west + $c * $dLon, $south + ($r + 1) * $dLat, $west + ($c + 1) * $dLon];
+        }
+    }
+    return $out;
 }
 
 /**
@@ -632,23 +689,15 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
         }
         // STATT DER KENNUNG EIN PUNKT ("@48.2,11.6"): ein Abschnitt aus der
         // DB-Suche kennt nur DB-Halte. Hat die DB für ihn keine Ist-Zeiten -
-        // bei der U6 der Normalfall -, fragt die Live-Verfolgung die MVG-Tafel
-        // der nächstgelegenen Haltestelle. Die Zuordnung Punkt -> Haltestelle
-        // ändert sich nie und wird eine Woche gemerkt.
+        // bei der U6 der Normalfall -, fragt die Live-Verfolgung die Tafel
+        // der nächstgelegenen Haltestelle (siehe mvgStationNear()).
         foreach (['from', 'to'] as $k) {
             if (preg_match('/^@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)$/', $leg[$k], $m)) {
-                $lat = (float) $m[1];
-                $lon = (float) $m[2];
-                if (!Mvg::inArea($lat, $lon)) {
+                if (!Mvg::inArea((float) $m[1], (float) $m[2])) {
                     fail('Der Halt liegt nicht im MVG-Netz.', 400);
                 }
-                $nkey = sprintf('mvgnear:%.4f,%.4f', $lat, $lon);
-                $id = $cache->get($nkey, 7 * 86400);
+                $id = mvgStationNear($http, $config, $cache, (float) $m[1], (float) $m[2]);
                 if ($id === null) {
-                    $id = (new Mvg($http, $config['providers']['mvg']))->nearestStation($lat, $lon)['globalId'] ?? '';
-                    $cache->set($nkey, $id);
-                }
-                if ($id === '') {
                     fail('Keine MVG-Haltestelle in der Nähe.', 404);
                 }
                 $leg[$k] = $id;
@@ -699,7 +748,7 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
         if ($lauf === null) {
             fail('Fahrt nicht mehr im Fahrplan.', 404);
         }
-        ok(['train' => $lauf, 'cached' => false]);
+        ok(['train' => mvgPlanRealtime($http, $config, $cache, $jid, $lauf), 'cached' => false]);
     }
 
     // Die Pünktlichkeitshistorie kommt NICHT in den Cache: sie wächst mit
@@ -914,6 +963,132 @@ function handleNextConnection(Http $http, array $config, Cache $cache): void
     // der Liste erneut an.
     $cache->set($key, $out);
     ok(['connections' => $out, 'cached' => false]);
+}
+
+/**
+ * Die MVG-Haltestelle an einem Punkt, oder null. Die Zuordnung ändert sich
+ * nie und wird eine Woche gemerkt.
+ */
+function mvgStationNear(Http $http, array $config, Cache $cache, float $lat, float $lon): ?string
+{
+    $nkey = sprintf('mvgnear:%.4f,%.4f', $lat, $lon);
+    $id = $cache->get($nkey, 7 * 86400);
+    if ($id === null) {
+        $id = (new Mvg($http, $config['providers']['mvg']))->nearestStation($lat, $lon)['globalId'] ?? '';
+        $cache->set($nkey, $id);
+    }
+    return $id === '' ? null : (string) $id;
+}
+
+/**
+ * Echtzeit für eine U-Bahn oder Tram der Live-Karte.
+ *
+ * Deren Lauf ist nach Fahrplan gerechnet (MvgRail) - die Live-Karte kennt
+ * keine Fahrzeugpositionen. Die MVV-Auskunft kennt aber die Lage jeder Fahrt
+ * an jeder Haltestelle. Gefragt wird am NÄCHSTEN Halt der Bahn; die dort
+ * gemeldete Verspätung gilt für den Rest des Laufs. 30 Sekunden gemerkt -
+ * wer das Fenster offen hat, fragt bei jeder Aktualisierung.
+ */
+function mvgPlanRealtime(Http $http, array $config, Cache $cache, string $jid, array $lauf): array
+{
+    $efa = new MvvEfa($http, $config['providers']['mvv'] ?? []);
+    if (!$efa->isEnabled() || ($config['providers']['mvg']['enabled'] ?? false) !== true) {
+        return $lauf;
+    }
+    $key = 'mvgplanrt:' . $jid;
+    $lage = $cache->get($key, 30);
+    $jetzt = time();
+    $naechster = null;
+    foreach ($lauf['stops'] as $k => $st) {
+        $t = strtotime((string) ($st['departure'] ?? $st['arrival'] ?? ''));
+        if ($t !== false && $t >= $jetzt - 30) {
+            $naechster = $k;
+            break;
+        }
+    }
+    if ($lage === null) {
+        $lage = ['found' => false];
+        if ($naechster !== null) {
+            $st = $lauf['stops'][$naechster];
+            $id = mvgStationNear($http, $config, $cache, (float) $st['lat'], (float) $st['lon']);
+            $plan = strtotime((string) ($st['departure'] ?? $st['arrival']));
+            // Am Endhalt gibt es keine Abfahrt - dort die Ankunftstafel.
+            $r = $id === null ? null : $efa->delayAt($id, (string) $lauf['line'], (int) $plan,
+                (string) ($lauf['direction'] ?? ''), ($st['departure'] ?? null) === null);
+            if ($r !== null) {
+                $lage = ['found' => true, 'from' => $naechster] + $r;
+            }
+        }
+        $cache->set($key, $lage);
+    }
+    if (empty($lage['found'])) {
+        return $lauf;
+    }
+
+    $d = (int) $lage['delay'];
+    $plus = static fn(?string $iso): ?string => $iso === null ? null : date('c', (int) strtotime($iso) + $d * 60);
+
+    // Verkürzt? Dann endet die Fahrt am gemeldeten Ziel, die Halte danach
+    // entfallen. Nur wenn das Ziel im Lauf vorkommt - sonst weiß man nicht,
+    // wo genau, und es bleibt beim Hinweis.
+    $neuesZiel = (string) ($lage['direction'] ?? '');
+    $plan = mb_strtolower((string) ($lauf['direction'] ?? ''));
+    $verkuerzt = $neuesZiel !== '' && $plan !== ''
+        && !str_contains(mb_strtolower($neuesZiel), mb_substr($plan, 0, 8))
+        && !str_contains($plan, mb_substr(mb_strtolower($neuesZiel), 0, 8));
+    $endeBei = null;
+    if ($verkuerzt) {
+        foreach ($lauf['stops'] as $k => $st) {
+            if ($k >= (int) $lage['from'] && mb_strtolower($st['name']) === mb_strtolower($neuesZiel)) {
+                $endeBei = $k;
+                break;
+            }
+        }
+        // Ein abweichendes Ziel, das NICHT vor uns auf der Strecke liegt, ist
+        // keine Verkürzung, sondern die Gegenrichtung zur selben Minute - die
+        // U3 nach Moosach bekam so einmal die Lage einer U3 nach Fürstenried.
+        if ($endeBei === null) {
+            return $lauf;
+        }
+    }
+
+    foreach ($lauf['stops'] as $k => &$st) {
+        if ($k < (int) $lage['from']) {
+            continue;
+        }
+        if ($endeBei !== null && $k > $endeBei) {
+            $st['cancelled'] = true;
+            continue;
+        }
+        $st['arrivalReal'] = $plus($st['arrival']);
+        $st['departureReal'] = $plus($st['departure']);
+        $st['delay'] = $d;
+        if ($k === (int) $lage['from']) {
+            $st['platform'] = $lage['platform'] ?? null;
+            $st['cancelled'] = (bool) $lage['cancelled'];
+        }
+    }
+    unset($st);
+    $lauf['delay'] = $d;
+    $lauf['hasRealtime'] = true;
+    $lauf['cancelled'] = (bool) $lage['cancelled'];
+    $lauf['realtimeSource'] = 'MVV';
+    $lauf['messages'] = [[
+        'text' => 'Position auf der Karte nach Fahrplan der MVG, Verspätung laut MVV am nächsten Halt ('
+            . $lauf['stops'][(int) $lage['from']]['name'] . ').',
+        'from' => null,
+        'to'   => null,
+    ]];
+    if ($verkuerzt) {
+        $lauf['planDirection'] = $lauf['direction'];
+        $lauf['direction'] = $neuesZiel;
+        array_unshift($lauf['messages'], [
+            'text' => "Fährt heute nur bis $neuesZiel (laut MVV) - nicht bis {$lauf['planDirection']}.",
+            'from' => null,
+            'to'   => null,
+        ]);
+    }
+    return $lauf;
 }
 
 /**
