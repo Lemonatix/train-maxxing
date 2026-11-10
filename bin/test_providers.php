@@ -35,6 +35,7 @@ require $lib . '/Fares.php';
 require $lib . '/Providers/OebbHafas.php';
 require $lib . '/Providers/DbVendo.php';
 require $lib . '/Providers/Mvg.php';
+require $lib . '/Providers/MvvEfa.php';
 require $lib . '/CityTrips.php';
 require $lib . '/Inbound.php';
 require $lib . '/Providers/Overpass.php';
@@ -872,6 +873,35 @@ pruefe('angekommen: die am letzten Halt mit Echtzeit',
 pruefe('noch nicht losgefahren: die am ersten Halt',
     OebbHafas::currentDelay($lauf, strtotime('2026-11-09T21:00:00+01:00')), 40);
 pruefe('ohne Echtzeit: null', OebbHafas::currentDelay([['delay' => null]], $jetzt), null);
+
+// ---------------------------------------------------------------------
+echo "\nMVV-Auskunft - Abfahrten für die Echtzeit der U-Bahn\n";
+
+$efa = MvvEfa::events(['ok' => true, 'json' => ['stopEvents' => [
+    ['departureTimePlanned' => '2026-11-10T12:17:00Z', 'departureTimeEstimated' => '2026-11-10T12:20:00Z',
+     'realtimeStatus' => ['MONITORED'], 'location' => ['properties' => ['platform' => '52', 'platformName' => 'Gleis 2']],
+     'transportation' => ['number' => 'U6', 'destination' => ['name' => 'Garching'], 'properties' => ['tripCode' => 4711],
+                          'product' => ['name' => 'U-Bahn']]],
+    ['departureTimePlanned' => '2026-11-10T12:19:00Z', 'realtimeStatus' => ['TRIP_CANCELLED'],
+     'transportation' => ['number' => '178', 'disassembledName' => '178']],
+]]]);
+pruefe('EFA: Linie, Plan, Prognose, Gleis, Fahrtnummer',
+    [$efa[0]['line'], $efa[0]['real'] - $efa[0]['planned'], $efa[0]['platform'], $efa[0]['trip']], ['u6', 180, '2', '4711']);
+pruefe('EFA: ohne Prognose kein Ist, Ausfall erkannt', [$efa[1]['real'], $efa[1]['cancelled']], [null, true]);
+pruefe('EFA: keine Antwort ist null, keine leere Liste', MvvEfa::events(['ok' => false, 'json' => null]), null);
+
+// ---------------------------------------------------------------------
+echo "\nOverpass - welche Instanz zuerst\n";
+
+$ocache = new Cache(sys_get_temp_dir() . '/tm-test-overpass-' . getmypid());
+$liste = ['https://a/api', 'https://b/api', 'https://c/api'];
+pruefe('ohne Wissen: wie konfiguriert', Overpass::ordered($liste, $ocache), $liste);
+$ocache->set('overpass:good', 'https://c/api');
+$ocache->set('overpass:dead:' . md5('https://a/api'), time());
+pruefe('die zuletzt erfolgreiche vorn, die tote hinten (nicht weg)',
+    Overpass::ordered($liste, $ocache), ['https://c/api', 'https://b/api', 'https://a/api']);
+pruefe('nach zehn Minuten lebt die tote wieder',
+    Overpass::ordered($liste, $ocache, time() + 700), ['https://c/api', 'https://a/api', 'https://b/api']);
 
 // ---------------------------------------------------------------------
 echo "\nText - Fremdtexte als Klartext\n";
