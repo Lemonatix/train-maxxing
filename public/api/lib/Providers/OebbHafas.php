@@ -701,13 +701,21 @@ final class OebbHafas
      * @param float $south,$west,$north,$east Grad
      * @return array{ok:bool,error:?string,data:array}
      */
-    public function liveTrains(float $south, float $west, float $north, float $east, int $max = 40, int $productMask = 0): array
+    /**
+     * @param ?int $at Zeitpunkt der Positionen (Unixzeit), sonst jetzt. Wer
+     *                 mehrere Ausschnitte gleichzeitig fragt (Http::prefetch),
+     *                 muss ihn vorgeben: sonst unterscheidet sich die Anfrage
+     *                 beim zweiten Durchlauf um eine Sekunde, und keine
+     *                 vorab geholte Antwort passt mehr.
+     */
+    public function liveTrains(float $south, float $west, float $north, float $east, int $max = 40, int $productMask = 0, ?int $at = null): array
     {
+        $jetzt = (new DateTimeImmutable('@' . ($at ?? time())))->setTimezone(new DateTimeZone(date_default_timezone_get()));
         $req = [
             'maxJny'       => $max,
             'onlyRT'       => false,
-            'date'         => (new DateTimeImmutable('now'))->format('Ymd'),
-            'time'         => (new DateTimeImmutable('now'))->format('His'),
+            'date'         => $jetzt->format('Ymd'),
+            'time'         => $jetzt->format('His'),
             'rect'         => [
                 'llCrd' => ['x' => (int) round($west * 1000000), 'y' => (int) round($south * 1000000)],
                 'urCrd' => ['x' => (int) round($east * 1000000), 'y' => (int) round($north * 1000000)],
