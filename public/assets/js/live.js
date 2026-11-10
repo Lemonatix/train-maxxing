@@ -44,6 +44,13 @@ const REFRESH_MS = 30_000;
  * schon weg sein muss.
  */
 const SAFE_TRANSFER_MIN = 2;
+/**
+ * So kurz vor der Abfahrt wird bei der MVG nachgefragt, wenn die DB für
+ * einen Münchner Abschnitt keine Ist-Zeiten hat. Die MVG-Tafel kennt die
+ * Echtzeit nur für die nächsten Minuten - weiter vorher wäre jede Abfrage
+ * umsonst.
+ */
+const MVG_FALLBACK_MIN = 30;
 
 /** Nur solange die Verbindung noch läuft, ist Auffrischen sinnvoll. */
 const STALE_AFTER_ARRIVAL_MS = 15 * 60_000;
@@ -437,7 +444,23 @@ ${url.href}`);
       }
       return res;
     }
-    if (entry.src === 'db') return api.trainRun({ db: leg.dbJourneyId });
+    if (entry.src === 'db') {
+      const res = await api.trainRun({ db: leg.dbJourneyId });
+      // DIE U6 UND ANDERE OHNE PROGNOSE BEI DER DB: kurz vor der Abfahrt
+      // weiß die MVG-Tafel am Einstieg oft mehr. Zugeordnet wird über die
+      // Koordinaten - der Abschnitt kennt nur DB-Halte.
+      if (!res.train?.hasRealtime && LiveTracker.wantsMvgFallback(leg)) {
+        try {
+          const mvg = await api.trainRun({
+            mvgFrom: `@${leg.from.lat},${leg.from.lon}`, mvgTo: `@${leg.to.lat},${leg.to.lon}`,
+            line: LiveTracker.mvgLine(leg), dep: leg.departure, arr: leg.arrival,
+            fromName: leg.from.name, toName: leg.to.name,
+          });
+          if (mvg.train?.hasRealtime) res.train = LiveTracker.withMvgRealtime(res.train, leg, mvg.train);
+        } catch { /* dann eben der Fahrplan */ }
+      }
+      return res;
+    }
 
     const res = await api.trainRun({
       mvgFrom: String(leg.from.id).slice(4), mvgTo: String(leg.to.id).slice(4),
@@ -471,6 +494,63 @@ ${url.href}`);
       if (stops[i].arrival && i > von) b = i;
     }
     return a >= 0 && b > a ? { from: stops[a], to: stops[b] } : null;
+  }
+
+  /**
+   * Lohnt die MVG-Tafel für diesen Abschnitt? Nur im Raum München (wie
+   * Mvg::inArea()) und nur kurz vor bis kurz nach der Abfahrt.
+   */
+  static wantsMvgFallback(leg, now = Date.now()) {
+    const { lat, lon } = leg.from || {};
+    const zu = leg.to || {};
+    const imNetz = (a, o) => a >= 47.85 && a <= 48.45 && o >= 11.10 && o <= 12.10;
+    if (lat == null || lon == null || zu.lat == null || zu.lon == null) return false;
+    if (!imNetz(lat, lon) || !imNetz(zu.lat, zu.lon)) return false;
+    const ab = Date.parse(leg.departure || '');
+    return Number.isFinite(ab) && ab - now < MVG_FALLBACK_MIN * 60_000 && now - ab < 15 * 60_000
+      && LiveTracker.mvgLine(leg) !== '';
+  }
+
+  /** Die Linie, wie die MVG sie schreibt: "U6", "182", "S8" - nicht "Bus 182". */
+  static mvgLine(leg) {
+    if (leg.line) return String(leg.line);
+    return String(leg.name || '').replace(/^(Bus|STR|Tram)\s+/i, '').trim();
+  }
+
+  /**
+   * Die Ist-Zeiten der MVG in den Lauf der DB einsetzen. Der Einstieg
+   * bekommt die gemeldete Abfahrt, der Ausstieg die gemeldete (oder
+   * hochgerechnete) Ankunft, und die Halte dazwischen werden um die
+   * Verspätung am Einstieg verschoben - der Rest des Laufs bleibt Fahrplan.
+   */
+  static withMvgRealtime(run, leg, mvg) {
+    const stops = (run?.stops || []).map((s) => ({ ...s }));
+    const finde = (p) => stops.findIndex((s) => (p?.id && String(s.id) === String(p.id)) || s.name === p?.name);
+    const von = finde(leg.from);
+    const bis = finde(leg.to);
+    const ein = mvg.stops?.[0];
+    const aus = mvg.stops?.[mvg.stops.length - 1];
+    const delay = Number.isFinite(mvg.delay) ? mvg.delay : 0;
+    const plus = (iso) => (iso ? new Date(Date.parse(iso) + delay * 60_000).toISOString() : null);
+    if (von >= 0 && bis > von) {
+      for (let i = von; i <= bis; i++) {
+        const s = stops[i];
+        s.arrivalReal = s.arrivalReal ?? plus(s.arrival);
+        s.departureReal = s.departureReal ?? plus(s.departure);
+        s.delay = s.delay ?? delay;
+      }
+      if (ein?.departureReal) stops[von].departureReal = ein.departureReal;
+      if (aus?.arrivalReal) stops[bis].arrivalReal = aus.arrivalReal;
+      if (ein?.platform) stops[von].platform = ein.platform;
+    }
+    return {
+      ...run,
+      stops,
+      hasRealtime: true,
+      delay,
+      cancelled: Boolean(run?.cancelled || mvg.cancelled),
+      messages: [...(run?.messages || []), ...(mvg.messages || [])],
+    };
   }
 
   /**
