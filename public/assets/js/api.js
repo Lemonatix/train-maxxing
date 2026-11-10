@@ -119,6 +119,14 @@ export const api = {
 
   trainDetails: (jid, opts) => call('traindetails', { jid }, opts),
 
+  /**
+   * Streckenverlauf eines Abschnitts ohne jid (aus der DB-Suche), über die
+   * Zugnummer bei der ÖBB gefunden. Antwort `{ geometry: [[lat, lon], …] }`,
+   * leer, wenn sich der Zug nicht finden ließ.
+   */
+  trainLine: (params, opts) =>
+    call('trainline', { from: params.from, to: params.to, num: params.num, dep: params.dep }, opts),
+
   /** Vermutliche Zubringer der Züge, die an diesem Bahnhof beginnen - siehe inbound.js. */
   inbound: (station, time, opts) => call('inbound', { station, time }, opts),
 
