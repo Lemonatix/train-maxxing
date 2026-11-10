@@ -924,6 +924,30 @@ pruefe('über einen ungeprüften Abschnitt: kein Weg', $netz->route('1', '9'), n
 $p = $netz->route('1', '9', true);
 pruefe('im Prüfmodus doch, mit Ebenenwechsel und als ungeprüft markiert',
     [$p['changes'], $p['reviewed']], [[['kind' => 'steps', 'from' => 0, 'to' => -1]], false]);
+// Querbahnsteig mit einem Haken von 3 m an einem fremden Bahnsteigkopf,
+// dann eine echte Ecke von 40 m und eine Treppe nach unten.
+$haken = StationWalks::smooth([
+    [48.0000, 11.0000, 0], [48.0002, 11.00004, 0], [48.0004, 11.0000, 0],
+    [48.0004, 11.0005, 0], [48.0004, 11.0005, -1], [48.0004, 11.0008, -1],
+]);
+pruefe('Haken von 3 m weg, Ecke und Ebenenwechsel bleiben', count($haken), 5);
+// Ein langer Bahnsteig (Gleis 3) berührt den Gang an beiden Enden. Durch
+// ihn hindurch "einzusteigen" und am anderen Ende "auszusteigen" kostete
+// nichts - das darf keine Abkürzung sein.
+file_put_contents("$wdir/8000003.json", json_encode([
+    'nodes' => ['A@0' => [48.0, 11.0, 0], 'B@0' => [48.0, 11.0027, 0],
+                'G1@0' => [48.0, 11.0, 0], 'G2@0' => [48.0, 11.0027, 0], 'G3@0' => [48.0001, 11.0013, 0]],
+    'tracks' => ['1' => 'G1@0', '2' => 'G2@0', '3' => 'G3@0'],
+    'edges' => [
+        ['a' => 'G1@0', 'b' => 'A@0', 'kind' => 'board', 'reviewed' => true],
+        ['a' => 'G2@0', 'b' => 'B@0', 'kind' => 'board', 'reviewed' => true],
+        ['a' => 'G3@0', 'b' => 'A@0', 'kind' => 'board', 'reviewed' => true],
+        ['a' => 'G3@0', 'b' => 'B@0', 'kind' => 'board', 'reviewed' => true],
+        ['a' => 'A@0', 'b' => 'B@0', 'kind' => 'walk', 'reviewed' => true],
+    ],
+]));
+pruefe('kein Weg durch einen fremden Bahnsteig hindurch (200 m, nicht 0)',
+    StationWalks::load($wdir, '8000003')->route('1', '2')['meters'], 200);
 pruefe('unbekanntes Gleis oder Bahnhof ohne Netz: null',
     [$netz->route('1', '77'), StationWalks::load($wdir, '8000002')], [null, null]);
 
