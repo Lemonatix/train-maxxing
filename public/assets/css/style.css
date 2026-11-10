@@ -1385,6 +1385,30 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .map__walk.is-exact { stroke-dasharray: 7 5; opacity: 1; }
 
+/* Laufweg im Bahnhof (StationWalks): durchgezogen, nicht gestrichelt - er
+   ist von Hand gezeichnet und abgenommen, keine Luftlinie. Im Prüfmodus
+   stehen noch nicht abgenommene Wege gestrichelt in Bernstein da. */
+.map__xwalk-casing, .map__xwalk {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.map__xwalk-casing { stroke: var(--map-casing); stroke-width: 6; opacity: 0.85; }
+.map__xwalk { stroke: var(--purple); stroke-width: 3; }
+.map__xwalk.is-unreviewed { stroke: var(--amber); stroke-dasharray: 6 4; }
+.map__xwalk.is-other-level, .map__xwalk-casing.is-other-level { opacity: 0.3; }
+.map__xwalk-board {
+  fill: none;
+  stroke: var(--purple);
+  stroke-width: 2;
+  stroke-dasharray: 1 5;
+  stroke-linecap: round;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.map__xwalk-board.is-other-level { opacity: 0.2; }
+
 .map__walk-label {
   fill: var(--purple);
   font-family: var(--font-mono);
