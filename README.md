@@ -3030,6 +3030,7 @@ public/
     ├── config.local.php          Schlüssel - nicht im Repository (Vorlage: config.local.example.php)
     ├── push_worker.php           Minutentakt für Push (Cronjob, nur Kommandozeile)
     ├── data/mvg_rail.json        U-Bahn/Tram-Fahrplan (bin/build_mvg_rail.php)
+    ├── data/platforms/           Bahnsteige der großen Bahnhöfe für den Umstiegsplan (bin/build_platforms.php)
     └── lib/
         ├── Http.php              cURL-Wrapper inkl. Browser-TLS-Profil
         ├── Cache.php             Dateicache, degradiert still
@@ -3050,6 +3051,7 @@ public/
             ├── OebbHafas.php     Fahrplan, Zuggattungen, Ländercodes, Geometrie, Tafel
             ├── DbVendo.php       Echtpreise, alle Tarife, Auslastung, Ausstattung
             ├── Mvg.php           Münchner Nahverkehr: Orte, Verbindungen, Abfahrten
+            ├── MvvEfa.php        Echtzeit U-Bahn/Tram/Bus über die MVV-Auskunft (EFA)
             ├── SwissOpenData.php Schweizer Prognosen (transport.opendata.ch)
             ├── SwissOjp.php      Schweizer Echtzeit über OJP 2.0 (Schlüssel)
             ├── SwissFormation.php SBB-Wagenreihung und Baureihe (Schlüssel)
@@ -3068,7 +3070,8 @@ Alles per GET auf `api/`:
 | `?action=locations&q=Bern` | Ortssuche: Bahnhöfe, dazu Adressen und POIs (`kind: address \| poi`) |
 | `?action=journeys&from=…&to=…&date=…&time=…` | Verbindungen inklusive Preis (`&scroll=…` blättert; der Kontext trägt seine Richtung selbst — `scroll` aus der Antwort führt zu späteren, `scrollBack` zu früheren Abfahrten) |
 | `?action=livetrains&bbox=süd,west,nord,ost` | Züge, die dort gerade fahren — nur im Ausschnitt, in München plus U-Bahn und Tram nach Fahrplan (`counts.live`, `counts.plan`) |
-| `?action=traindetails&jid=…` | Zuglauf mit Halten und Verspätung — statt `jid` auch `db=<journeyId>` (Zuglauf bei der DB) oder `mvgFrom`, `mvgTo`, `line`, `dep`, `arr` (Echtzeit eines MVG-Abschnitts) oder `chFrom`, `chTo`, `cat`, `dir`, `dep`, `arr` (Schweizer Prognose über opendata.ch) |
+| `?action=trainline&from=…&to=…&num=…&dep=…` | Streckenverlauf eines DB-Abschnitts, über die Zugnummer bei der ÖBB gefunden |
+| `?action=traindetails&jid=…` | Zuglauf mit Halten und Verspätung — statt `jid` auch `db=<journeyId>` (Zuglauf bei der DB) oder `mvgFrom`, `mvgTo`, `line`, `dep`, `arr` (Echtzeit eines Münchner Abschnitts, erst über die MVV-Auskunft, sonst die MVG-Tafel; statt der Kennung auch `@lat,lon`) oder `chFrom`, `chTo`, `cat`, `dir`, `dep`, `arr` (Schweizer Prognose über opendata.ch) |
 | `?action=bestprices&from=…&to=…&date=…` | Günstigste Zeitfenster am Tag |
 | `?action=nextconnection&from=…&to=…&date=…&time=…` | Nächster Anschluss nach einem knappen Umstieg oder Ausfall (mit Echtzeit) |
 | `?action=localroute&fromLat=…&fromLon=…&toLat=…&toLon=…&date=…&time=…` | Ersatzweg im MVV über die MVG |
