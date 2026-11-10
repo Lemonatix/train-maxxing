@@ -131,6 +131,17 @@ $config = [
             'user_agent' => 'train-maxxing (+https://github.com/)',
         ],
 
+        // --- Auskunft des MVV (EFA): Echtzeit für U-Bahn, Tram, Bus. ---
+        //
+        // Für Münchner Abschnitte, bei denen die DB keine Prognose hat - die
+        // U6 zum Beispiel. Die EFA kennt eine für jede Fahrt, die MVG-Tafel
+        // nur für einzelne. Siehe lib/Providers/MvvEfa.php.
+        'mvv' => [
+            'enabled'    => true,
+            'endpoint'   => 'https://efa.mvv-muenchen.de/ng/XML_DM_REQUEST',
+            'user_agent' => 'train-maxxing (+https://github.com/Lemonatix/train-maxxing)',
+        ],
+
         // --- Fußwege auf der Straße (OSRM, Profil "zu Fuß"). ---
         //
         // Für die gestrichelte Linie von der Haustür zur Haltestelle, wenn
@@ -187,7 +198,9 @@ $config = [
                 'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
                 'https://overpass.private.coffee/api/interpreter',
             ],
-            'user_agent' => 'train-maxxing (+https://github.com/)',
+            // Mit Projektadresse: overpass-api.de weist Anfragen ohne
+            // erkennbaren Absender ab (HTTP 406).
+            'user_agent' => 'train-maxxing (+https://github.com/Lemonatix/train-maxxing)',
             // Gesamtbudget für alle Versuche zusammen. Je Instanz wird ein
             // Teil davon angesetzt, damit eine tote Instanz nicht die ganze
             // Zeit frisst - vorher wartete die Anfrage zweimal fünfzig
