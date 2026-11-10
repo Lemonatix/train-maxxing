@@ -622,8 +622,8 @@ export class RouteMap {
     }[this.mode] || 'Ganze Route zeigen';
 
     controls.append(
-      btn('+', 'Hineinzoomen', () => this.zoomBy(1)),
-      btn('−', 'Herauszoomen', () => this.zoomBy(-1)),
+      btn('+', 'Hineinzoomen', () => this.zoomSmooth(1)),
+      btn('−', 'Herauszoomen', () => this.zoomSmooth(-1)),
       btn('⤢', zeigAlles, () => { this.fit(); this.render(); }),
     );
     // Im Bahnhof hilft der eigene Standort nicht weiter: die Karte zeigt
@@ -676,6 +676,14 @@ export class RouteMap {
     let last = null;
     const pointers = new Map();
     let pinchDist = 0;
+    // Mitte zwischen den beiden Fingern, im Kasten der Karte. Der Ort darunter
+    // bleibt beim Zoomen unter den Fingern - wie bei jeder anderen Karte.
+    let pinchMid = null;
+    let pinchZoomed = false;
+    const mitteVon = (a, b) => {
+      const r = vp.getBoundingClientRect();
+      return { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top };
+    };
     // Das beim Drücken getroffene Element merken. Nötig, weil
     // setPointerCapture das Ziel späterer Events auf den Viewport umbiegt -
     // beim Klick wäre e.target dann der Viewport und nicht die Route.
@@ -706,6 +714,7 @@ export class RouteMap {
         dragging = false;
         const [a, b] = [...pointers.values()];
         pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+        pinchMid = mitteVon(a, b);
       }
     });
 
@@ -716,10 +725,18 @@ export class RouteMap {
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (pinchDist > 0 && Math.abs(d - pinchDist) > 12) {
-          this.zoomBy(d > pinchDist ? 0.5 : -0.5);
-          pinchDist = d;
+        const mitte = mitteVon(a, b);
+        // STUFENLOS: der Zoom folgt dem Fingerabstand (doppelter Abstand =
+        // eine Stufe), und die Karte wandert mit der Mitte zwischen den
+        // Fingern. Vorher sprang sie bei je 12 px um eine halbe Stufe, und
+        // immer um die Kartenmitte statt um die Finger.
+        if (pinchDist > 0 && d > 0) {
+          if (pinchMid) this.panBy(pinchMid.x - mitte.x, pinchMid.y - mitte.y);
+          this.zoomBy(Math.log2(d / pinchDist), mitte.x, mitte.y, true);
+          pinchZoomed = true;
         }
+        pinchDist = d;
+        pinchMid = mitte;
         return;
       }
 
@@ -741,7 +758,13 @@ export class RouteMap {
 
     const end = (e) => {
       if (!pointers.delete(e.pointerId)) return;
-      if (pointers.size < 2) pinchDist = 0;
+      if (pointers.size < 2) {
+        pinchDist = 0;
+        pinchMid = null;
+        // Züge erst nach der Geste nachladen, nicht bei jedem Zwischenschritt.
+        if (pinchZoomed) this.onViewChange && this.onViewChange();
+        pinchZoomed = false;
+      }
       if (pointers.size === 1) {
         // Ein Finger vom Zoomen gehoben: mit dem anderen weiter verschieben,
         // statt bis zum Loslassen festzustecken.
@@ -775,6 +798,7 @@ export class RouteMap {
     let wheelRaf = 0;
     vp.addEventListener('wheel', (e) => {
       e.preventDefault();
+      this.stopZoomSmooth();
       // deltaMode LINE (Firefox) und PAGE liefern kleine Zahlen — hochskalieren.
       const factor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
       wheelAccum += e.deltaY * factor;
@@ -821,7 +845,7 @@ export class RouteMap {
       if (e.target.closest?.('.map__controls, .map__attr')) return;
       e.preventDefault();
       const r = vp.getBoundingClientRect();
-      this.zoomBy(1, e.clientX - r.left, e.clientY - r.top);
+      this.zoomSmooth(1, e.clientX - r.left, e.clientY - r.top);
     });
 
     // Tastaturbedienung bei fokussierter Karte.
@@ -832,8 +856,8 @@ export class RouteMap {
       const step = e.shiftKey ? 160 : 80;
       let handled = true;
       switch (e.key) {
-        case '+': case '=':  this.zoomBy(1); break;
-        case '-': case '_':  this.zoomBy(-1); break;
+        case '+': case '=':  this.zoomSmooth(1); break;
+        case '-': case '_':  this.zoomSmooth(-1); break;
         case 'ArrowLeft':    this.panBy(-step, 0); break;
         case 'ArrowRight':   this.panBy( step, 0); break;
         case 'ArrowUp':      this.panBy(0, -step); break;
@@ -891,7 +915,52 @@ export class RouteMap {
     this._renderTimer = setTimeout(jetzt, 150);
   }
 
-  zoomBy(delta, px, py) {
+  /**
+   * Zoomen in einer kurzen Bewegung statt in einem Sprung - für Knöpfe,
+   * Tasten und Doppelklick. Jeder Frame legt ein Drittel des restlichen Wegs
+   * zurück; nach gut 200 ms ist die neue Stufe erreicht. Ein zweiter Druck
+   * während der Bewegung verschiebt das Ziel, statt sie abzubrechen: zweimal
+   * "+" schnell hintereinander ergibt zwei Stufen.
+   */
+  zoomSmooth(delta, px, py) {
+    const ziel = (this._zoomZiel ?? this.zoom) + delta;
+    this._zoomZiel = Math.max(TILES.minZoom, Math.min(TILES.maxZoom, ziel));
+    this._zoomAnker = [px, py];
+    if (this._zoomLauf) return;
+
+    const schritt = () => {
+      // Animationsframe mit Zeitgeber als Rückfall - in einem Tab im
+      // Hintergrund kommt der Frame sonst nie, und der Zoom bliebe hängen.
+      cancelAnimationFrame(this._zoomLauf?.raf);
+      clearTimeout(this._zoomLauf?.timer);
+      const rest = this._zoomZiel - this.zoom;
+      const fertig = Math.abs(rest) < 0.02;
+      this.zoomBy(fertig ? rest : rest / 3, ...this._zoomAnker, true);
+      if (fertig) {
+        this._zoomLauf = null;
+        this._zoomZiel = null;
+        this.onViewChange && this.onViewChange();
+        return;
+      }
+      this._zoomLauf = { raf: requestAnimationFrame(schritt), timer: setTimeout(schritt, 50) };
+    };
+    this._zoomLauf = { raf: requestAnimationFrame(schritt), timer: setTimeout(schritt, 50) };
+  }
+
+  /** Eine laufende zoomSmooth()-Bewegung anhalten, wo sie gerade ist. */
+  stopZoomSmooth() {
+    if (!this._zoomLauf) return;
+    cancelAnimationFrame(this._zoomLauf.raf);
+    clearTimeout(this._zoomLauf.timer);
+    this._zoomLauf = null;
+    this._zoomZiel = null;
+  }
+
+  /**
+   * @param {boolean} [quiet] Mitten in einer Bewegung: noch keine Züge
+   *   nachladen lassen, das passiert am Ende einmal.
+   */
+  zoomBy(delta, px, py, quiet = false) {
     const z0 = this.zoom;
     const z1 = Math.max(TILES.minZoom, Math.min(TILES.maxZoom, z0 + delta));
     if (z1 === z0) return;
@@ -915,11 +984,12 @@ export class RouteMap {
     this.zoom = z1;
     this.center = { lat: yToLat(ny, z1), lon: xToLon(nx, z1) };
     this.render();
-    this.onViewChange && this.onViewChange();
+    if (!quiet) this.onViewChange && this.onViewChange();
   }
 
   /** Setzt Ausschnitt und Zoom so, dass alles Gezeigte hineinpasst. */
   fit() {
+    this.stopZoomSmooth();
     const pts = [];
 
     // Im Bahnhof zählen die beiden beteiligten Bahnsteige, nicht der ganze
@@ -1848,7 +1918,14 @@ export class RouteMap {
     this.tileLayer.classList.toggle('is-dark', !!TILES.invert);
 
     // Kacheln gibt es nur ganzzahlig; der Rest wird per CSS skaliert.
-    const zi = Math.round(this.zoom);
+    //
+    // MIT SPIELRAUM: die Stufe wechselt erst, wenn der Zoom 0,7 von ihr weg
+    // ist, nicht schon bei 0,5. Beim stufenlosen Zoomen pendelt der Wert
+    // sonst um die Grenze, und jedes Pendeln lädt das ganze Kachelgitter neu.
+    if (this.tileZ == null || Math.abs(this.zoom - this.tileZ) > 0.7) {
+      this.tileZ = Math.round(this.zoom);
+    }
+    const zi = Math.max(TILES.minZoom, Math.min(TILES.maxZoom, this.tileZ));
     const scale = 2 ** (this.zoom - zi);
     const n = 2 ** zi;
 
@@ -1876,18 +1953,60 @@ export class RouteMap {
         const key = `${zi}/${wx}/${y}`;
         const left = (x * TILE_SIZE - cxi) * scale + w / 2;
         const top = (y * TILE_SIZE - cyi) * scale + h / 2;
-        wanted.set(key, { zi, wx, y, left, top, size: TILE_SIZE * scale });
+        wanted.set(key, { zi, x, wx, y, left, top, size: TILE_SIZE * scale });
       }
     }
 
     // Vorhandene Kacheln weiterverwenden, überflüssige entfernen.
+    //
+    // AUSSER BEIM STUFENWECHSEL: die neuen Kacheln blenden erst ein, wenn
+    // sie geladen sind. Wurden die alten sofort entfernt, stand die Karte
+    // dazwischen leer - das Aufblitzen beim Zoomen. Jetzt bleiben die Kacheln
+    // der vorigen Stufe darunter liegen, mitskaliert, bis die neue Stufe
+    // vollständig da ist.
     this.tiles = this.tiles || new Map();
+    this.oldTiles = this.oldTiles || new Map();
     for (const [key, img] of this.tiles) {
-      if (!wanted.has(key)) {
+      if (wanted.has(key)) continue;
+      this.tiles.delete(key);
+      if (Number(img.dataset.z) !== zi && img.classList.contains('is-loaded')) {
+        img.classList.add('is-old');
+        this.oldTiles.set(key, img);
+      } else {
         img.remove();
-        this.tiles.delete(key);
       }
     }
+    for (const [key, img] of this.oldTiles) {
+      const oz = Number(img.dataset.z);
+      // Nur eine Stufe Abstand: weiter weg wären es zu viele oder zu grobe.
+      if (wanted.has(key)) {
+        // Zurück auf dieser Stufe: die Kachel ist schon geladen.
+        img.classList.remove('is-old');
+        this.oldTiles.delete(key);
+        this.tiles.set(key, img);
+        continue;
+      }
+      if (Math.abs(oz - zi) > 1) {
+        img.remove();
+        this.oldTiles.delete(key);
+        continue;
+      }
+      const f = 2 ** (this.zoom - oz);
+      const ox = cx / f;
+      const oy = cy / f;
+      img.style.left = `${(Number(img.dataset.x) * TILE_SIZE - ox) * f + w / 2}px`;
+      img.style.top = `${(Number(img.dataset.y) * TILE_SIZE - oy) * f + h / 2}px`;
+      img.style.width = `${TILE_SIZE * f}px`;
+      img.style.height = `${TILE_SIZE * f}px`;
+    }
+    const alteWeg = () => {
+      if (this.oldTiles.size === 0) return;
+      for (const t of this.tiles.values()) {
+        if (!t.classList.contains('is-loaded') && !t.classList.contains('is-error')) return;
+      }
+      for (const img of this.oldTiles.values()) img.remove();
+      this.oldTiles.clear();
+    };
 
     for (const [key, t] of wanted) {
       let img = this.tiles.get(key);
@@ -1900,6 +2019,9 @@ export class RouteMap {
         // Sichtbarkeit dann nicht bestimmen und fordert sie nie an.
         img.decoding = 'async';
         img.draggable = false;
+        img.dataset.z = String(t.zi);
+        img.dataset.x = String(t.x);
+        img.dataset.y = String(t.y);
         const sub = TILES.subdomains[Math.abs(t.wx + t.y) % TILES.subdomains.length];
         img.src = TILES.url
           .replace('{s}', sub)
@@ -1908,9 +2030,9 @@ export class RouteMap {
           .replace('{y}', String(t.y))
           .replace('{r}', retina);
         // Fehlende Kacheln nicht als kaputtes Bild stehen lassen.
-        img.addEventListener('error', () => img.classList.add('is-error'), { once: true });
+        img.addEventListener('error', () => { img.classList.add('is-error'); alteWeg(); }, { once: true });
         // Sanftes Einblenden nach dem Laden, damit Zoom-Wechsel nicht flackert.
-        img.addEventListener('load', () => img.classList.add('is-loaded'), { once: true });
+        img.addEventListener('load', () => { img.classList.add('is-loaded'); alteWeg(); }, { once: true });
         this.tileLayer.append(img);
         this.tiles.set(key, img);
       }
@@ -1919,6 +2041,7 @@ export class RouteMap {
       img.style.width = `${t.size}px`;
       img.style.height = `${t.size}px`;
     }
+    alteWeg();
   }
 
   renderOverlay(w, h, toPx) {
