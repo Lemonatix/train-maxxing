@@ -944,6 +944,62 @@ final class OebbHafas
     // ------------------------------------------------------------------
 
     /**
+     * Züge nach ihrem Namen finden: "RJ 80", "ICE690" oder nur "690".
+     *
+     * HAFAS kennt dafür JourneyMatch - dieselbe Suche wie das Feld
+     * "Zugnummer" in der Auskunft der ÖBB. Geliefert wird je Treffer der
+     * erste und der letzte Halt und die Kennung, mit der sich der ganze Lauf
+     * holen lässt (journeyDetails).
+     *
+     * @param string $date YYYY-MM-DD - der Betriebstag, an dem der Zug fährt
+     * @return array{ok:bool,error:?string,data:array}
+     */
+    public function trainSearch(string $query, string $date, int $max = 12): array
+    {
+        $res = $this->call('JourneyMatch', [
+            'input'  => $query,
+            'date'   => str_replace('-', '', $date),
+            'onlyRT' => false,
+        ]);
+        if (!$res['ok']) {
+            return $res;
+        }
+        $body  = $res['data']['res'] ?? [];
+        $prodL = $body['common']['prodL'] ?? [];
+        $locL  = $body['common']['locL'] ?? [];
+        $out   = [];
+        foreach (($body['jnyL'] ?? []) as $jny) {
+            $prod = $prodL[$jny['prodX'] ?? -1] ?? [];
+            $ctx  = $prod['prodCtx'] ?? [];
+            $name = self::productName($prod);
+            $stops = $jny['stopL'] ?? [];
+            $erster = $stops[0] ?? null;
+            $letzter = $stops !== [] ? $stops[count($stops) - 1] : null;
+            $tag = (string) ($jny['date'] ?? str_replace('-', '', $date));
+            $jid = (string) ($jny['jid'] ?? '');
+            if ($jid === '' || $erster === null) {
+                continue;
+            }
+            $out[] = [
+                'jid'         => $jid,
+                'category'    => trim((string) ($ctx['catOut'] ?? '')),
+                'line'        => self::lineName($ctx),
+                'trainNumber' => self::trainNumber($ctx, $name),
+                'name'        => $name,
+                'direction'   => (string) ($jny['dirTxt'] ?? ($locL[$letzter['locX'] ?? -1]['name'] ?? '')),
+                'from'        => (string) ($locL[$erster['locX'] ?? -1]['name'] ?? ''),
+                'to'          => (string) ($locL[$letzter['locX'] ?? -1]['name'] ?? ''),
+                'departure'   => $this->hafasTime($tag, $erster['dTimeS'] ?? null, $erster['dTZOffset'] ?? null),
+                'arrival'     => $this->hafasTime($tag, $letzter['aTimeS'] ?? null, $letzter['aTZOffset'] ?? null),
+            ];
+            if (count($out) >= $max) {
+                break;
+            }
+        }
+        return ['ok' => true, 'error' => null, 'data' => $out];
+    }
+
+    /**
      * Die Verspätung, die ein Zug JETZT hat: die am nächsten Halt, den er
      * noch nicht erreicht hat - sonst die am letzten mit Echtzeit.
      *
