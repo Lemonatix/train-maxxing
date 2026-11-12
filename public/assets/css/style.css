@@ -1070,6 +1070,55 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   padding: 0 0.2rem 0.5rem;
 }
 
+/* --- Zugsuche über der Live-Karte ------------------------------------ */
+
+.train-search { display: flex; gap: 0.4rem; align-items: center; }
+.train-search input {
+  width: 13rem;
+  max-width: 55vw;
+  min-height: 34px;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  /* 16 px: darunter zoomt Safari beim Antippen in das Feld hinein. */
+  font-size: 16px;
+}
+.train-search__go { min-height: 34px; padding: 0.3rem 0.7rem; font-size: 0.8rem; }
+.train-search__results {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0.3rem;
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.train-search__hit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.7rem;
+  align-items: baseline;
+  width: 100%;
+  min-height: 40px;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.train-search__hit:hover, .train-search__hit:focus-visible { background: var(--surface-card); color: var(--text); }
+.train-search__hit strong { font-family: var(--font-mono); color: var(--text); }
+.train-search__note { padding: 0.35rem 0.5rem; font-size: 0.82rem; color: var(--text-muted); }
+.train-panel__track { margin: 0 0 0.5rem; }
+
 /* --- Filtermenü für die Live-Züge ------------------------------------ */
 
 .live-filter { position: relative; }
