@@ -7,7 +7,7 @@
  */
 
 import { typeOf } from './data/trains.js';
-import { trainLabel, RouteMap, walkText } from './map.js';
+import { trainLabel, RouteMap, walkText, journeyKm } from './map.js';
 import { formatDuration, formatTime, formatPrice, priceOrigin, counterValue, fxInfo, comfortOf } from './scoring.js';
 import { wantsInbound, inboundFor, inboundText } from './inbound.js';
 import { missChance, RISK_SHOW, RISK_HIGH } from './prefetch.js';
@@ -366,6 +366,9 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
       j.changes === 0 ? 'direkt' : `${j.changes} Umstieg${j.changes > 1 ? 'e' : ''}`
     )
   );
+
+  const km = kmLabel(j);
+  if (km) meta.append(km);
 
   const left = el('div', 'journey__main');
   left.append(times, meta);
@@ -1386,6 +1389,24 @@ function renderSequence(rolle, leg, seq) {
   }
   if (teile.length) box.append(el('p', 'wagen__note', teile.join(' · ')));
   return box;
+}
+
+/**
+ * "62 km" an der Verbindung - wie weit die Züge fahren. Solange ein Zug
+ * seinen Streckenverlauf noch nicht hat (der kommt erst beim Antippen),
+ * steht "ca." davor: die Geraden zwischen den Halten sind kürzer als die
+ * Schiene. app.js tauscht das Etikett aus, sobald der Verlauf da ist.
+ */
+export function kmLabel(journey) {
+  const k = journeyKm(journey);
+  if (!k) return null;
+  const zahl = k.km >= 100 ? Math.round(k.km) : Math.round(k.km * 10) / 10;
+  const span = el('span', 'journey__km', `${k.exact ? '' : 'ca. '}${String(zahl).replace('.', ',')} km`);
+  span.title = k.exact
+    ? 'Strecke auf der Schiene, aus dem Streckenverlauf der Züge.'
+    : 'Geschätzt aus den Geraden zwischen den Halten - die Schiene ist etwas länger. '
+      + 'Genauer, sobald die Verbindung angetippt ist.';
+  return span;
 }
 
 /** Inhalt des Umstiegsplans: der Bahnhof aus OpenStreetMap, oder eine Erklärung. */
