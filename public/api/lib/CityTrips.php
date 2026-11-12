@@ -161,31 +161,111 @@ final class CityTrips
     /**
      * Verbindungen aus zwei Quellen zusammenführen, ohne Doppelte.
      *
-     * Dieselbe S-Bahn kommt von HAFAS und von der MVG. Gleich ist, was zur
-     * selben Minute abfährt und ankommt und mit derselben Linie beginnt;
-     * dann gewinnt die erste Liste - HAFAS, mit Preis und Zuglauf-Kennung.
+     * Dieselbe S-Bahn kommt von HAFAS und von der MVG. Gleich ist, was mit
+     * DENSELBEN ZÜGEN fährt - siehe sameTrainsKey(). Vorher zählten auch
+     * Abfahrt und Ankunft der ganzen Reise mit, und die unterscheiden sich
+     * schon, wenn DB und MVG den Fußweg zur Haltestelle verschieden lang
+     * schätzen: Garching-Forschungszentrum - Fröttmaning stand mit derselben
+     * U6 zweimal in der Liste, einmal mit 802 m Fußweg und einmal mit 865.
      *
-     * @param callable(array):array $labels  trainLabels()
+     * Von zwei gleichen bleibt die SCHNELLERE; bei Gleichstand die aus der
+     * ersten Liste - HAFAS bzw. DB, mit Preis und Zuglauf-Kennung.
+     *
+     * @param callable(array):array $labels  trainLabels() - nicht mehr
+     *        gebraucht, bleibt für die Aufrufer stehen
      */
     public static function merge(array $primary, array $secondary, callable $labels): array
     {
-        $key = static function (array $j) use ($labels): string {
-            return substr((string) ($j['departure'] ?? ''), 0, 16) . '|'
-                . substr((string) ($j['arrival'] ?? ''), 0, 16) . '|'
-                . (($labels($j)[0] ?? ''));
-        };
-        $seen = [];
-        foreach ($primary as $j) {
-            $seen[$key($j)] = true;
-        }
-        $out = $primary;
-        foreach ($secondary as $j) {
-            if (!isset($seen[$key($j)])) {
-                $out[] = $j;
-            }
-        }
+        $out = self::fastestPerTrains(array_merge($primary, $secondary));
         usort($out, static fn($a, $b) => strcmp((string) ($a['departure'] ?? ''), (string) ($b['departure'] ?? '')));
         return $out;
+    }
+
+    /**
+     * Woran man erkennt, dass zwei Verbindungen dieselbe Fahrt sind: an den
+     * Zügen - Linie und Abfahrtsminute jedes Abschnitts. Fußwege zählen
+     * nicht mit. Ohne Zug (reiner Fußweg) bleibt jede Verbindung für sich.
+     */
+    public static function sameTrainsKey(array $j): string
+    {
+        $teile = [];
+        foreach ($j['legs'] ?? [] as $l) {
+            if (($l['mode'] ?? '') !== 'train') {
+                continue;
+            }
+            $linie = (string) (($l['line'] ?? '') !== '' ? $l['line'] : ($l['name'] ?? ''));
+            $linie = mb_strtolower((string) preg_replace('/^(bus|tram|str)\s+|\s+/iu', '', trim($linie)));
+            $teile[] = $linie . '@' . substr((string) ($l['departure'] ?? ''), 0, 16);
+        }
+        return $teile === []
+            ? 'zu-fuss:' . ($j['departure'] ?? '') . '|' . ($j['arrival'] ?? '')
+            : implode('|', $teile);
+    }
+
+    /**
+     * Je Zugfolge nur die schnellste Verbindung. Die Reihenfolge der Liste
+     * bleibt, bei gleicher Dauer gewinnt die frühere.
+     */
+    public static function fastestPerTrains(array $journeys): array
+    {
+        $dauer = static function (array $j): int {
+            $ab = strtotime((string) ($j['departure'] ?? ''));
+            $an = strtotime((string) ($j['arrival'] ?? ''));
+            return $ab !== false && $an !== false ? $an - $ab : PHP_INT_MAX;
+        };
+        $best = [];
+        foreach ($journeys as $i => $j) {
+            $k = self::sameTrainsKey($j);
+            if (!isset($best[$k]) || $dauer($j) < $dauer($journeys[$best[$k]])) {
+                $best[$k] = $i;
+            }
+        }
+        sort($best);
+        return array_map(static fn(int $i): array => $journeys[$i], $best);
+    }
+
+    /**
+     * Ist-Abfahrt und Ist-Ankunft einer ganzen Reise, oder null ohne Zug.
+     *
+     * Maßgeblich sind der erste und der letzte ZUG. Beginnt die Reise mit
+     * einem Fußweg, ist ihre Ist-Abfahrt aber nicht die des Zuges: vorher
+     * stand in der Trefferliste der Beginn des Fußwegs durchgestrichen da und
+     * daneben in Rot die Abfahrt des Zuges am Bahnhof, als wäre die Reise um
+     * den ganzen Fußweg verspätet. Jetzt verschiebt sich der Beginn nur um
+     * die Verspätung des Zuges - entsprechend die Ankunft.
+     *
+     * @return ?array{0:?string,1:?string}
+     */
+    public static function realEnds(array $journey): ?array
+    {
+        $trains = array_values(array_filter($journey['legs'] ?? [], static fn($l) => ($l['mode'] ?? '') === 'train'));
+        if ($trains === []) {
+            return null;
+        }
+        $erster = $trains[0];
+        $letzter = $trains[count($trains) - 1];
+        return [
+            self::shiftBy($journey['departure'] ?? null, $erster['departure'] ?? null, $erster['departureReal'] ?? null),
+            self::shiftBy($journey['arrival'] ?? null, $letzter['arrival'] ?? null, $letzter['arrivalReal'] ?? null),
+        ];
+    }
+
+    /**
+     * `$zeit`, verschoben um den Abstand zwischen Plan und Ist eines Zuges.
+     * Ohne Ist-Zeit null; sind `$zeit` und Plan dieselbe Zeit, die Ist-Zeit.
+     */
+    public static function shiftBy(?string $zeit, ?string $plan, ?string $ist): ?string
+    {
+        if ($ist === null || $ist === '' || $zeit === null || $plan === null) {
+            return null;
+        }
+        try {
+            $z = new DateTimeImmutable($zeit);
+            $diff = (new DateTimeImmutable($ist))->getTimestamp() - (new DateTimeImmutable($plan))->getTimestamp();
+            return $z->modify(($diff >= 0 ? '+' : '') . $diff . ' seconds')->format('Y-m-d\TH:i:sP');
+        } catch (Exception $e) {
+            return null;
+        }
     }
 
     /**
