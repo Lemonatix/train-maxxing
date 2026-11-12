@@ -458,6 +458,39 @@ export function legGeometryFromRun(leg, run) {
   return g.slice(i, j + 1);
 }
 
+/**
+ * Wie viele Kilometer eine Verbindung auf der Schiene zurücklegt.
+ *
+ * Aus dem Streckenverlauf, wo es einen gibt; sonst aus den Geraden zwischen
+ * den Halten - das unterschätzt, weil keine Strecke gerade ist. `exact`
+ * sagt, ob jeder Zug seinen Verlauf hatte. Fußwege zählen nicht mit.
+ *
+ * @returns {?{km: number, exact: boolean}} null ohne brauchbare Koordinaten
+ */
+export function journeyKm(journey) {
+  const zuege = (journey?.legs || []).filter((l) => l.mode === 'train');
+  if (zuege.length === 0) return null;
+  let meter = 0;
+  for (const part of geometryOf(journey)) {
+    for (let i = 1; i < part.length; i++) meter += metresBetween(part[i - 1], part[i]);
+  }
+  if (meter < 100) return null;
+  return {
+    km: meter / 1000,
+    exact: zuege.every((l) => Array.isArray(l.geometry) && l.geometry.length > 1),
+  };
+}
+
+function metresBetween(a, b) {
+  const r = 6371000;
+  const p1 = (a[0] * Math.PI) / 180;
+  const p2 = (b[0] * Math.PI) / 180;
+  const dp = p2 - p1;
+  const dl = ((b[1] - a[1]) * Math.PI) / 180;
+  const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * r * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 export function geometryOf(journey) {
   const parts = [];
   for (const leg of journey.legs || []) {
