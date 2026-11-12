@@ -140,6 +140,9 @@ export const api = {
 
   trainDetails: (jid, opts) => call('traindetails', { jid }, opts),
 
+  /** Züge nach Namen oder Nummer finden ("RJ 80", "690") - heute. */
+  trainSearch: (q, opts) => call('trainsearch', { q }, opts),
+
   /**
    * Streckenverlauf eines Abschnitts ohne jid (aus der DB-Suche), über die
    * Zugnummer bei der ÖBB gefunden. Antwort `{ geometry: [[lat, lon], …] }`,
