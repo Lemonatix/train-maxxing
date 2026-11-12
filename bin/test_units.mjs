@@ -1061,6 +1061,24 @@ console.log('\nOrtssuche - Sofort-Vorschläge vor der Antwort des Servers');
 }
 
 // ---------------------------------------------------------------------
+console.log('\nKilometer einer Verbindung');
+{
+  const { journeyKm } = await import('../public/assets/js/map.js');
+  // 0,1 Grad Breite sind 11,1 km.
+  const mitVerlauf = { legs: [
+    { mode: 'walk', from: { lat: 48, lon: 11 }, to: { lat: 48.01, lon: 11 } },
+    { mode: 'train', geometry: [[48.0, 11.0], [48.1, 11.0], [48.2, 11.0]] },
+  ] };
+  const k = journeyKm(mitVerlauf);
+  pruefe('aus dem Streckenverlauf, Fußweg zählt nicht', [Math.round(k.km * 10) / 10, k.exact], [22.2, true]);
+  const nurHalte = { legs: [{ mode: 'train', stops: [{ lat: 48.0, lon: 11.0 }, { lat: 48.1, lon: 11.0 }] }] };
+  pruefe('nur Halte: Luftlinie, als ungenau markiert',
+    [Math.round(journeyKm(nurHalte).km * 10) / 10, journeyKm(nurHalte).exact], [11.1, false]);
+  pruefe('ohne Zug oder ohne Koordinaten: nichts',
+    [journeyKm({ legs: [{ mode: 'walk' }] }), journeyKm({ legs: [{ mode: 'train', stops: [] }] })], [null, null]);
+}
+
+// ---------------------------------------------------------------------
 console.log('\nPendelstrecken - nächster Pendeltag und Lage der Verbindung');
 {
   const { nextCommuteDate, daysLabel } = await import('../public/assets/js/commutes.js');
