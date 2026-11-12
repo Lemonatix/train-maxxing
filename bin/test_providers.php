@@ -858,6 +858,39 @@ pruefe('pünktlicher Zubringer: keine erwartete Verspätung',
     array_key_exists('expectedDeparture', $m['800'] ?? []) ? $m['800']['expectedDeparture'] : 'fehlt', null);
 
 // ---------------------------------------------------------------------
+echo "\nDieselben Züge, anderer Fußweg\n";
+
+$u6 = static fn(string $linie, string $an, string $src): array => [
+    'id' => $src, 'source' => $src, 'departure' => '2026-11-12T20:53:00+01:00', 'arrival' => $an,
+    'legs' => [
+        ['mode' => 'train', 'line' => $linie, 'name' => $linie, 'departure' => '2026-11-12T20:53:00+01:00', 'arrival' => '2026-11-12T21:02:00+01:00'],
+        ['mode' => 'walk', 'departure' => '2026-11-12T21:02:00+01:00', 'arrival' => $an],
+    ],
+];
+$db = $u6('U6', '2026-11-12T21:14:00+01:00', 'db');
+$mvg = $u6('U 6', '2026-11-12T21:15:00+01:00', 'mvg');
+pruefe('DB und MVG mit derselben U6: eine Verbindung, die schnellere',
+    array_column(CityTrips::merge([$db], [$mvg], static fn(array $j): array => []), 'source'), ['db']);
+pruefe('die schnellere gewinnt auch aus der zweiten Liste',
+    array_column(CityTrips::merge([$mvg], [$db], static fn(array $j): array => []), 'source'), ['db']);
+$spaeter = $u6('U6', '2026-11-12T21:14:00+01:00', 'db2');
+$spaeter['legs'][0]['departure'] = '2026-11-12T21:13:00+01:00';
+pruefe('eine andere Abfahrt ist eine andere Verbindung',
+    count(CityTrips::fastestPerTrains([$db, $spaeter])), 2);
+
+// Fußweg 7 min, dann Bus mit +1: die Reise beginnt eine Minute später,
+// nicht erst zur Abfahrt des Busses.
+$mitFussweg = ['departure' => '2026-11-12T20:41:00+01:00', 'arrival' => '2026-11-12T22:08:00+01:00', 'legs' => [
+    ['mode' => 'walk', 'departure' => '2026-11-12T20:41:00+01:00', 'arrival' => '2026-11-12T20:48:00+01:00'],
+    ['mode' => 'train', 'departure' => '2026-11-12T20:48:00+01:00', 'departureReal' => '2026-11-12T20:49:00+01:00',
+     'arrival' => '2026-11-12T22:08:00+01:00', 'arrivalReal' => '2026-11-12T22:22:00+01:00'],
+]];
+pruefe('Ist-Abfahrt mit Fußweg davor: um die Verspätung des Zuges verschoben',
+    CityTrips::realEnds($mitFussweg), ['2026-11-12T20:42:00+01:00', '2026-11-12T22:22:00+01:00']);
+$mitFussweg['legs'][1]['departureReal'] = null;
+pruefe('ohne Echtzeit des Zuges: keine Ist-Abfahrt', CityTrips::realEnds($mitFussweg)[0], null);
+
+// ---------------------------------------------------------------------
 echo "\nAktuelle Verspätung eines Zuglaufs\n";
 
 // Nacht-ICE: in Hamburg +40, bis Nürnberg aufgeholt, vor München +5.
