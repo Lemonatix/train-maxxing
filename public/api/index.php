@@ -20,6 +20,7 @@
  *   ?action=fxrate                          EZB-Tageskurse (für CHF neben EUR)
  *   ?action=platforms&lat=..&lon=..         Bahnsteiglage aus OSM für den Umstiegsplan
  *   ?action=trainline&from=..&to=..&num=..&dep=..  Streckenverlauf eines DB-Abschnitts über die ÖBB
+ *   ?action=trainsearch&q=RJ+80             Züge nach Namen oder Nummer finden (heute)
  *   ?action=works                           Bauarbeiten im Netz, mit Abschnitt und Zeitraum
  *   ?action=disruptions                     MVG-Störungsticker München
  *   ?action=walkroute&from=lat,lon&to=lat,lon  Fußweg auf der Straße (Linie, Länge, Gehzeit)
@@ -211,6 +212,7 @@ const RATE_COST = [
     'traindetails'   => 2,
     // Eine Verbindungssuche bei der ÖBB, aber eine Woche gecacht.
     'trainline'      => 2,
+    'trainsearch'    => 2,
     'works'          => 4,
     'platforms'      => 4,
     'nextconnection' => 4,
@@ -302,6 +304,9 @@ try {
             break;
         case 'trainline':
             handleTrainLine($http, $config, $cache);
+            break;
+        case 'trainsearch':
+            handleTrainSearch($http, $config, $cache);
             break;
         case 'bestprices':
             handleBestPrices($http, $config, $cache);
@@ -963,6 +968,37 @@ function handleNextConnection(Http $http, array $config, Cache $cache): void
     // der Liste erneut an.
     $cache->set($key, $out);
     ok(['connections' => $out, 'cached' => false]);
+}
+
+/**
+ * Züge nach Namen finden - "RJ 80", "ICE 690", "690" - für die Zugsuche auf
+ * der Live-Karte. Gesucht wird am heutigen Betriebstag (oder `date`); fünf
+ * Minuten gemerkt, der Fahrplan eines Tages ändert sich nicht.
+ */
+function handleTrainSearch(Http $http, array $config, Cache $cache): void
+{
+    $q = trim((string) preg_replace('/\s+/', ' ', (string) ($_GET['q'] ?? '')));
+    if (mb_strlen($q) < 2 || mb_strlen($q) > 20 || !preg_match('/^[\p{L}\d .\-]+$/u', $q) || !preg_match('/\d/', $q)) {
+        ok(['trains' => [], 'note' => 'Bitte einen Zug mit Nummer eingeben, zum Beispiel "RJ 80" oder "ICE 690".']);
+    }
+    $date = trim((string) ($_GET['date'] ?? ''));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        $date = (new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin')))->format('Y-m-d');
+    }
+    // "RJ80" und "rj 80" sind derselbe Zug.
+    $q = (string) preg_replace('/^(\p{L}+)\s*(\d)/u', '$1 $2', mb_strtoupper($q));
+
+    $key = 'tsearch:' . $date . ':' . $q;
+    $cached = $cache->get($key, 300);
+    if ($cached !== null) {
+        ok(['trains' => $cached, 'cached' => true]);
+    }
+    $res = (new OebbHafas($http, $config['providers']['oebb']))->trainSearch($q, $date);
+    if (!$res['ok']) {
+        ok(['trains' => [], 'error' => $res['error']]);
+    }
+    $cache->set($key, $res['data']);
+    ok(['trains' => $res['data'], 'cached' => false]);
 }
 
 /**
@@ -2705,7 +2741,17 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     $nachPunkt = $endpunkt($to, 'to');
     foreach ($journeys as $i => $j) {
         $journeys[$i] = Walks::complete($j, $vonPunkt, $nachPunkt);
+        // Für alle Quellen gleich, auch die, die annotateTransfers() nicht
+        // durchlaufen: Ist-Zeiten der Reise um den Fußweg verschoben.
+        $enden = CityTrips::realEnds($journeys[$i]);
+        if ($enden !== null) {
+            [$journeys[$i]['departureReal'], $journeys[$i]['arrivalReal']] = $enden;
+        }
     }
+    // DIESELBEN ZÜGE, NUR EIN ANDERER FUSSWEG: dann bleibt die schnellste.
+    // Auch innerhalb einer Quelle - die DB bietet zum selben Zug gern den
+    // Weg über zwei verschiedene Ausgänge an.
+    $journeys = CityTrips::fastestPerTrains($journeys);
 
     $payload = [
         'journeys'    => $journeys,
@@ -3323,12 +3369,10 @@ function annotateTransfers(array $journey): array
     }
     $journey['delay'] = $delay;
 
-    // Ist-Abfahrt und Ist-Ankunft der ganzen Reise: erster und letzter Zug.
-    $trains = array_values(array_filter($legs, static fn($l) => ($l['mode'] ?? '') === 'train'));
-    if ($trains !== []) {
-        $journey['departureReal'] = $trains[0]['departureReal'] ?? null;
-        $journey['arrivalReal']   = $trains[count($trains) - 1]['arrivalReal'] ?? null;
-    }
+    // Ist-Abfahrt und Ist-Ankunft der ganzen Reise: erster und letzter Zug -
+    // um den Fußweg davor bzw. danach verschoben, siehe CityTrips::realEnds().
+    [$journey['departureReal'], $journey['arrivalReal']] = CityTrips::realEnds($journey)
+        ?? [$journey['departureReal'] ?? null, $journey['arrivalReal'] ?? null];
 
     return $journey;
 }
