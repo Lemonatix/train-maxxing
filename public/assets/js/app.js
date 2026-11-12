@@ -8,7 +8,7 @@
 
 import { api } from './api.js';
 import { rank, highlights, setFxRates, spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
-import { renderResults, renderNotices, renderTripPair } from './render.js';
+import { renderResults, renderNotices, renderTripPair, kmLabel } from './render.js';
 import { RouteMap, setMapTheme, trainLabel, lineKey, nextOnLine, geoErrorText, legGeometryFromRun } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
 import { pendingLoads } from './prefetch.js';
@@ -188,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupTabs();
   setupMode();
   setupSort();
+  setupTrainSearch();
   setupTripTabs();
   setupNightValue();
   setupLiveToggle();
@@ -1886,6 +1887,11 @@ async function loadLines(journey) {
   if (geaendert) {
     map.render();
     routePreview?.render();
+    // Mit dem Streckenverlauf stimmt auch die Kilometerzahl an der Karte.
+    const index = state.ranked.findIndex((e) => e.journey === journey);
+    const alt = $('#results-list')?.querySelector(`.journey[data-index="${index}"] .journey__km`);
+    const neu = kmLabel(journey);
+    if (alt && neu) alt.replaceWith(neu);
   }
 }
 
@@ -2577,6 +2583,96 @@ async function loadBestPrices() {
 let trainAbort = null;
 
 /** Lädt den Lauf eines angetippten Zuges und zeigt ihn unter der Karte. */
+/**
+ * Aus einem Zuglauf eine "Verbindung" für die Live-Verfolgung: ein einziger
+ * Abschnitt vom ersten bis zum letzten Halt. So lässt sich auch ein Zug
+ * verfolgen, den man nicht über die Verbindungssuche gefunden hat - über
+ * die Zugsuche oder einen Tipp auf die Karte.
+ */
+function journeyFromRun(t, jid) {
+  const stops = t.stops || [];
+  const a = stops[0];
+  const b = stops[stops.length - 1];
+  const ort = (s) => ({ id: s.id || '', name: s.name, country: s.country || '', lat: s.lat ?? null, lon: s.lon ?? null, platform: s.platform ?? null });
+  const ab = a.departure || a.arrival;
+  const an = b.arrival || b.departure;
+  return {
+    id: `zug-${jid}`,
+    source: 'train',
+    departure: ab,
+    arrival: an,
+    durationMin: Math.max(0, Math.round((Date.parse(an) - Date.parse(ab)) / 60000)),
+    changes: 0,
+    countries: [],
+    price: null,
+    legs: [{
+      mode: 'train', jid,
+      category: t.category || '', categoryName: t.categoryName || '', line: t.line || '',
+      trainNumber: t.trainNumber || '', name: t.name || '', direction: t.direction || '', operator: t.operator || '',
+      from: ort(a), to: ort(b), departure: ab, arrival: an,
+      stops, geometry: Array.isArray(t.geometry) && t.geometry.length > 1 ? t.geometry : undefined,
+    }],
+  };
+}
+
+/**
+ * Die Zugsuche über der Live-Karte: "RJ 80" eingeben, Treffer antippen, das
+ * Zugfenster geht auf - von dort lässt sich der Zug verfolgen.
+ */
+function setupTrainSearch() {
+  const form = $('#train-search');
+  const feld = $('#train-search-input');
+  const liste = $('#train-search-results');
+  if (!form || !feld || !liste) return;
+  const zeit = (iso) => (iso ? new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '');
+  const melde = (text) => {
+    const li = document.createElement('li');
+    li.className = 'train-search__note';
+    li.textContent = text;
+    liste.replaceChildren(li);
+    liste.hidden = false;
+  };
+  let lauf = 0;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const q = feld.value.trim();
+    if (q === '') { liste.hidden = true; return; }
+    const meiner = ++lauf;
+    melde('Suche …');
+    try {
+      const res = await api.trainSearch(q);
+      if (meiner !== lauf) return;
+      const zuege = res.trains || [];
+      if (zuege.length === 0) {
+        melde(res.note || (res.error ? 'Die Zugsuche ist gerade nicht erreichbar.' : `Heute fährt kein Zug „${q}“.`));
+        return;
+      }
+      liste.replaceChildren(...zuege.map((t) => {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'train-search__hit';
+        const name = document.createElement('strong');
+        name.textContent = trainLabel(t);
+        const weg = document.createElement('span');
+        weg.textContent = `${t.from} ${zeit(t.departure)} → ${t.to} ${zeit(t.arrival)}`;
+        b.append(name, weg);
+        b.addEventListener('click', () => {
+          liste.hidden = true;
+          showTrainDetails(t);
+          $('#train-panel')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
+        li.append(b);
+        return li;
+      }));
+      liste.hidden = false;
+    } catch (err) {
+      if (meiner === lauf) melde('Die Zugsuche ist gerade nicht erreichbar: ' + err.message);
+    }
+  });
+  feld.addEventListener('input', () => { if (feld.value.trim() === '') liste.hidden = true; });
+}
+
 async function showTrainDetails(train) {
   const panel = $('#train-panel');
   panel.hidden = false;
@@ -2753,6 +2849,25 @@ function renderTrainPanel(panel, head, t) {
     badge.dataset.state = 'good';
   }
   head.append(badge);
+
+  // Diesen Zug verfolgen - den ganzen Lauf, vom ersten bis zum letzten Halt.
+  const jid = state.trainJid;
+  if (jid && (t.stops || []).length >= 2) {
+    const journey = journeyFromRun(t, jid);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'live-btn train-panel__track' + (live.isTracking(journey) ? ' is-on' : '');
+    b.textContent = live.isTracking(journey) ? 'Verfolgung beenden' : 'Verfolgen';
+    b.addEventListener('click', () => {
+      const lief = live.isTracking(journey);
+      live.start(journey);
+      b.classList.toggle('is-on', !lief);
+      b.textContent = lief ? 'Verfolgen' : 'Verfolgung beenden';
+      // Das Live-Panel steht bei den Verbindungen.
+      if (!lief) showTab('search');
+    });
+    panel.append(b);
+  }
 
   // Meldungen kommen als { text, from, to } - `from`/`to` sind Haltindizes
   // des Zuglaufs. Hier stand vorher das Objekt selbst im textContent, und
