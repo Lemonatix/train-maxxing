@@ -422,8 +422,17 @@
         </div>
       </details>
 
+      <!-- Einen Zug über seinen Namen finden ("RJ 80") - auch einen, den man
+           nicht selbst fährt: wer jemanden abholt, will nur diesen Zug sehen. -->
+      <form id="train-search" class="train-search" role="search">
+        <input id="train-search-input" type="search" placeholder="Zug suchen, z. B. RJ 80"
+               aria-label="Zug nach Namen oder Nummer suchen" autocomplete="off" maxlength="20">
+        <button type="submit" class="btn btn--ghost train-search__go">Suchen</button>
+      </form>
+
       <span id="live-note" class="map-bar__note"></span>
     </div>
+    <ul id="train-search-results" class="train-search__results" hidden></ul>
     <!-- Routenkarte: Kacheln von OpenStreetMap/CARTO, darüber die Routen
          als SVG. Die Kachelquelle steht in assets/js/map.js. -->
     <section id="map" class="map" aria-label="Routenkarte"></section>
