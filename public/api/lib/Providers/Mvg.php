@@ -622,8 +622,11 @@ final class Mvg
             'id'          => 'mvg-' . (string) ($route['uniqueId'] ?? md5(json_encode($route))),
             'departure'   => $first['departure'],
             'arrival'     => $last['arrival'],
-            'departureReal' => $trains[0]['departureReal'] ?? null,
-            'arrivalReal' => $trains[count($trains) - 1]['arrivalReal'] ?? null,
+            // Mit Fußweg davor oder danach: um ihn verschoben, nicht die
+            // Zeit des Zuges selbst - siehe CityTrips::realEnds().
+            'departureReal' => CityTrips::shiftBy($first['departure'], $trains[0]['departure'] ?? null, $trains[0]['departureReal'] ?? null),
+            'arrivalReal' => CityTrips::shiftBy($last['arrival'], $trains[count($trains) - 1]['arrival'] ?? null,
+                $trains[count($trains) - 1]['arrivalReal'] ?? null),
             'durationMin' => self::minutes($first['departure'], $last['arrival']),
             'changes'     => max(0, count($trains) - 1),
             'legs'        => $legs,
