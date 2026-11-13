@@ -750,6 +750,9 @@ final class OebbHafas
             $name = self::productName($prod, $body['common']['opL'] ?? []);
 
             $out[] = [
+                // Verspätung am nächsten Halt - für die Farbe des Punktes auf
+                // der Karte. null ohne Echtzeit; siehe positionDelay().
+                'delay'       => $this->positionDelay($jny),
                 'lat'         => $pos['y'] / 1000000,
                 'lon'         => $pos['x'] / 1000000,
                 'category'    => trim((string) ($ctx['catOut'] ?? '')),
@@ -763,6 +766,48 @@ final class OebbHafas
         }
 
         return ['ok' => true, 'error' => null, 'data' => $out];
+    }
+
+    /**
+     * Wie spät ein Zug der Positionsabfrage gerade ist: am Halt, den er als
+     * nächstes erreicht (`ani.tLocX`), sonst am letzten mit Ist-Zeit. null,
+     * wenn HAFAS für ihn keine Echtzeit hat - dann ist die Position aus dem
+     * Fahrplan gerechnet, und "pünktlich" wäre geraten.
+     */
+    private function positionDelay(array $jny): ?int
+    {
+        $stops = $jny['stopL'] ?? [];
+        if ($stops === []) {
+            return null;
+        }
+        $date = (string) ($jny['date'] ?? date('Ymd'));
+        $am = function (array $st) use ($date): ?int {
+            foreach ([['aTimeS', 'aTimeR', 'aTZOffset'], ['dTimeS', 'dTimeR', 'dTZOffset']] as [$plan, $ist, $tz]) {
+                if (!isset($st[$plan], $st[$ist])) {
+                    continue;
+                }
+                $p = $this->hafasTime($date, $st[$plan], $st[$tz] ?? null);
+                $r = $this->hafasTime($date, $st[$ist], $st[$tz] ?? null);
+                if ($p !== null && $r !== null) {
+                    return $this->diffMinutes($p, $r);
+                }
+            }
+            return null;
+        };
+        $naechster = $jny['ani']['tLocX'][0] ?? null;
+        if (is_int($naechster) && isset($stops[$naechster])) {
+            $d = $am($stops[$naechster]);
+            if ($d !== null) {
+                return $d;
+            }
+        }
+        for ($i = count($stops) - 1; $i >= 0; $i--) {
+            $d = $am($stops[$i]);
+            if ($d !== null) {
+                return $d;
+            }
+        }
+        return null;
     }
 
     /**
