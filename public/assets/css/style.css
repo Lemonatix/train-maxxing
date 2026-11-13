@@ -3951,14 +3951,46 @@ details.live__msg .live__msg-text {
   gap: 0.5rem;
 }
 .mvg-ticker__item {
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  gap: 0.5rem;
-  align-items: center;
-  padding: 0.4rem 0;
+  padding: 0.35rem 0;
   border-top: 1px dashed var(--border);
 }
 .mvg-ticker__item:first-child { border-top: 0; }
+/* Kopfzeile einer Meldung: Linien, "ab …", Titel - umbrechend, damit lange
+   Titel auf dem Telefon nicht aus dem Kasten laufen. */
+.mvg-ticker__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.5rem;
+  cursor: pointer;
+  list-style: none;
+}
+.mvg-ticker__head::-webkit-details-marker { display: none; }
+.mvg-ticker__entry.is-short .mvg-ticker__head { cursor: default; }
+.mvg-ticker__title { min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.mvg-ticker__entry:not(.is-short) .mvg-ticker__title::after { content: " ▾"; color: var(--text-muted); }
+.mvg-ticker__entry[open] .mvg-ticker__title::after { content: " ▴"; }
+.mvg-ticker__text {
+  margin: 0.4rem 0 0.2rem;
+  white-space: pre-line;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.mvg-ticker__filter { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.6rem; }
+.mvg-ticker__chip {
+  min-height: 32px;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.mvg-ticker__chip.is-on { border-color: var(--accent); color: var(--text); background: var(--surface); }
+.mvg-ticker__empty { padding: 0.4rem 0; color: var(--text-muted); }
 /* Angekündigt, noch nicht in Kraft ("ab 12.10. 21:20"). */
 .mvg-ticker__when {
   flex: 0 0 auto;
@@ -4192,15 +4224,15 @@ details.live__msg .live__msg-text {
 
 .mvg-ticker__line--more { color: var(--text-muted); }
 
-/* Bauarbeiten auf der Karte: gestrichelt, weil die gerade Linie den
-   BETROFFENEN ABSCHNITT zeigt und nicht den Verlauf der Schiene. */
+/* Bauarbeiten auf der Karte. Ohne bekannten Verlauf nur eine dünne, blasse
+   Verbindung zwischen den beiden Enden (Ringe) - nicht gestrichelt: die
+   kräftige Strichlinie las sich wie ein Gleis quer durchs Gelände. */
 .map__works { pointer-events: none; }
 
 .map__work-line {
   stroke: var(--amber);
-  stroke-width: 3;
-  stroke-dasharray: 6 4;
-  opacity: 0.8;
+  stroke-width: 1.5;
+  opacity: 0.35;
   pointer-events: stroke;
   fill: none;
 }
@@ -4211,11 +4243,13 @@ details.live__msg .live__msg-text {
 .map__work-line.is-exact {
   stroke-dasharray: none;
   stroke-width: 3.5;
+  opacity: 0.85;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
 .map__work-dot { fill: var(--amber); opacity: 0.9; }
+.map__work-dot.is-ends { fill: var(--surface-card, #fff); stroke: var(--amber); stroke-width: 2.5; opacity: 1; }
 
 .mvg-ticker__line[data-transport="UBAHN"] { color: #fff; background: #1f6bb6; border-color: #1f6bb6; }
 .mvg-ticker__line[data-transport="SBAHN"] { color: #fff; background: #128f4c; border-color: #128f4c; }
