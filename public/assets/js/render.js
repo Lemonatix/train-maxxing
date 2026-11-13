@@ -372,6 +372,8 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
 
   const left = el('div', 'journey__main');
   left.append(times, meta);
+  const leiste = journeyBar(j);
+  if (leiste) left.append(leiste);
 
   const right = el('div', 'journey__price-box');
   const priceText = formatPrice(j.price);
@@ -1392,6 +1394,58 @@ function renderSequence(rolle, leg, seq) {
 }
 
 /**
+ * Welche Farbe ein Abschnitt trägt: in München die der MVG (U-Bahn blau,
+ * S-Bahn grün, Tram rot, Bus dunkelblau), Fernverkehr kräftig, Regional
+ * grau, Fußwege lila. Dieselben Farben in der Reiseleiste, an den Linien-
+ * symbolen und an der Linie links im Streckenverlauf.
+ */
+export function modeOf(leg) {
+  if (!leg || leg.mode === 'walk') return 'walk';
+  const t = typeOf(leg);
+  if (t.label === 'U') return 'ubahn';
+  if (t.label === 'S') return 'sbahn';
+  if (t.label === 'Tram') return 'tram';
+  if (t.label === 'Bus') return 'bus';
+  return t.longDistance ? 'fern' : 'regio';
+}
+
+/**
+ * Die Reise als Leiste: jeder Abschnitt so breit, wie er dauert, in der
+ * Farbe seines Verkehrsmittels; Wartezeit beim Umstieg als Lücke. Zeigt
+ * ohne Aufklappen, ob es ein langer Zug mit kurzem Bus ist oder drei
+ * Umstiege mit Warten dazwischen.
+ */
+export function journeyBar(j) {
+  const ab = Date.parse(j.departure || '');
+  const an = Date.parse(j.arrival || '');
+  const gesamt = an - ab;
+  if (!Number.isFinite(gesamt) || gesamt <= 0) return null;
+  const bar = el('div', 'journey__bar');
+  bar.setAttribute('aria-hidden', 'true');
+  let bis = ab;
+  for (const leg of j.legs || []) {
+    const von = Date.parse(leg.departure || '');
+    const zu = Date.parse(leg.arrival || '');
+    if (!Number.isFinite(von) || !Number.isFinite(zu)) continue;
+    if (von > bis) {
+      const warten = el('span', 'journey__bar-seg is-wait');
+      warten.style.flexGrow = String(von - bis);
+      bar.append(warten);
+    }
+    const dauer = Math.max(zu - von, 0);
+    if (dauer > 0) {
+      const seg = el('span', 'journey__bar-seg');
+      seg.dataset.mode = modeOf(leg);
+      seg.style.flexGrow = String(dauer);
+      seg.title = `${leg.mode === 'walk' ? 'Fußweg' : trainLabel(leg)} · ${formatDuration(Math.round(dauer / 60000))}`;
+      bar.append(seg);
+    }
+    bis = Math.max(bis, zu);
+  }
+  return bar.childElementCount > 0 ? bar : null;
+}
+
+/**
  * "62 km" an der Verbindung - wie weit die Züge fahren. Solange ein Zug
  * seinen Streckenverlauf noch nicht hat (der kommt erst beim Antippen),
  * steht "ca." davor: die Geraden zwischen den Halten sind kürzer als die
@@ -2144,6 +2198,8 @@ function renderLegs(journey, entry, state, actions) {
     row.append(line1);
     row.append(...zugang(leg, 'from'));
 
+    // Farbe des Verkehrsmittels: am Liniensymbol und an der Linie links.
+    row.dataset.mode = modeOf(leg);
     const info = el('div', 'leg__train');
     info.append(el('span', 'leg__cat', trainLabel(leg)));
     info.append(el('span', 'leg__long', type.long));
