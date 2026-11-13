@@ -2562,6 +2562,9 @@ export class RouteMap {
         + (t === own ? ' is-tracked' : '')
         + stadt
         + (t.source === 'mvg-plan' ? ' is-plan' : '')
+        // Pünktlichkeit als Farbe: grün, ab 3 min gelb, ab 10 rot; grau,
+        // wo HAFAS keine Echtzeit hat und die Stelle nur gerechnet ist.
+        + (t.delay == null ? ' is-nort' : t.delay >= 10 ? ' is-late' : t.delay >= 3 ? ' is-slow' : '')
         // Hochgerechnete Position: derselbe Punkt, nur hohl - damit man
         // sieht, dass die Stelle geschätzt und nicht gemeldet ist.
         + (t.estimated ? ' is-estimated' : ''));
@@ -2598,6 +2601,7 @@ export class RouteMap {
 
       const title = document.createElementNS(NS, 'title');
       title.textContent = `${trainLabel(t)}${t.direction ? ' → ' + t.direction : ''}`
+        + (t.delay > 0 ? ` · +${t.delay} min` : t.delay === 0 ? ' · pünktlich' : '')
         + (t.nextStop ? ` — nächster Halt ${t.nextStop}` : '')
         + (t.estimated ? ' — Position aus dem Fahrplan geschätzt' : '')
         + (t.jid ? ' (antippen für Details)' : '');
