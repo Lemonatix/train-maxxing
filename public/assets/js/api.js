@@ -140,8 +140,8 @@ export const api = {
 
   trainDetails: (jid, opts) => call('traindetails', { jid }, opts),
 
-  /** Züge nach Namen oder Nummer finden ("RJ 80", "690") - heute. */
-  trainSearch: (q, opts) => call('trainsearch', { q }, opts),
+  /** Züge nach Namen oder Nummer finden ("RJ 80", "690") - an `date` (YYYY-MM-DD), sonst heute. */
+  trainSearch: (q, date, opts) => call('trainsearch', { q, date: date || '' }, opts),
 
   /**
    * Streckenverlauf eines Abschnitts ohne jid (aus der DB-Suche), über die
