@@ -123,15 +123,13 @@
        sich als Lesezeichen speichern lässt. -->
   <nav class="tabs" role="tablist" aria-label="Ansicht">
     <button type="button" role="tab" id="tab-search" class="tab is-active"
-            aria-controls="view-search" aria-selected="true">Verbindungen</button>
+            aria-controls="view-search" aria-selected="true"><svg class="tab__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h7.5a3.5 3.5 0 0 0 0-7h-7a3.5 3.5 0 0 1 0-7H16"/></svg><span class="tab__label">Verbindungen</span></button>
     <button type="button" role="tab" id="tab-trips" class="tab"
-            aria-controls="view-trips" aria-selected="false" tabindex="-1">Reisen <span id="trips-count" class="tab__count" hidden></span></button>
+            aria-controls="view-trips" aria-selected="false" tabindex="-1"><svg class="tab__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span class="tab__label">Reisen</span> <span id="trips-count" class="tab__count" hidden></span></button>
     <button type="button" role="tab" id="tab-map" class="tab"
-            aria-controls="view-map" aria-selected="false" tabindex="-1"><span class="tab__long">Live-</span>Karte</button>
+            aria-controls="view-map" aria-selected="false" tabindex="-1"><svg class="tab__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg><span class="tab__label">Live-Karte</span></button>
     <button type="button" role="tab" id="tab-board" class="tab"
-            aria-controls="view-board" aria-selected="false" tabindex="-1">Abfahrten</button>
-    <button type="button" role="tab" id="tab-works" class="tab"
-            aria-controls="view-works" aria-selected="false" tabindex="-1">Baustellen</button>
+            aria-controls="view-board" aria-selected="false" tabindex="-1"><svg class="tab__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="tab__label">Abfahrten</span></button>
   </nav>
 
   <div id="view-search" role="tabpanel" aria-labelledby="tab-search">
@@ -384,6 +382,10 @@
   <!-- MVG-Störungsticker München, per JS eingeblendet wenn aktive Meldungen vorliegen. -->
   <aside id="mvg-ticker" class="mvg-ticker-mount" hidden></aside>
 
+  <!-- Bauarbeiten im Netz: eigene Karte, darunter Abschnitt und Zeitraum.
+       Bewusst getrennt von der Live-Karte - siehe works.js. -->
+  <aside id="works" class="mvg-ticker-mount" hidden></aside>
+
   </div>
 
   <!-- Gemerkte Reisen - siehe trips.js und tripsView.js. -->
@@ -425,6 +427,8 @@
       <form id="train-search" class="train-search" role="search">
         <input id="train-search-input" type="search" placeholder="Zug suchen, z. B. RJ 80"
                aria-label="Zug nach Namen oder Nummer suchen" autocomplete="off" maxlength="20">
+        <!-- Leer heißt heute. Ein anderer Tag für den Zug von morgen früh. -->
+        <input id="train-search-date" type="date" aria-label="An welchem Tag">
         <button type="submit" class="btn btn--ghost train-search__go">Suchen</button>
       </form>
 
@@ -478,12 +482,6 @@
     </button>
   </section>
 
-  <!-- Bauarbeiten im Netz: eigene Karte, darunter Abschnitt und Zeitraum.
-       Ein eigener Tab, seit die Abschnitte ihren Verlauf auf dem Gleis haben
-       (StreckenInfo::addGeometry) - siehe works.js. -->
-  <section id="view-works" class="works-view" role="tabpanel" aria-labelledby="tab-works" hidden>
-    <div id="works"></div>
-  </section>
 
   <footer class="page-foot">
     <p>
