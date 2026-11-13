@@ -5,6 +5,15 @@
  * Chip unter dem Formular. Der Endpunkt liefert das gesamte MVV/MVG-Netz;
  * hier werden nur zeitlich gültige Einträge dargestellt.
  *
+ * NACH VERKEHRSMITTEL, NICHT DIE ERSTEN SECHS. Die MVG meldet für das ganze
+ * MVV-Gebiet, an einem gewöhnlichen Tag über zweihundert Einträge, und drei
+ * von vier betreffen Regionalbusse im Umland. Vorher standen hier einfach
+ * die ersten sechs - "Volkstrauertag in Grafing", eine verlegte Haltestelle
+ * in Geretsried -, während "U1/U2 reduzierte Taktung" dahinter verschwand.
+ * Jetzt kommt zuerst, was die meisten betrifft (U-Bahn, S-Bahn, Tram,
+ * Regionalzug), gezählt wird nur das, und die Busse liegen hinter einem
+ * eigenen Filter. Ein Tipp auf eine Meldung zeigt den ganzen Text.
+ *
  * Bewusst zurückhaltend:
  *   - Standardmäßig eingeklappt, kein visueller Konkurrent zur Suchmaske
  *   - Aktualisierung nur alle 2 Minuten - länger reicht dem PHP-Cache
@@ -15,16 +24,19 @@
 import { api } from './api.js';
 
 const REFRESH_MS = 120_000;
-const MAX_ROWS   = 6;
 
-const TYPE_LABEL = {
-  INCIDENT:        'Störung',
-  SCHEDULE_CHANGE: 'Fahrplanänderung',
-  CONSTRUCTION:    'Baustelle',
-  DISRUPTION:      'Störung',
-  ELEVATOR:        'Aufzug',
-  ESCALATOR:       'Rolltreppe',
-};
+/**
+ * Gruppen in der Reihenfolge ihres Gewichts. `wichtig`: zählt im Kopf mit
+ * und ist ohne Filter zu sehen.
+ */
+const GROUPS = [
+  { id: 'ubahn', label: 'U-Bahn', types: ['UBAHN'], wichtig: true },
+  { id: 'sbahn', label: 'S-Bahn', types: ['SBAHN'], wichtig: true },
+  { id: 'tram', label: 'Tram', types: ['TRAM'], wichtig: true },
+  { id: 'bahn', label: 'Regionalzug', types: ['BAHN'], wichtig: true },
+  { id: 'bus', label: 'Stadtbus', types: ['BUS'], wichtig: false },
+  { id: 'regio', label: 'Regionalbus', types: ['REGIONAL_BUS'], wichtig: false },
+];
 
 /**
  * Baut das Widget in $mount ein und startet den Refresh-Zyklus.
@@ -50,6 +62,10 @@ export function initMvgTicker(mount) {
   summary.append(label, count);
   details.append(summary);
 
+  const filter = document.createElement('div');
+  filter.className = 'mvg-ticker__filter';
+  details.append(filter);
+
   const list = document.createElement('ul');
   list.className = 'mvg-ticker__list';
   details.append(list);
@@ -62,7 +78,7 @@ export function initMvgTicker(mount) {
     controller = new AbortController();
     try {
       const data = await api.disruptions({ signal: controller.signal });
-      renderTicker(mount, count, list, data.disruptions || []);
+      renderTicker(mount, count, filter, list, data.disruptions || []);
     } catch (err) {
       if (err.name === 'AbortError') return;
       // Ausblenden statt Alarm; ein toter Endpunkt darf die Suche nicht stören.
@@ -80,61 +96,144 @@ export function initMvgTicker(mount) {
   };
 }
 
+/** Die gewählte Gruppe überlebt die Aktualisierung alle zwei Minuten. */
+let gewaehlt = null;
+
+/**
+ * In welche Gruppe gehört eine Meldung? In die gewichtigste ihrer Linien:
+ * Bauarbeiten, die S2 und drei Busse betreffen, sind eine S-Bahn-Meldung.
+ */
+export function groupOf(m) {
+  const typen = new Set((m?.lines || []).map((l) => l.transportType));
+  return GROUPS.find((g) => g.types.some((t) => typen.has(t)))?.id ?? 'regio';
+}
+
+/**
+ * Die gerade gültigen Meldungen, ohne Doppelte, nach Gewicht sortiert.
+ * Doppelt heißt: derselbe Titel - die MVG meldet manche Sperrung je Linie
+ * einzeln, mit identischem Text.
+ */
+export function relevantMessages(all, now = Date.now()) {
+  const gesehen = new Set();
+  const rang = (m) => GROUPS.findIndex((g) => g.id === groupOf(m));
+  return (all || [])
+    .filter((m) => isActiveNow(m, now))
+    .filter((m) => {
+      const k = (m.title || m.description || '').trim().toLowerCase();
+      if (gesehen.has(k)) return false;
+      gesehen.add(k);
+      return true;
+    })
+    .sort((a, b) => rang(a) - rang(b));
+}
+
 /**
  * Aktualisiert die Anzeige. Reine Textinhalte, keine gefährlichen Elemente -
  * MVG-Titel und -Beschreibungen kommen aus einer externen API.
  */
-function renderTicker(mount, count, list, all) {
-  const active = all.filter(isActiveNow).slice(0, MAX_ROWS);
-  if (active.length === 0) {
+function renderTicker(mount, count, filter, list, all) {
+  const aktiv = relevantMessages(all);
+  if (aktiv.length === 0) {
     mount.hidden = true;
     return;
   }
-
   mount.hidden = false;
-  count.textContent = String(active.length);
 
-  list.innerHTML = '';
-  for (const m of active) {
+  const proGruppe = new Map(GROUPS.map((g) => [g.id, []]));
+  for (const m of aktiv) proGruppe.get(groupOf(m)).push(m);
+  const wichtige = aktiv.filter((m) => GROUPS.find((g) => g.id === groupOf(m)).wichtig);
+  // Im Kopf zählt Schiene und Tram; sonst wäre es immer "200".
+  count.textContent = String(wichtige.length);
+  count.title = `${wichtige.length} bei U-Bahn, S-Bahn, Tram und Regionalzug, `
+    + `${aktiv.length - wichtige.length} bei Bussen`;
+
+  // Filter: "Bahn & Tram" (Voreinstellung) und je Bus-Gruppe ein Knopf.
+  const knoepfe = [{ id: null, label: 'Bahn & Tram', n: wichtige.length }]
+    .concat(GROUPS.filter((g) => !g.wichtig).map((g) => ({ id: g.id, label: g.label, n: proGruppe.get(g.id).length })))
+    .filter((k) => k.n > 0 || k.id === null);
+  if (gewaehlt && !knoepfe.some((k) => k.id === gewaehlt)) gewaehlt = null;
+  filter.replaceChildren(...knoepfe.map((k) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mvg-ticker__chip' + (k.id === gewaehlt ? ' is-on' : '');
+    b.setAttribute('aria-pressed', String(k.id === gewaehlt));
+    b.textContent = `${k.label} ${k.n}`;
+    b.addEventListener('click', () => {
+      gewaehlt = k.id;
+      renderTicker(mount, count, filter, list, all);
+    });
+    return b;
+  }));
+
+  const zeigen = gewaehlt ? proGruppe.get(gewaehlt) : wichtige;
+  list.replaceChildren();
+  if (zeigen.length === 0) {
     const li = document.createElement('li');
-    li.className = 'mvg-ticker__item';
-
-    const type = document.createElement('span');
-    type.className = 'mvg-ticker__type';
-    type.textContent = TYPE_LABEL[m.type] || 'Meldung';
-    li.append(type);
-
-    const lines = uniqueLineLabels(m.lines);
-    if (lines.length) {
-      const badges = document.createElement('span');
-      badges.className = 'mvg-ticker__lines';
-      for (const l of lines) {
-        const b = document.createElement('span');
-        b.className = 'mvg-ticker__line';
-        b.dataset.transport = l.transportType || '';
-        b.textContent = l.label;
-        badges.append(b);
-      }
-      li.append(badges);
-    }
-
-    // Angekündigt, noch nicht in Kraft: mit Datum davor, sonst liest sich
-    // "Zugausfälle zwischen Pasing und Ostbahnhof" wie eine Störung jetzt.
-    const kommt = upcomingFrom(m);
-    if (kommt) {
-      const ab = document.createElement('span');
-      ab.className = 'mvg-ticker__when';
-      ab.textContent = `ab ${kommt}`;
-      li.append(ab);
-    }
-
-    const title = document.createElement('span');
-    title.className = 'mvg-ticker__title';
-    title.textContent = m.title || m.description || '(ohne Titel)';
-    li.append(title);
-
+    li.className = 'mvg-ticker__empty';
+    li.textContent = 'Bei U-Bahn, S-Bahn, Tram und Regionalzug ist gerade nichts gemeldet.';
     list.append(li);
+    return;
   }
+  for (const m of zeigen) list.append(renderItem(m));
+}
+
+/** Eine Meldung: Kopfzeile mit Linien und Titel, aufklappbar zum ganzen Text. */
+function renderItem(m) {
+  const li = document.createElement('li');
+  li.className = 'mvg-ticker__item';
+  const box = document.createElement('details');
+  box.className = 'mvg-ticker__entry';
+  const kopf = document.createElement('summary');
+  kopf.className = 'mvg-ticker__head';
+
+  const lines = uniqueLineLabels(m.lines);
+  if (lines.length) {
+    const badges = document.createElement('span');
+    badges.className = 'mvg-ticker__lines';
+    // Bei vielen Buslinien nur die ersten - der Rest steht im Text.
+    for (const l of lines.slice(0, 6)) {
+      const b = document.createElement('span');
+      b.className = 'mvg-ticker__line';
+      b.dataset.transport = l.transportType || '';
+      b.textContent = l.label;
+      badges.append(b);
+    }
+    if (lines.length > 6) {
+      const mehr = document.createElement('span');
+      mehr.className = 'mvg-ticker__line mvg-ticker__line--more';
+      mehr.textContent = `+${lines.length - 6}`;
+      badges.append(mehr);
+    }
+    kopf.append(badges);
+  }
+
+  // Angekündigt, noch nicht in Kraft: mit Datum davor, sonst liest sich
+  // "Zugausfälle zwischen Pasing und Ostbahnhof" wie eine Störung jetzt.
+  const kommt = upcomingFrom(m);
+  if (kommt) {
+    const ab = document.createElement('span');
+    ab.className = 'mvg-ticker__when';
+    ab.textContent = `ab ${kommt}`;
+    kopf.append(ab);
+  }
+
+  const title = document.createElement('span');
+  title.className = 'mvg-ticker__title';
+  title.textContent = m.title || m.description || '(ohne Titel)';
+  kopf.append(title);
+  box.append(kopf);
+
+  const text = (m.description || '').trim();
+  if (text && text !== (m.title || '').trim()) {
+    const p = document.createElement('p');
+    p.className = 'mvg-ticker__text';
+    p.textContent = text;
+    box.append(p);
+  } else {
+    box.classList.add('is-short');
+  }
+  li.append(box);
+  return li;
 }
 
 /**
@@ -171,11 +270,18 @@ export function affectsWindow(m, t0, t1) {
   });
 }
 
-function isActiveNow(m) {
-  const now = Date.now();
+/**
+ * Gilt die Meldung jetzt? Nach ihren Zeitfenstern, wo sie welche hat - eine
+ * Sperrung "nur nachts" steht tagsüber nicht als Störung da. Ohne Fenster
+ * zählt der Veröffentlichungszeitraum. Angekündigtes für die nächsten zwei
+ * Tage bleibt drin, mit "ab …" davor.
+ */
+function isActiveNow(m, now = Date.now()) {
   const from = m.validFrom ? Date.parse(m.validFrom) : 0;
   const to   = m.validTo   ? Date.parse(m.validTo)   : Number.POSITIVE_INFINITY;
-  return from <= now && to >= now;
+  if (!(from <= now && to >= now)) return false;
+  if (!(m.incidents || []).length) return true;
+  return affectsWindow(m, now, now + 2 * 86_400_000);
 }
 
 /** Doppelte Linien-Labels entfernen, Reihenfolge stabil halten. */
