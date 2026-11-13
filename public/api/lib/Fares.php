@@ -535,6 +535,35 @@ final class Fares
     {
         $out = [];
 
+        // HALTE OHNE LAND: Busse und U-Bahnen aus der MVG-Suche tragen keinen
+        // Ländercode. Ihre Kilometer landeten unter "default", und dort
+        // greift kein Abo - mit Deutschlandticket blieben von Obermenzing
+        // nach Augsburg (Bus 160 + RB86) so "2,38 €" stehen. Ein Halt ohne
+        // Land liegt im Land der übrigen Halte derselben Reise.
+        $land = '';
+        foreach (($journey['legs'] ?? []) as $leg) {
+            foreach (['from', 'to'] as $k) {
+                $c = (string) ($leg[$k]['country'] ?? '');
+                if ($land === '' && $c !== '') {
+                    $land = $c;
+                }
+            }
+        }
+        if ($land !== '') {
+            foreach ($journey['legs'] ?? [] as $i => $leg) {
+                foreach (['from', 'to'] as $k) {
+                    if (isset($leg[$k]) && (string) ($leg[$k]['country'] ?? '') === '') {
+                        $journey['legs'][$i][$k]['country'] = $land;
+                    }
+                }
+                foreach ($leg['stops'] ?? [] as $j => $st) {
+                    if ((string) ($st['country'] ?? '') === '') {
+                        $journey['legs'][$i]['stops'][$j]['country'] = $land;
+                    }
+                }
+            }
+        }
+
         foreach (($journey['legs'] ?? []) as $leg) {
             if (($leg['mode'] ?? '') !== 'train') {
                 continue;
