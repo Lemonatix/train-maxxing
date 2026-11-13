@@ -201,6 +201,9 @@ document.addEventListener('DOMContentLoaded', () => {
   applyStateToForm();
   // MVG-Störungsticker München einblenden, wenn der Endpoint Meldungen hat.
   initMvgTicker(document.getElementById('mvg-ticker'));
+  // Bauarbeiten im Netz: Liste plus eigene Karte, ganz unten in der Suche.
+  // Die Baustellen gehören nicht auf die Routenkarte, siehe works.js.
+  initWorks(document.getElementById('works'));
 
   // Eine geteilte Fahrt (?live=…) hat Vorrang; sonst überlebt die eigene
   // Verfolgung Neuladen und neue Suchen.
@@ -262,8 +265,6 @@ function setupOffline() {
 
 let board = null;
 let tripsView = null;
-/** Der Tab "Baustellen" - siehe works.js. */
-let worksView = null;
 
 /**
  * Vier Tabs, in dieser Reihenfolge: Verbindungen, gemerkte Reisen,
@@ -279,7 +280,7 @@ let worksView = null;
  * Der Tab steht in der Adresse (#reisen, #karte, #abfahrten), damit er ein
  * Neuladen übersteht und sich als Lesezeichen speichern lässt.
  */
-const TAB_HASH = { search: '', trips: '#reisen', map: '#karte', board: '#abfahrten', works: '#baustellen' };
+const TAB_HASH = { search: '', trips: '#reisen', map: '#karte', board: '#abfahrten' };
 let showTab = () => {};
 /** Der offene Tab - die Karte fragt danach, ob sie Züge holen soll. */
 let currentTab = 'search';
@@ -340,14 +341,6 @@ function setupTabs() {
       board.activate();
     } else {
       board?.deactivate();
-    }
-    // Bauarbeiten im Netz: eigener Tab mit eigener Karte, siehe works.js -
-    // angelegt und geladen erst beim ersten Öffnen.
-    if (name === 'works') {
-      worksView ??= initWorks($('#works'));
-      worksView.activate();
-    } else {
-      worksView?.deactivate();
     }
     // DIE VERFOLGUNG WANDERT MIT IN DEN REISEN-TAB. Das Panel steht in der
     // Suche - auf dem Handy liegt man während der Fahrt aber meist bei den
@@ -1600,7 +1593,9 @@ async function runSearch() {
 
   status.className = 'status status--busy';
   status.textContent = 'Suche Verbindungen …';
-  results.replaceChildren();
+  // Platzhalter in der Form der Ergebnisse, statt einer leeren Fläche - die
+  // Liste ersetzt sie, sobald die Antwort da ist.
+  results.replaceChildren(...skeletonCards(3));
   $('#notices').replaceChildren();
   state.selectedIndex = 0;
   state.visible = PAGE_SIZE;
@@ -1676,7 +1671,23 @@ async function runSearch() {
     if (err.name === 'AbortError') return;
     status.className = 'status status--error';
     status.textContent = err.message;
+    for (const p of results.querySelectorAll('.journey--skeleton')) p.remove();
   }
+}
+
+/** Graue Platzhalterkarten, solange die Suche läuft. */
+function skeletonCards(n) {
+  return Array.from({ length: n }, () => {
+    const k = document.createElement('div');
+    k.className = 'journey journey--skeleton';
+    k.setAttribute('aria-hidden', 'true');
+    for (const cls of ['is-time', 'is-meta', 'is-bar']) {
+      const z = document.createElement('span');
+      z.className = `skeleton__line ${cls}`;
+      k.append(z);
+    }
+    return k;
+  });
 }
 
 /**
@@ -2631,8 +2642,11 @@ function journeyFromRun(t, jid) {
 function setupTrainSearch() {
   const form = $('#train-search');
   const feld = $('#train-search-input');
+  const tag = $('#train-search-date');
   const liste = $('#train-search-results');
   if (!form || !feld || !liste) return;
+  // Heute vorbelegt - die Suche gilt immer für einen Betriebstag.
+  if (tag && !tag.value) tag.value = localDateTime(Date.now()).date;
   const zeit = (iso) => (iso ? new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '');
   const melde = (text) => {
     const li = document.createElement('li');
@@ -2649,11 +2663,14 @@ function setupTrainSearch() {
     const meiner = ++lauf;
     melde('Suche …');
     try {
-      const res = await api.trainSearch(q);
+      const datum = tag?.value || '';
+      const res = await api.trainSearch(q, datum);
       if (meiner !== lauf) return;
       const zuege = res.trains || [];
       if (zuege.length === 0) {
-        melde(res.note || (res.error ? 'Die Zugsuche ist gerade nicht erreichbar.' : `Heute fährt kein Zug „${q}“.`));
+        const wann = !datum || datum === localDateTime(Date.now()).date ? 'Heute'
+          : `Am ${new Date(`${datum}T12:00`).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric' })}`;
+        melde(res.note || (res.error ? 'Die Zugsuche ist gerade nicht erreichbar.' : `${wann} fährt kein Zug „${q}“.`));
         return;
       }
       liste.replaceChildren(...zuege.map((t) => {
