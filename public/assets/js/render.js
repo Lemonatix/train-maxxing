@@ -2040,6 +2040,27 @@ export function renderJourneyLegs(journey, state, actions) {
   return renderLegs(journey, { comfortPerLeg: comfortOf(journey, state.modelPrefs).perLeg }, state, actions);
 }
 
+/**
+ * "Umstieg am selben Halt · 8 min Zeit, ca. 2 min Fußweg".
+ *
+ * Vorher stand hier nur die Gehzeit, die die DB für den Umstieg rechnet -
+ * in Garching "2 min" zwischen Bus (an 23:28) und U6 (ab 23:36). Das las
+ * sich wie zwei Minuten Umsteigezeit, dabei waren es acht. Jetzt steht die
+ * Zeit zwischen den beiden Zügen vorn und die Gehzeit dahinter.
+ */
+function sameStopText(journey, walk) {
+  const legs = journey.legs || [];
+  const i = legs.indexOf(walk);
+  const vorher = [...legs.slice(0, i)].reverse().find((l) => l.mode === 'train');
+  const nachher = legs.slice(i + 1).find((l) => l.mode === 'train');
+  const an = Date.parse(vorher?.arrivalReal || vorher?.arrival || '');
+  const ab = Date.parse(nachher?.departureReal || nachher?.departure || '');
+  const zeit = Number.isFinite(an) && Number.isFinite(ab) ? Math.round((ab - an) / 60000) : null;
+  const gehen = (walk.durationMin || 0) >= 1 ? `ca. ${formatDuration(walk.durationMin)} Fußweg` : null;
+  if (zeit == null || zeit < 0) return `Umstieg am selben Halt${gehen ? ` · ${gehen}` : ''}`;
+  return `Umstieg am selben Halt · ${formatDuration(zeit)} Zeit${gehen ? `, ${gehen}` : ''}`;
+}
+
 function renderLegs(journey, entry, state, actions) {
   const wrap = el('div', 'legs');
 
@@ -2066,7 +2087,7 @@ function renderLegs(journey, entry, state, actions) {
       // Gehzeit und Länge - "ca.", wo sie geschätzt sind (Walks.php).
       const text = walksBetween
         ? `Zu Fuß: ${leg.from.name} → ${leg.to.name} · ${walkText(leg) || formatDuration(leg.durationMin)}`
-        : `Umstieg am selben Halt · ${formatDuration(leg.durationMin)}`;
+        : sameStopText(journey, leg);
 
       const row = el('div', 'leg leg--walk');
       if (walksBetween) row.classList.add('leg--walk-between');
