@@ -13,16 +13,17 @@
  * gerecht werden — die Route will Zürich–Wien zeigen, die Baustellenkarte
  * das ganze Netz. Deshalb hier eine zweite Karte, die nur Abschnitte kennt.
  *
- * Sie wird erst gebaut, wenn jemand den Tab öffnet: eine Karte lädt Kacheln,
- * und das gehört nicht zum Seitenaufbau.
+ * Sie wird erst gebaut, wenn jemand aufklappt: eine Karte lädt Kacheln, und
+ * das gehört nicht zum Seitenaufbau.
  *
  * ZWEI QUELLEN: das Verzeichnis der DB InfraGO hinter strecken.info für
  * Deutschland, der HAFAS Information Manager der ÖBB für Österreich und die
  * Schweiz. Deutschland steht vorn — das größte Netz im deutschsprachigen
  * Raum, und die österreichische Quelle meldet fast nur Nebenbahnen.
  *
- * Aktualisierung nur stündlich und nur bei offenem Tab - der Server cacht
- * ohnehin so lange.
+ * Bewusst zurückhaltend: standardmäßig eingeklappt, Aktualisierung nur
+ * stündlich (der Server cacht ohnehin so lange), und bei Fehlern lautlos
+ * verstecken statt Alarm zu schlagen.
  */
 
 import { api } from './api.js';
@@ -32,58 +33,47 @@ const REFRESH_MS = 3_600_000;
 const MAX_ROWS = 8;
 
 /**
- * Baut den Tab "Baustellen" in $mount — samt eigener Karte.
- *
- * Lädt erst, wenn der Tab zum ersten Mal geöffnet wird (activate): die
- * Abfrage ist die langsamste der App, und die Karte lädt Kacheln. Beides
- * gehört nicht zum Seitenaufbau, wenn jemand nur eine Verbindung sucht.
+ * Baut das Widget in $mount — samt eigener Karte.
  *
  * @param {HTMLElement} mount
- * @returns {{activate: () => void, deactivate: () => void}}
  */
 export function initWorks(mount) {
-  if (!mount) return { activate() {}, deactivate() {} };
+  if (!mount) return () => {};
 
   mount.replaceChildren();
-  const box = document.createElement('div');
-  box.className = 'mvg-ticker works';
+  mount.hidden = true;
 
-  const kopf = document.createElement('h2');
-  kopf.className = 'works__title';
+  const details = document.createElement('details');
+  details.className = 'mvg-ticker works';
+
+  const summary = document.createElement('summary');
+  summary.className = 'mvg-ticker__summary';
   const label = document.createElement('span');
   label.textContent = 'Große Baustellen im Netz';
   const count = document.createElement('span');
   count.className = 'mvg-ticker__count';
-  count.hidden = true;
-  kopf.append(label, count);
-  box.append(kopf);
+  summary.append(label, count);
+  details.append(summary);
 
   const note = document.createElement('p');
   note.className = 'works__note';
   note.textContent = 'Totalsperrungen ab einer Woche Dauer, Deutschland zuerst. '
     + 'Quellen: DB InfraGO (strecken.info) und ÖBB.';
-  box.append(note);
+  details.append(note);
 
   const mapEl = document.createElement('div');
   mapEl.className = 'map works__map';
-  box.append(mapEl);
-
-  const status = document.createElement('p');
-  status.className = 'works__status';
-  status.textContent = 'Baustellen werden geladen …';
-  box.append(status);
+  details.append(mapEl);
 
   const list = document.createElement('ul');
   list.className = 'mvg-ticker__list works__list';
-  box.append(list);
+  details.append(list);
 
-  mount.append(box);
+  mount.append(details);
 
+  // Die Karte entsteht erst beim Aufklappen — vorher wären ihre Kacheln
+  // Ladezeit für etwas, das niemand ansieht.
   let map = null;
-  let aktiv = false;
-  let latest = [];
-  // Die Karte entsteht beim ersten Öffnen - vorher hätte ihr Kasten keine
-  // Größe, und der Ausschnitt passte nicht.
   const ensureMap = () => {
     if (map) return map;
     map = new RouteMap(mapEl, { mode: 'works' });
@@ -94,70 +84,65 @@ export function initWorks(mount) {
     map.render();
     return map;
   };
-  // Erst im nächsten Frame messen: im selben Moment, in dem der Tab
-  // sichtbar wird, hat die Karte noch keine echte Größe. Mit Zeitgeber als
-  // Rückfall - siehe renderSoon() in map.js.
-  const zeigen = () => {
-    let fertig = false;
-    const los = () => {
-      if (fertig || !aktiv) return;
-      fertig = true;
-      const m = ensureMap();
-      m.fit();
-      m.render();
-    };
-    requestAnimationFrame(los);
-    setTimeout(los, 120);
-  };
+  details.addEventListener('toggle', () => { if (details.open) ensureMap(); });
 
+  let latest = [];
   let controller = null;
-  let gestartet = false;
   const refresh = async () => {
     controller?.abort();
     controller = new AbortController();
     try {
       const data = await api.works({ signal: controller.signal });
       latest = data.works || [];
-      if (latest.length === 0) {
-        status.textContent = 'Zurzeit sind keine größeren Baustellen gemeldet.';
-        status.hidden = false;
-      } else {
-        status.hidden = true;
-      }
-      render(count, list, latest, ensureMap);
+      render(mount, count, list, latest, ensureMap);
       // Die Karte bekommt alle Abschnitte, nicht nur die aufgelisteten —
       // sie hat Platz dafür und der Überblick ist dort der eigentliche Zweck.
-      if (map) {
-        map.setWorks(latest);
-        map.fit();
-        map.render();
-      }
+      map?.setWorks(latest);
     } catch (err) {
       if (err.name === 'AbortError') return;
-      status.textContent = 'Die Baustellen sind gerade nicht abrufbar. Später noch einmal öffnen.';
-      status.hidden = false;
-      gestartet = false;
+      mount.hidden = true;
     }
   };
 
-  const timer = setInterval(() => { if (gestartet && aktiv) refresh(); }, REFRESH_MS);
+  // NICHT BEIM SEITENAUFBAU LADEN.
+  //
+  // Die Baustellenabfrage ist die langsamste der ganzen App - das
+  // Verzeichnis der DB InfraGO umfasst mehrere Megabyte, kalt gemessen 28
+  // Sekunden. Browser halten je Host nur etwa sechs Verbindungen offen, und
+  // die Seite feuert beim Aufbau schon Katalog, Kurse, Störungsticker,
+  // Live-Züge und die eigentliche Suche ab. Die Baustellen belegten davon
+  // einen Platz für eine halbe Minute - und die Trefferliste wartete
+  // dahinter, obwohl ihre eigene Antwort längst da war.
+  //
+  // Also erst, wenn der Kasten überhaupt ins Bild kommt. Er sitzt ganz unten;
+  // bis dahin ist die Suche lange fertig. Kennt der Browser keinen
+  // IntersectionObserver, greift ein Zeitgeber - Hauptsache nicht sofort.
+  let gestartet = false;
+  const starten = () => {
+    if (gestartet) return;
+    gestartet = true;
+    beobachter?.disconnect();
+    clearTimeout(später);
+    refresh();
+  };
 
-  return {
-    activate() {
-      aktiv = true;
-      if (!gestartet) {
-        gestartet = true;
-        refresh();
-      }
-      zeigen();
-    },
-    deactivate() {
-      aktiv = false;
-    },
-    stop() {
-      controller?.abort();
-      clearInterval(timer);
-    },
+  const beobachter = 'IntersectionObserver' in window
+    ? new IntersectionObserver((sichtbare) => {
+        if (sichtbare.some((e) => e.isIntersecting)) starten();
+      }, { rootMargin: '400px' })
+    : null;
+  beobachter?.observe(mount);
+
+  const später = setTimeout(starten, 6000);
+
+  const timer = setInterval(() => { if (gestartet) refresh(); }, REFRESH_MS);
+
+  return () => {
+    controller?.abort();
+    beobachter?.disconnect();
+    clearTimeout(später);
+    clearInterval(timer);
+    mount.hidden = true;
   };
 }
 
@@ -173,8 +158,12 @@ export function initWorks(mount) {
  * Einträge gezeigt und der Rest über einen Knopf nachgeschoben. So ist alles
  * erreichbar, ohne dass beim Aufklappen eine Wand aus Text kommt.
  */
-function render(count, list, works, ensureMap) {
-  count.hidden = works.length === 0;
+function render(mount, count, list, works, ensureMap) {
+  if (works.length === 0) {
+    mount.hidden = true;
+    return;
+  }
+  mount.hidden = false;
   count.textContent = String(works.length);
 
   // Reihenfolge der Länder wie sie kommen — der Server sortiert bereits
