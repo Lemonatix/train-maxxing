@@ -639,7 +639,7 @@ final class OebbHafas
             $stb  = $j['stbStop'] ?? [];
             $prod = $prodL[$stb[$a . 'ProdX'] ?? $j['prodX'] ?? -1] ?? [];
             $ctx  = $prod['prodCtx'] ?? [];
-            $name = self::productName($prod);
+            $name = self::productName($prod, $common['opL'] ?? []);
             $day  = (string) ($j['date'] ?? '');
 
             $planned = $this->hafasTime($day, $stb[$a . 'TimeS'] ?? null, $stb[$a . 'TZOffset'] ?? null);
@@ -747,7 +747,7 @@ final class OebbHafas
             $prod = $prodL[$jny['prodX'] ?? -1] ?? [];
             $ctx  = $prod['prodCtx'] ?? [];
 
-            $name = self::productName($prod);
+            $name = self::productName($prod, $body['common']['opL'] ?? []);
 
             $out[] = [
                 'lat'         => $pos['y'] / 1000000,
@@ -796,7 +796,7 @@ final class OebbHafas
 
         $prod = ($common['prodL'] ?? [])[$jny['prodX'] ?? -1] ?? [];
         $ctx  = $prod['prodCtx'] ?? [];
-        $name = self::productName($prod);
+        $name = self::productName($prod, $common['opL'] ?? []);
         $date = (string) ($jny['date'] ?? '');
         $locL = $common['locL'] ?? [];
 
@@ -971,7 +971,7 @@ final class OebbHafas
         foreach (($body['jnyL'] ?? []) as $jny) {
             $prod = $prodL[$jny['prodX'] ?? -1] ?? [];
             $ctx  = $prod['prodCtx'] ?? [];
-            $name = self::productName($prod);
+            $name = self::productName($prod, $body['common']['opL'] ?? []);
             $stops = $jny['stopL'] ?? [];
             $erster = $stops[0] ?? null;
             $letzter = $stops !== [] ? $stops[count($stops) - 1] : null;
@@ -1036,7 +1036,14 @@ final class OebbHafas
      * kurzen (`nameS`). Genommen wird deshalb der längere - er enthält den
      * anderen praktisch immer und dazu die Nummer.
      */
-    private static function productName(array $prod): string
+    /**
+     * @param array $opL Betreiberliste der Antwort (common.opL). Wo HAFAS
+     *        keinen Zugnamen hat - in Großbritannien bei fast allen Zügen -,
+     *        heißt der Zug nach seinem Betreiber: "Elizabeth line",
+     *        "Southern". So sprechen die Briten auch von ihren Zügen; auf
+     *        der Karte standen vorher Punkte ohne Beschriftung.
+     */
+    private static function productName(array $prod, array $opL = []): string
     {
         $saeubern = static function (string $v): string {
             $v = trim((string) preg_replace('/\s+/u', ' ', $v));
@@ -1050,6 +1057,10 @@ final class OebbHafas
         $long  = $saeubern((string) ($prod['name'] ?? ''));
         $short = $saeubern((string) ($prod['nameS'] ?? ''));
 
+        if ($long === '' && $short === '') {
+            $betreiber = trim((string) ($opL[$prod['oprX'] ?? -1]['name'] ?? ''));
+            return $betreiber !== '' ? $betreiber : trim((string) ($prod['prodCtx']['catOutL'] ?? ''));
+        }
         if ($long === '' || $short === '') {
             return $long !== '' ? $long : $short;
         }
@@ -1122,7 +1133,7 @@ final class OebbHafas
                 $jny  = $sec['jny'] ?? [];
                 $prod = $prodL[$jny['prodX'] ?? -1] ?? [];
                 $ctx  = $prod['prodCtx'] ?? [];
-                $prodName = self::productName($prod);
+                $prodName = self::productName($prod, $common['opL'] ?? []);
 
                 $stops = $this->mapStops($jny['stopL'] ?? [], $locL, $baseDate);
                 foreach ($stops as $s) {
