@@ -139,6 +139,7 @@ require __DIR__ . '/lib/Providers/CoachSequence.php';
 require __DIR__ . '/lib/Providers/Mvg.php';
 require __DIR__ . '/lib/Providers/MvvEfa.php';
 require __DIR__ . '/lib/Providers/Overpass.php';
+require __DIR__ . '/lib/Mvt.php';
 require __DIR__ . '/lib/Providers/StreckenInfo.php';
 require __DIR__ . '/lib/Providers/SwissOpenData.php';
 require __DIR__ . '/lib/Providers/SwissOjp.php';
@@ -2022,7 +2023,9 @@ function handleWorks(Http $http, array $config, Cache $cache): void
 {
     $days = max(1, min(90, (int) ($_GET['days'] ?? 30)));
 
-    $key    = 'works:' . $days;
+    // "works2": seit dem Verlauf aus den Kacheln von strecken-info - die
+    // alten Einträge ohne ihn sollen nicht noch eine Stunde gelten.
+    $key    = 'works2:' . $days;
     $cached = $cache->get($key, (int) ($config['cache_ttl']['works'] ?? 3600));
     if ($cached !== null) {
         ok(['works' => $cached, 'cached' => true]);
@@ -2036,7 +2039,8 @@ function handleWorks(Http $http, array $config, Cache $cache): void
         $si  = new StreckenInfo($http, $cache, $config['providers']['streckeninfo'] ?? []);
         $res = $si->works($days);
         if ($res['ok']) {
-            $works = array_merge($works, $res['data']);
+            // Verlauf aus dem Netz der DB selbst - siehe addGeometry().
+            $works = array_merge($works, $si->addGeometry($res['data']));
         } else {
             $fehler[] = $res['error'];
         }
