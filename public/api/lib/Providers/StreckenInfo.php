@@ -62,6 +62,27 @@ final class StreckenInfo
     /** Mehr Einträge braucht keine Übersicht - und die Antwort bleibt klein. */
     private const MAX_WORKS = 60;
 
+    /** Kartenkacheln der Seite - das Schienennetz mit der Lage der Sperrungen. */
+    private const TILE_ENDPOINT = 'https://strecken-info.de/api/karte';
+    /** So viele Kacheln je Aktualisierung höchstens; der Rest kommt beim nächsten Mal. */
+    private const MAX_TILES = 320;
+    /** So viele davon gleichzeitig - mehr wäre unhöflich gegenüber strecken-info. */
+    private const TILE_BATCH = 40;
+    /** Rand um die beiden Enden einer Baustelle, in Grad (rund 1 km). */
+    private const TILE_PAD_DEG = 0.01;
+    /**
+     * Stützpunkte zweier Stücke, die näher liegen, sind dieselbe Stelle.
+     * Großzügig, weil nur Stücke derselben Streckennummer im Spiel sind -
+     * eine Nachbarstrecke kann nicht kurzgeschlossen werden.
+     */
+    private const SAME_POINT_M = 60.0;
+    /** Abstand der eingefügten Zwischenpunkte, siehe densify(). */
+    private const DENSIFY_M = 25.0;
+    /** So weit darf ein Ende vom Gleis liegen und doch dazu gehören. */
+    private const SNAP_M = 400.0;
+    /** Stützpunkte je Verlauf - für eine Übersichtskarte reicht das. */
+    private const MAX_POINTS = 200;
+
     private Http $http;
     private Cache $cache;
     private array $cfg;
@@ -249,6 +270,327 @@ final class StreckenInfo
     }
 
     // ------------------------------------------------------------------
+    // Streckenverlauf
+    // ------------------------------------------------------------------
+
+    /**
+     * Den Verlauf jeder Baustelle auf dem Gleis ergänzen - aus dem Netz der
+     * DB InfraGO selbst, nicht aus OpenStreetMap.
+     *
+     * WIE: Die Karte von strecken-info.de besteht aus Vektorkacheln
+     * (`/api/karte/<Stand>/netz_<z>_<x>_<y>.mvt`). Darin trägt jedes
+     * Gleisstück seine Streckennummer und, mit demselben Filter wie die
+     * Baustellenliste abgefragt, ob es gesperrt ist ("SCHWER"). Die
+     * Baustelle nennt Streckennummer und beide Enden. Ihr Verlauf ist also
+     * der kürzeste Weg über die gesperrten Stücke dieser Strecke vom einen
+     * Ende zum anderen. Die Kennung der Baustelle tragen die Gleisstücke
+     * nicht, nur ein Markierungspunkt - deshalb der Umweg über den Weg.
+     *
+     * WARUM: Vorher kam der Verlauf über Overpass aus OSM (RailGeometry).
+     * Im November 2026 hatten so 4 von 93 Baustellen einen; der Rest stand
+     * als Gerade zwischen den Enden da.
+     *
+     * HÖFLICH: Kacheln gleichzeitig, aber je Aktualisierung höchstens
+     * MAX_TILES; der Verlauf hält dreißig Tage, ein vergeblicher Versuch eine
+     * Woche.
+     *
+     * @param array<int,array> $works aus works(), andere Länder bleiben unberührt
+     */
+    public function addGeometry(array $works): array
+    {
+        $rev = null;
+        $offen = [];
+        foreach ($works as $i => $w) {
+            if (($w['country'] ?? '') !== 'de' || count($w['geometry'] ?? []) > 1
+                || !str_starts_with((string) ($w['id'] ?? ''), 'si-') || ($w['lines'] ?? []) === []) {
+                continue;
+            }
+            $gemerkt = $this->cache->get(self::geoKey($w), 30 * 86400);
+            if (is_array($gemerkt)) {
+                $works[$i]['geometry'] = $gemerkt;
+                continue;
+            }
+            $offen[$i] = self::tilesFor($w);
+        }
+        if ($offen === []) {
+            return $works;
+        }
+        $rev = $this->findRevision();
+        if ($rev === null) {
+            return $works;
+        }
+
+        // Welche Kacheln, bis zum Kontingent. Kacheln teilen sich mehrere
+        // Baustellen auf derselben Strecke - jede wird nur einmal geholt.
+        $kacheln = [];
+        $dran = [];
+        foreach ($offen as $i => $liste) {
+            $neu = array_diff_key($liste, $kacheln);
+            if ($kacheln !== [] && count($kacheln) + count($neu) > self::MAX_TILES) {
+                continue;
+            }
+            $kacheln += $neu;
+            $dran[] = $i;
+        }
+
+        $stuecke = $this->tilePieces($rev, $kacheln);
+        foreach ($dran as $i) {
+            $w = $works[$i];
+            $teile = [];
+            foreach ($offen[$i] as $k => $_) {
+                foreach ($stuecke[$k] ?? [] as [$nr, $linie]) {
+                    if (in_array($nr, $w['lines'], true)) {
+                        $teile[] = $linie;
+                    }
+                }
+            }
+            $weg = self::path($teile, [$w['from']['lat'], $w['from']['lon']], [$w['to']['lat'], $w['to']['lon']]);
+            if ($weg === null && !isset($stuecke['_fehler'])) {
+                $this->cache->set(self::geoKey($w), []);
+                continue;
+            }
+            if ($weg !== null) {
+                $weg = self::thin($weg, self::MAX_POINTS);
+                $works[$i]['geometry'] = $weg;
+                $this->cache->set(self::geoKey($w), $weg);
+            }
+        }
+        return $works;
+    }
+
+    private static function geoKey(array $w): string
+    {
+        return 'sigeo:' . $w['id'] . '|' . implode(',', $w['lines'] ?? [])
+            . sprintf('|%.4f,%.4f|%.4f,%.4f', $w['from']['lat'], $w['from']['lon'], $w['to']['lat'], $w['to']['lon']);
+    }
+
+    /**
+     * Die Kacheln um eine Baustelle, als ["z/x/y" => [z, x, y]]. Die Stufe so
+     * fein, dass es höchstens sechzehn sind - lange Sperrungen gröber.
+     */
+    private static function tilesFor(array $w): array
+    {
+        $a = [(float) $w['from']['lat'], (float) $w['from']['lon']];
+        $b = [(float) $w['to']['lat'], (float) $w['to']['lon']];
+        for ($z = 12; $z >= 8; $z--) {
+            [$x1, $y1] = Mvt::tileOf($z, max($a[0], $b[0]) + self::TILE_PAD_DEG, min($a[1], $b[1]) - self::TILE_PAD_DEG);
+            [$x2, $y2] = Mvt::tileOf($z, min($a[0], $b[0]) - self::TILE_PAD_DEG, max($a[1], $b[1]) + self::TILE_PAD_DEG);
+            if (($x2 - $x1 + 1) * ($y2 - $y1 + 1) <= 16 || $z === 8) {
+                $out = [];
+                for ($x = $x1; $x <= $x2; $x++) {
+                    for ($y = $y1; $y <= $y2; $y++) {
+                        $out["$z/$x/$y"] = [$z, $x, $y];
+                    }
+                }
+                return $out;
+            }
+        }
+        return [];
+    }
+
+    /**
+     * Die gesperrten Gleisstücke je Kachel: ["z/x/y" => [[Streckennummer,
+     * [[lat, lon], …]], …]]. Sechs Stunden gemerkt - je Kachel, nicht je
+     * Baustelle. "_fehler" ist gesetzt, wenn eine Kachel nicht kam.
+     */
+    private function tilePieces(int $rev, array $kacheln): array
+    {
+        $out = [];
+        $holen = [];
+        foreach ($kacheln as $k => $zxy) {
+            $c = $this->cache->get('sitile:' . $k, 6 * 3600);
+            if (is_array($c)) {
+                $out[$k] = $c;
+            } else {
+                $holen[$k] = $zxy;
+            }
+        }
+        if ($holen === []) {
+            return $out;
+        }
+        $body = json_encode(['filter' => self::filter(30 * 24, true), 'zugfahrtID' => null]);
+        $kopf = ['Content-Type' => 'application/json',
+            'User-Agent' => (string) ($this->cfg['user_agent'] ?? 'train-maxxing')];
+        $antworten = [];
+        foreach (array_chunk($holen, self::TILE_BATCH, true) as $paket) {
+            $laden = function () use ($paket, $rev, $body, $kopf): array {
+                $r = [];
+                foreach ($paket as $k => [$z, $x, $y]) {
+                    $r[$k] = $this->http->request('POST', self::TILE_ENDPOINT . "/$rev/netz_{$z}_{$x}_{$y}.mvt", $kopf, $body);
+                }
+                return $r;
+            };
+            Http::prefetch(Http::record($laden), 15.0);
+            $antworten += $laden();
+        }
+        foreach ($antworten as $k => $res) {
+            if (!$res['ok'] || ($res['body'] ?? '') === '') {
+                $out['_fehler'] = true;
+                continue;
+            }
+            [$z, $x, $y] = $holen[$k];
+            $stuecke = [];
+            foreach (Mvt::features($res['body']) as $f) {
+                $p = $f['props'];
+                if (($p['type'] ?? '') !== 'STRECKE') {
+                    continue;
+                }
+                $gesperrt = in_array('SCHWER', [$p['linkesGleisEinschraenkung'] ?? null,
+                    $p['rechtesGleisEinschraenkung'] ?? null, $p['baustellenEinschraenkung'] ?? null], true);
+                if (!$gesperrt) {
+                    continue;
+                }
+                foreach ($f['lines'] as $linie) {
+                    if (count($linie) < 2) {
+                        continue;
+                    }
+                    $stuecke[] = [(string) ($p['streckennr'] ?? ''), array_map(
+                        static fn(array $q): array => Mvt::toLatLon($z, $x, $y, $q[0], $q[1], $f['extent']),
+                        $linie
+                    )];
+                }
+            }
+            $out[$k] = $stuecke;
+            $this->cache->set('sitile:' . $k, $stuecke);
+        }
+        return $out;
+    }
+
+    /**
+     * Der kürzeste Weg über die Stücke vom einen Ende zum anderen, oder null.
+     * Stücke, die sich an Kachelrändern nur fast berühren, gelten als
+     * verbunden.
+     *
+     * @param array<int,array<int,array{0:float,1:float}>> $teile
+     */
+    private static function path(array $teile, array $a, array $b): ?array
+    {
+        $key = static fn(array $p): string => sprintf('%.5f,%.5f', $p[0], $p[1]);
+        $pos = [];
+        $adj = [];
+        // Dicht machen: die Kacheln liefern lange gerade Abschnitte mit wenigen
+        // Stützpunkten, und zwei Stücke derselben Strecke lagen übereinander,
+        // ohne dass ein Punkt des einen in die Nähe eines Punktes des anderen
+        // kam - Grevesmühlen - Strecknitz blieb deshalb ohne Verlauf.
+        $teile = array_map([self::class, 'densify'], $teile);
+        foreach ($teile as $linie) {
+            for ($i = 1; $i < count($linie); $i++) {
+                $u = $key($linie[$i - 1]);
+                $v = $key($linie[$i]);
+                $pos[$u] = $linie[$i - 1];
+                $pos[$v] = $linie[$i];
+                $d = self::metres($linie[$i - 1], $linie[$i]);
+                $adj[$u][$v] = $d;
+                $adj[$v][$u] = $d;
+            }
+        }
+        if ($pos === []) {
+            return null;
+        }
+        // ÜBERLAPPENDE STÜCKE VERBINDEN. Jede Kachel liefert dieselbe Strecke
+        // mit eigenen Stützpunkten und über ihren Rand hinaus; gemeinsame
+        // Punkte haben zwei Stücke deshalb selten. Verbunden wird jeder
+        // Stützpunkt mit allen anderen im Umkreis von SAME_POINT_M - über ein
+        // Raster, damit es nicht jeder mit jedem ist.
+        $zelle = static fn(array $p): string => (int) floor($p[0] / 0.0006) . ':' . (int) floor($p[1] / 0.001);
+        $raster = [];
+        foreach ($pos as $k => $p) {
+            $raster[$zelle($p)][] = $k;
+        }
+        foreach ($pos as $u => $p) {
+            $zy = (int) floor($p[0] / 0.0006);
+            $zx = (int) floor($p[1] / 0.001);
+            for ($dy = -1; $dy <= 1; $dy++) {
+                for ($dx = -1; $dx <= 1; $dx++) {
+                    foreach ($raster[($zy + $dy) . ':' . ($zx + $dx)] ?? [] as $v) {
+                        if ($v === $u || isset($adj[$u][$v])) {
+                            continue;
+                        }
+                        $d = self::metres($p, $pos[$v]);
+                        if ($d < self::SAME_POINT_M) {
+                            $adj[$u][$v] = $d;
+                            $adj[$v][$u] = $d;
+                        }
+                    }
+                }
+            }
+        }
+        $naechster = static function (array $p) use ($pos): array {
+            $best = null;
+            $bestD = INF;
+            foreach ($pos as $k => $q) {
+                $d = self::metres($p, $q);
+                if ($d < $bestD) {
+                    $bestD = $d;
+                    $best = $k;
+                }
+            }
+            return [$best, $bestD];
+        };
+        [$sa, $da] = $naechster($a);
+        [$sb, $db] = $naechster($b);
+        if ($da > self::SNAP_M || $db > self::SNAP_M || $sa === $sb) {
+            return null;
+        }
+        $dist = [$sa => 0.0];
+        $prev = [];
+        $q = new SplPriorityQueue();
+        $q->insert($sa, 0);
+        while (!$q->isEmpty()) {
+            $u = $q->extract();
+            if ($u === $sb) {
+                break;
+            }
+            foreach ($adj[$u] ?? [] as $v => $w) {
+                $nd = $dist[$u] + $w;
+                if ($nd < ($dist[$v] ?? INF)) {
+                    $dist[$v] = $nd;
+                    $prev[$v] = $u;
+                    $q->insert($v, -$nd);
+                }
+            }
+        }
+        if (!isset($dist[$sb])) {
+            return null;
+        }
+        $weg = [$sb];
+        while (end($weg) !== $sa) {
+            $weg[] = $prev[end($weg)];
+        }
+        return array_map(static fn(string $k): array => [round($pos[$k][0], 5), round($pos[$k][1], 5)], array_reverse($weg));
+    }
+
+    /** Zwischenpunkte einfügen, höchstens DENSIFY_M auseinander. */
+    private static function densify(array $linie): array
+    {
+        $out = [$linie[0]];
+        for ($i = 1; $i < count($linie); $i++) {
+            $a = $linie[$i - 1];
+            $b = $linie[$i];
+            $n = (int) ceil(self::metres($a, $b) / self::DENSIFY_M);
+            for ($k = 1; $k <= $n; $k++) {
+                $out[] = [$a[0] + ($b[0] - $a[0]) * $k / $n, $a[1] + ($b[1] - $a[1]) * $k / $n];
+            }
+        }
+        return $out;
+    }
+
+    /** Gleichmäßig ausdünnen, Anfang und Ende bleiben. */
+    private static function thin(array $pts, int $max): array
+    {
+        $n = count($pts);
+        if ($n <= $max) {
+            return $pts;
+        }
+        $out = [];
+        for ($i = 0; $i < $max - 1; $i++) {
+            $out[] = $pts[(int) floor($i * ($n - 1) / ($max - 1))];
+        }
+        $out[] = $pts[$n - 1];
+        return $out;
+    }
+
+    // ------------------------------------------------------------------
     // Revision
     // ------------------------------------------------------------------
 
@@ -380,21 +722,30 @@ final class StreckenInfo
     {
         $payload = [
             'revision' => $rev,
-            'filter'   => [
-                'baustellenAktiv'            => true,
-                'baustellenNurTotalsperrung' => $nurTotalsperrung,
-                'streckenruhenAktiv'         => false,
-                'stoerungenAktiv'            => false,
-                'wirkungsdauer'              => 0,
-                'zeitraum'                   => ['type' => 'ROLLIEREND', 'stunden' => $stunden],
-                'regionalbereiche'           => array_values($regionen),
-                'streckennummern'            => [],
-                'betriebsstellen'            => [],
-            ],
+            'filter'   => self::filter($stunden, $nurTotalsperrung, $regionen),
         ];
 
         return $this->http->postJson(self::ENDPOINT, $payload, [
             'User-Agent' => (string) ($this->cfg['user_agent'] ?? 'train-maxxing'),
         ]);
+    }
+
+    /**
+     * Der Filter der Weboberfläche - für die Liste und die Kartenkacheln
+     * derselbe, damit die Kacheln genau die Sperrungen der Liste zeigen.
+     */
+    private static function filter(int $stunden, bool $nurTotalsperrung, array $regionen = self::REGIONEN): array
+    {
+        return [
+            'baustellenAktiv'            => true,
+            'baustellenNurTotalsperrung' => $nurTotalsperrung,
+            'streckenruhenAktiv'         => false,
+            'stoerungenAktiv'            => false,
+            'wirkungsdauer'              => 0,
+            'zeitraum'                   => ['type' => 'ROLLIEREND', 'stunden' => $stunden],
+            'regionalbereiche'           => array_values($regionen),
+            'streckennummern'            => [],
+            'betriebsstellen'            => [],
+        ];
     }
 }
