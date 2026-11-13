@@ -1221,13 +1221,13 @@ export class RouteMap {
     }
     if (this.mode === 'works') {
       if (this.works.length === 0) return 'Zurzeit sind keine größeren Baustellen gemeldet.';
-      // Zwei Linienarten, zwei Aussagen — das gehört dazugesagt, sonst liest
-      // man die gestrichelte Gerade als Streckenverlauf.
+      // Zwei Darstellungen, zwei Aussagen — das gehört dazugesagt, sonst
+      // liest man die dünne Verbindung als Streckenverlauf.
       const exakt = this.works.filter((w) => w.geometry?.length > 1).length;
       return exakt === 0
-        ? 'Gestrichelt: der gesperrte Abschnitt — nicht der Verlauf der Strecke.'
-        : 'Durchgezogen: der Verlauf der Strecke. Gestrichelt: nur der betroffene '
-          + 'Abschnitt, wo der Verlauf nicht bekannt ist.';
+        ? 'Ringe: Anfang und Ende des gesperrten Abschnitts — der Verlauf dazwischen ist nicht bekannt.'
+        : 'Kräftige Linie: der gesperrte Abschnitt auf der Strecke. Ringe: Anfang und Ende, '
+          + 'wo der Verlauf nicht bekannt ist.';
     }
     return this.ranked.length === 0
       ? 'Start und Ziel wählen — die Routen erscheinen hier.'
@@ -2399,12 +2399,14 @@ export class RouteMap {
       }
       g.append(shape);
 
+      // Ohne Verlauf als RINGE: die beiden Enden sind bekannt, der Weg
+      // dazwischen nicht - siehe .map__work-line im Stylesheet.
       for (const [x, y] of [[x1, y1], [x2, y2]]) {
         const dot = document.createElementNS(NS, 'circle');
         dot.setAttribute('cx', x.toFixed(1));
         dot.setAttribute('cy', y.toFixed(1));
-        dot.setAttribute('r', '3.5');
-        dot.setAttribute('class', 'map__work-dot');
+        dot.setAttribute('r', verlauf ? '3.5' : '4.5');
+        dot.setAttribute('class', 'map__work-dot' + (verlauf ? '' : ' is-ends'));
         g.append(dot);
       }
 
