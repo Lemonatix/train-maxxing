@@ -3577,7 +3577,13 @@ details.live__msg .live__msg-text {
 
 .badge--walk { background: var(--purple-soft); color: var(--purple); }
 
-.leg__line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
+/* Zeit, Ort, Gleis in EINER Zeile: die Zeit steht fest links, der Ort
+   beginnt direkt dahinter und bricht in seiner eigenen Spalte um. Vorher
+   rutschte ein langer Ortsname als Ganzes unter die Zeit
+   ("17:16" / "Forschungszentrum, Garching b. München"). */
+.leg__line { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 0.5rem; }
+.leg__line > .leg__time, .leg__line > .leg__day, .leg__line > .leg__platform { flex: none; }
+.leg__line > .leg__station { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 
 .leg__time {
   font-family: var(--font-mono);
@@ -3600,14 +3606,25 @@ details.live__msg .live__msg-text {
 
 .leg__train {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.5rem;
-  align-items: baseline;
+  align-items: flex-start;
   padding: 0.15rem 0 0.15rem 0.3rem;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   color: var(--text-muted);
 }
+/* Linie, Dauer, Komfort … als Block, der in sich umbricht; der Knopf
+   "Fahrtinfo" daneben bleibt immer rechts oben. */
+.leg__facts {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.5rem;
+  align-items: baseline;
+}
+.leg__train > .leg__info-btn { flex: none; }
 
 .leg__cat { color: var(--db-red); font-weight: 500; }
 .leg__comfort { color: var(--purple); }
