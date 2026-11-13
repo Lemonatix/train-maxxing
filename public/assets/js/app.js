@@ -201,10 +201,6 @@ document.addEventListener('DOMContentLoaded', () => {
   applyStateToForm();
   // MVG-Störungsticker München einblenden, wenn der Endpoint Meldungen hat.
   initMvgTicker(document.getElementById('mvg-ticker'));
-  // Bauarbeiten im Netz: Liste plus Kartenebene.
-  // Die Baustellen bringen ihre eigene Karte mit - sie gehören nicht auf
-  // die Routenkarte, siehe works.js.
-  initWorks(document.getElementById('works'));
 
   // Eine geteilte Fahrt (?live=…) hat Vorrang; sonst überlebt die eigene
   // Verfolgung Neuladen und neue Suchen.
@@ -266,6 +262,8 @@ function setupOffline() {
 
 let board = null;
 let tripsView = null;
+/** Der Tab "Baustellen" - siehe works.js. */
+let worksView = null;
 
 /**
  * Vier Tabs, in dieser Reihenfolge: Verbindungen, gemerkte Reisen,
@@ -281,7 +279,7 @@ let tripsView = null;
  * Der Tab steht in der Adresse (#reisen, #karte, #abfahrten), damit er ein
  * Neuladen übersteht und sich als Lesezeichen speichern lässt.
  */
-const TAB_HASH = { search: '', trips: '#reisen', map: '#karte', board: '#abfahrten' };
+const TAB_HASH = { search: '', trips: '#reisen', map: '#karte', board: '#abfahrten', works: '#baustellen' };
 let showTab = () => {};
 /** Der offene Tab - die Karte fragt danach, ob sie Züge holen soll. */
 let currentTab = 'search';
@@ -327,6 +325,9 @@ function setupTabs() {
 
   const show = (name, { focus = false, remember = true } = {}) => {
     linieSetzen(name);
+    // Auf dem Telefon lässt sich die Leiste wischen - der gewählte Tab soll
+    // nicht halb abgeschnitten am Rand stehen.
+    tabs[name]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
     for (const [k, tab] of Object.entries(tabs)) {
       const on = k === name;
       tab.classList.toggle('is-active', on);
@@ -339,6 +340,14 @@ function setupTabs() {
       board.activate();
     } else {
       board?.deactivate();
+    }
+    // Bauarbeiten im Netz: eigener Tab mit eigener Karte, siehe works.js -
+    // angelegt und geladen erst beim ersten Öffnen.
+    if (name === 'works') {
+      worksView ??= initWorks($('#works'));
+      worksView.activate();
+    } else {
+      worksView?.deactivate();
     }
     // DIE VERFOLGUNG WANDERT MIT IN DEN REISEN-TAB. Das Panel steht in der
     // Suche - auf dem Handy liegt man während der Fahrt aber meist bei den
