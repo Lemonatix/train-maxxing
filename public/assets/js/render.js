@@ -2180,7 +2180,13 @@ function renderLegs(journey, entry, state, actions) {
     // Fahrtinfo: Wagenreihung, Zuglauf, Fahrzeug - hinter einem Knopf, damit
     // unter dem Einstieg gleich die Halte folgen (siehe renderTrainInfo).
     const fahrtinfo = renderTrainInfo(journey, leg, comfortEntry, state, actions);
-    info.append(fahrtinfo.button);
+    // Die Angaben zum Zug als ein Block, der in sich umbricht - der Knopf
+    // steht daneben fest rechts oben. Vorher rutschte er auf schmalen
+    // Bildschirmen mal mit in die Zeile, mal darunter, je nachdem, wie lang
+    // die Angaben davor waren ("Bus X660 Bus 8 min Komfort 1").
+    const fakten = el('div', 'leg__facts');
+    fakten.append(...info.childNodes);
+    info.append(fakten, fahrtinfo.button);
     row.append(info, fahrtinfo.panel);
 
     // Was die Fahrt verhindern kann (Reservierungspflicht, DB-Fahrscheine
