@@ -1087,6 +1087,8 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   font-size: 16px;
 }
 .train-search__go { min-height: 34px; padding: 0.3rem 0.7rem; font-size: 0.8rem; }
+.train-search { flex-wrap: wrap; }
+.train-search input[type="date"] { width: auto; max-width: 11rem; }
 .train-search__results {
   list-style: none;
   margin: 0 0 0.5rem;
@@ -1323,7 +1325,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .map__tracked-line {
   fill: none;
-  stroke: var(--green);
+  stroke: var(--tracked);
   stroke-width: 4;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -1331,11 +1333,11 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .map__tracked-end {
   fill: var(--map-stop-fill);
-  stroke: var(--green);
+  stroke: var(--tracked);
   stroke-width: 3;
 }
 
-.map__tracked-end.is-end { fill: var(--green); }
+.map__tracked-end.is-end { fill: var(--tracked); }
 
 /* Die Zugposition hat hier KEINEN eigenen Marker mehr. Der verfolgte Zug
    wird in der Live-Ebene gezeichnet und dort rot eingefärbt — siehe
@@ -1525,29 +1527,40 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   stroke-width: 1.4;
 }
 
-/* Der gerade verfolgte Zug ist auch ein Live-Zug und wird deshalb ein
-   zweites Mal gezeichnet — diese Ebene liegt über der verfolgten Route.
-   Ohne eigene Farbe hätte der grüne Punkt den roten Positionsmarker
-   darunter wieder zugedeckt. */
+/* PÜNKTLICHKEIT ALS FARBE: grün pünktlich, gelb ab 3 min, rot ab 10, grau
+   ohne Echtzeit. Die Verspätung ist die am nächsten Halt (OebbHafas::
+   positionDelay), nicht die größte des Laufs. */
+.map__train.is-slow { --train-color: var(--amber); }
+.map__train.is-late { --train-color: var(--rose); }
+.map__train.is-nort { --train-color: var(--text-muted); }
+.map__train.is-slow .map__train-dot, .map__train.is-late .map__train-dot,
+.map__train.is-nort .map__train-dot { fill: var(--train-color); }
+.map__train.is-slow .map__train-halo, .map__train.is-late .map__train-halo,
+.map__train.is-nort .map__train-halo { fill: var(--train-color); }
+
+/* Der gerade verfolgte Zug: BLAU, wie seine Strecke - Rot steht jetzt für
+   "mehr als zehn Minuten zu spät". Er wird ein zweites Mal gezeichnet, über
+   der verfolgten Route; die Farbe gewinnt deshalb über die Pünktlichkeit. */
+.map__train.is-tracked { --train-color: var(--tracked); }
 .map__train.is-tracked .map__train-dot {
-  fill: var(--rose);
+  fill: var(--tracked);
   stroke-width: 2;
 }
 
-.map__train.is-tracked .map__train-halo { fill: var(--rose); }
+.map__train.is-tracked .map__train-halo { fill: var(--tracked); opacity: 0.3; }
 
 /* Hochgerechnete Position: derselbe Punkt, nur hohl. Kommt vor, wenn der Zug
    nicht in der Positionsantwort steht und seine Stelle aus dem Fahrplan
    geschätzt wurde — der Tooltip sagt es dann auch. */
 .map__train.is-tracked.is-estimated .map__train-dot {
   fill: var(--map-stop-fill);
-  stroke: var(--rose);
+  stroke: var(--tracked);
 }
 
 .map__train.is-tracked:hover .map__train-dot,
 .map__train.is-tracked:focus-visible .map__train-dot {
   fill: var(--map-stop-fill);
-  stroke: var(--rose);
+  stroke: var(--tracked);
 }
 
 /* U-Bahn blau, Tram rot - die Farben der Münchner und Wiener Netzpläne. */
@@ -1557,6 +1570,8 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .map__train.is-tram .map__train-dot { fill: var(--train-color); }
 .map__train.is-subway .map__train-halo,
 .map__train.is-tram .map__train-halo { fill: var(--train-color); }
+/* Verfolgt bleibt verfolgt, auch als U-Bahn oder Tram. */
+.map__train.is-tracked.is-subway, .map__train.is-tracked.is-tram { --train-color: var(--tracked); }
 
 /* Nach Fahrplan gerechnet (MvgRail): hohl und ohne Pulsieren - das Pulsieren
    steht für eine gemeldete Position. */
@@ -3548,6 +3563,64 @@ details.live__msg .live__msg-text {
 
 .journey__details > summary:hover { color: var(--accent); }
 
+/* Farben der Verkehrsmittel - modeOf() in render.js. In München die der
+   MVG; im dunklen Layout heller, damit sie auf dem Grund lesbar bleiben. */
+:root {
+  --mode-ubahn: #1f6bb6;
+  --mode-sbahn: #128f4c;
+  --mode-tram: #cc0018;
+  --mode-bus: #0d3d80;
+  --mode-fern: var(--text);
+  --mode-regio: #7b8794;
+  --mode-walk: var(--purple);
+  /* Die verfolgte Fahrt auf der Karte: Zug und Strecke. */
+  --tracked: #2563eb;
+}
+[data-theme="dark"] {
+  --mode-ubahn: #4d8fd6;
+  --mode-sbahn: #2fb36c;
+  --mode-tram: #e8434f;
+  --mode-bus: #5b85d9;
+  --mode-regio: #8f9aa6;
+  --tracked: #60a5fa;
+}
+
+/* Die Reise als Leiste - journeyBar() in render.js. */
+/* Platzhalter während der Suche (skeletonCards in app.js): ruhiges
+   Pulsieren der Deckkraft - das übernimmt die Grafikkarte. */
+.journey--skeleton { display: grid; gap: 0.6rem; padding: 1rem 1.1rem; pointer-events: none; }
+.skeleton__line {
+  display: block;
+  height: 0.9rem;
+  border-radius: 4px;
+  background: var(--border);
+  animation: skeletonPulse 1.4s ease-in-out infinite;
+}
+.skeleton__line.is-time { width: 45%; height: 1.4rem; }
+.skeleton__line.is-meta { width: 70%; }
+.skeleton__line.is-bar { width: 100%; height: 6px; }
+@keyframes skeletonPulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .skeleton__line { animation: none; } }
+
+.journey__bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  margin-top: 0.45rem;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.journey__bar-seg { flex: 1 1 0; min-width: 3px; border-radius: 2px; background: var(--mode-regio); }
+.journey__bar-seg[data-mode="ubahn"] { background: var(--mode-ubahn); }
+.journey__bar-seg[data-mode="sbahn"] { background: var(--mode-sbahn); }
+.journey__bar-seg[data-mode="tram"] { background: var(--mode-tram); }
+.journey__bar-seg[data-mode="bus"] { background: var(--mode-bus); }
+.journey__bar-seg[data-mode="fern"] { background: var(--mode-fern); }
+.journey__bar-seg[data-mode="walk"] {
+  background: repeating-linear-gradient(90deg, var(--mode-walk) 0 3px, transparent 3px 6px);
+}
+.journey__bar-seg.is-wait { min-width: 2px; background: var(--border); }
+
 .legs {
   display: flex;
   flex-direction: column;
@@ -3558,6 +3631,40 @@ details.live__msg .live__msg-text {
 }
 
 .leg { display: flex; flex-direction: column; gap: 0.22rem; }
+
+/* Die Linie links im Streckenverlauf: je Zug in der Farbe seines
+   Verkehrsmittels, über die graue Linie der Liste gelegt. */
+.leg[data-mode] {
+  position: relative;
+}
+.leg[data-mode]::before {
+  content: "";
+  position: absolute;
+  left: calc(-0.9rem - 1.5px);
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--mode-regio);
+}
+.leg[data-mode="ubahn"]::before { background: var(--mode-ubahn); }
+.leg[data-mode="sbahn"]::before { background: var(--mode-sbahn); }
+.leg[data-mode="tram"]::before { background: var(--mode-tram); }
+.leg[data-mode="bus"]::before { background: var(--mode-bus); }
+.leg[data-mode="fern"]::before { background: var(--mode-fern); }
+
+/* Das Liniensymbol als farbiges Schild, wie an der Haltestelle. */
+.leg[data-mode] .leg__cat {
+  padding: 0.02rem 0.35rem;
+  border-radius: 3px;
+  color: #fff;
+  background: var(--mode-regio);
+}
+.leg[data-mode="ubahn"] .leg__cat { background: var(--mode-ubahn); }
+.leg[data-mode="sbahn"] .leg__cat { background: var(--mode-sbahn); }
+.leg[data-mode="tram"] .leg__cat { background: var(--mode-tram); }
+.leg[data-mode="bus"] .leg__cat { background: var(--mode-bus); }
+.leg[data-mode="fern"] .leg__cat { background: var(--mode-fern); color: var(--surface-card, #fff); }
 
 .leg--walk {
   font-family: var(--font-mono);
@@ -4039,20 +4146,6 @@ details.live__msg .live__msg-text {
 }
 /* --- Bauarbeiten im Netz --------------------------------------------- */
 
-/* Eigener Tab: der Kasten steht oben, ohne Abstand nach außen. */
-.works-view .works { padding: 0.8rem 1rem; }
-.works__title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0 0 0.3rem;
-  font-size: 1rem;
-  font-weight: 500;
-  color: var(--text);
-}
-.works__status { margin: 0.6rem 0 0; font-size: 0.82rem; color: var(--text-muted); }
-/* Im eigenen Tab darf die Karte groß sein - sie ist der Zweck der Seite. */
-.works-view .works__map .map__viewport { height: clamp(320px, 60vh, 640px); }
 
 .works__note {
   margin: 0.2rem 0 0.3rem;
@@ -4760,13 +4853,32 @@ details.live__msg .live__msg-text {
 /* Vier Tabs auf dem Telefon: einzeilig und enger. Reicht die Breite
    trotzdem nicht, scrollt die Leiste waagrecht - die Seite nicht. */
 .tab { white-space: nowrap; }
+/* Symbole in der Tab-Leiste: am Rechner klein vor dem Wort, auf dem
+   Telefon über dem Wort - das spart Breite und liest sich ruhiger. */
+.tab { display: inline-flex; align-items: center; gap: 0.4rem; }
+.tab__icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 @media (max-width: 480px) {
   .tabs { gap: 0; overflow-x: auto; scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
-  /* Fünf Tabs: etwas enger, "Live-Karte" heißt hier nur "Karte", und was
-     dann noch nicht passt, lässt sich wischen. */
-  .tab { flex: 1 0 auto; padding: 0.5rem 0.4rem; font-size: 0.88rem; }
-  .tab__long { display: none; }
+  .tab {
+    flex: 1 0 auto;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.4rem 0.4rem 0.45rem;
+    font-size: 0.74rem;
+  }
+  .tab__icon { width: 1.25rem; height: 1.25rem; }
+  .tab .tab__count { position: absolute; top: 0.2rem; right: 0.6rem; }
 }
 
 /* --- Abfahrtstafel ------------------------------------------------- */
