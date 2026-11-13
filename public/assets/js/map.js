@@ -383,15 +383,22 @@ export function geoErrorText(err) {
       return 'Standortzugriff wurde abgelehnt. Über das Schloss-Symbol in der Adresszeile lässt er sich wieder erlauben.';
     }
     // VOM HOME-BILDSCHIRM fehlt das "aA"-Menü, auf das der Safari-Weg
-    // verweist - die frühere Anleitung lief dort ins Leere. Die Web-App fragt
-    // erst wieder, wenn die systemweite Einstellung es zulässt UND sie neu
-    // gestartet wurde; ein bloßes Neuladen reicht nicht.
+    // verweist - die frühere Anleitung lief dort ins Leere.
+    //
+    // UND EINE ABLEHNUNG BLEIBT AM SYMBOL. iOS merkt sich die Antwort je
+    // Home-Bildschirm-App, und kein Schalter in den Einstellungen setzt sie
+    // zurück: gemeldet von einem iPhone, auf dem systemweit alles erlaubt
+    // war und die App trotzdem sofort ablehnte, ohne zu fragen. Was hilft,
+    // ist das Symbol zu löschen und neu anzulegen - dann fragt sie wieder.
     return STANDALONE
-      ? 'Standort ist für die App gesperrt. 1. Einstellungen → Datenschutz & Sicherheit → Ortungsdienste: an, '
-        + 'darin „Safari-Websites“ → „Beim Verwenden der App“ oder „Nächstes Mal fragen“. '
-        + '2. Einstellungen → Apps → Safari → Standort → „Fragen“. '
-        + '3. train-maxxing im App-Umschalter wegwischen, neu öffnen und noch einmal tippen. '
-        + 'Fragt sie dann immer noch nicht: die Seite einmal in Safari öffnen und dort erlauben.'
+      ? 'iOS lehnt den Standort für dieses Symbol ab, ohne zu fragen. Meist hat es sich eine frühere Ablehnung '
+        + 'gemerkt, die sich in den Einstellungen nicht zurücksetzen lässt. So fragt es wieder: '
+        + '1. Symbol von train-maxxing auf dem Home-Bildschirm gedrückt halten → „App entfernen“ '
+        + '(gemerkte Reisen bleiben nur mit Sync-Code erhalten). '
+        + '2. In Safari die Seite öffnen → Teilen → „Zum Home-Bildschirm“. '
+        + '3. Die neue App öffnen, „Standort“ tippen und erlauben. '
+        + 'Fragt sie dann immer noch nicht: Einstellungen → Apps → Safari → Standort auf „Fragen“, '
+        + 'und Datenschutz & Sicherheit → Ortungsdienste → Safari-Websites auf „Beim Verwenden der App“.'
       : 'Standortzugriff ist blockiert. Einstellungen → Datenschutz & Sicherheit → Ortungsdienste '
         + '→ Safari-Websites → „Beim Verwenden der App“. In Safari zusätzlich „aA“ → Website-Einstellungen '
         + '→ Standort → Erlauben. Danach neu laden.';
