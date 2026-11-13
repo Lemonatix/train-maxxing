@@ -639,6 +639,19 @@ pruefe('nur Nahverkehr: U-Bahn + Bus ja, mit ICE nein', [
     Fares::isLocalOnly(['legs' => [['mode' => 'train', 'category' => 'S'], ['mode' => 'train', 'category' => 'ICE']]]),
 ], [true, false]);
 
+// Bus aus der MVG-Suche (Halte ohne Land) + Regionalzug: das ganze Stück
+// gehört Deutschland, also deckt das Deutschlandticket alles.
+$busRb = ['price' => ['amount' => 19.4, 'currency' => 'EUR'], 'legs' => [
+    ['mode' => 'train', 'category' => 'Bus', 'name' => 'Bus 160',
+     'from' => ['country' => '', 'lat' => 48.1676, 'lon' => 11.4621], 'to' => ['country' => '', 'lat' => 48.1500, 'lon' => 11.4600]],
+    ['mode' => 'walk', 'from' => ['country' => ''], 'to' => ['country' => 'de']],
+    ['mode' => 'train', 'category' => 'DRB', 'name' => '57118',
+     'from' => ['country' => 'de', 'lat' => 48.1496, 'lon' => 11.4613], 'to' => ['country' => 'de', 'lat' => 48.3654, 'lon' => 10.8855]],
+]];
+$p = Fares::apply($busRb, ['deutschlandticket'])['price'];
+pruefe('Bus ohne Ländercode + RB: mit Deutschlandticket ganz gedeckt', [$p['covered'], $p['amount'], array_keys($p['perCountry'])],
+    [true, 0.0, ['de']]);
+
 echo PHP_EOL . "Fares - Grenzquerung ohne Zwischenhalt" . PHP_EOL;
 
 // Stuetzpunkte wie HAFAS sie liefert, grob nachgezeichnet.
