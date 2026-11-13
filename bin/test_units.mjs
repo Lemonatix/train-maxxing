@@ -1061,6 +1061,28 @@ console.log('\nOrtssuche - Sofort-Vorschläge vor der Antwort des Servers');
 }
 
 // ---------------------------------------------------------------------
+console.log('\nStörungsticker München - nach Verkehrsmittel');
+{
+  const { groupOf, relevantMessages } = await import('../public/assets/js/mvgTicker.js');
+  const jetzt = Date.parse('2026-11-13T12:00:00Z');
+  const meldung = (title, ...typen) => ({
+    title, validFrom: '2026-11-01T00:00:00Z', validTo: '2026-12-01T00:00:00Z', incidents: [],
+    lines: typen.map((t, i) => ({ label: `${t}${i}`, transportType: t })),
+  });
+  pruefe('S-Bahn mit drei Bussen ist eine S-Bahn-Meldung', groupOf(meldung('x', 'REGIONAL_BUS', 'SBAHN', 'BUS')), 'sbahn');
+  const liste = relevantMessages([
+    meldung('Volkstrauertag in Grafing', 'REGIONAL_BUS'),
+    meldung('Haltestellenausfall', 'REGIONAL_BUS'),
+    meldung('Haltestellenausfall', 'REGIONAL_BUS'),
+    meldung('Reduzierte Taktung', 'UBAHN'),
+    { ...meldung('Nur nächste Woche', 'SBAHN'), incidents: [{ from: '2026-11-20T00:00:00Z', to: '2026-11-21T00:00:00Z' }] },
+    { ...meldung('Morgen früh', 'TRAM'), incidents: [{ from: '2026-11-14T04:00:00Z', to: '2026-11-14T08:00:00Z' }] },
+  ], jetzt);
+  pruefe('U-Bahn zuerst, Doppelte weg, nächste Woche noch nicht, morgen schon',
+    liste.map((m) => m.title), ['Reduzierte Taktung', 'Morgen früh', 'Volkstrauertag in Grafing', 'Haltestellenausfall']);
+}
+
+// ---------------------------------------------------------------------
 console.log('\nKilometer einer Verbindung');
 {
   const { journeyKm } = await import('../public/assets/js/map.js');
