@@ -1089,7 +1089,10 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .train-search__go { min-height: 34px; padding: 0.3rem 0.7rem; font-size: 0.8rem; }
 .train-search { flex-wrap: wrap; }
 .train-search input[type="date"] { width: auto; max-width: 11rem; }
+.train-search__results[hidden] { display: none; }
 .train-search__results {
+  max-height: 22rem;
+  overflow-y: auto;
   list-style: none;
   margin: 0 0 0.5rem;
   padding: 0.3rem;
@@ -1119,6 +1122,16 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .train-search__hit:hover, .train-search__hit:focus-visible { background: var(--surface-card); color: var(--text); }
 .train-search__hit strong { font-family: var(--font-mono); color: var(--text); }
 .train-search__note { padding: 0.35rem 0.5rem; font-size: 0.82rem; color: var(--text-muted); }
+.train-search__hit.is-past { opacity: 0.55; }
+/* "fährt gerade" - in Grün, wie ein pünktlicher Punkt auf der Karte. */
+.train-search__live {
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
 .train-panel__track { margin: 0 0 0.5rem; }
 
 /* --- Filtermenü für die Live-Züge ------------------------------------ */
@@ -1406,10 +1419,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   stroke-width: 4;
 }
 
-.map__train:focus-visible .map__train-dot {
-  fill: var(--purple);
-  stroke: #ffffff;
-}
 
 /* Fußwege der gewählten Verbindung: gestrichelt in der Farbe, die sie
    auch in der Liste haben. Die Luftlinie (noch kein Weg geladen) mit
@@ -1504,12 +1513,16 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .map__train-hit { fill: transparent; pointer-events: fill; }
 
+/* Beim Drüberfahren bleibt die Farbe der Pünktlichkeit - vorher wurde
+   jeder Punkt weiß mit grünem Rand, auch ein roter. Hervorgehoben wird
+   über den hellen Rand und den kräftigeren Hof. */
 .map__train:hover .map__train-dot,
 .map__train:focus-visible .map__train-dot {
-  fill: #ffffff;
-  stroke: var(--green);
-  stroke-width: 2;
+  stroke: var(--text);
+  stroke-width: 2.4;
 }
+.map__train:hover .map__train-halo,
+.map__train:focus-visible .map__train-halo { opacity: 0.45; }
 
 .map__train-halo {
   fill: var(--green);
@@ -1562,6 +1575,12 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   fill: var(--map-stop-fill);
   stroke: var(--tracked);
 }
+
+/* Der Zug aus der Zugsuche: größer, mit kräftigem Hof und Beschriftung -
+   seine Farbe bleibt die der Pünktlichkeit. */
+.map__train.is-focus .map__train-halo { opacity: 0.4; }
+.map__train.is-focus .map__train-dot { stroke: var(--text); stroke-width: 2; }
+.map__train.is-focus .map__train-label { fill: var(--text); font-size: 10.5px; }
 
 /* U-Bahn blau, Tram rot - die Farben der Münchner und Wiener Netzpläne. */
 .map__train.is-subway { --train-color: #1f6fd1; }
