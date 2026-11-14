@@ -151,6 +151,53 @@ document.addEventListener('click', (e) => {
   setTimeout(() => d.classList.remove('is-opening'), 900);
 }, true);
 
+/**
+ * Höhe gleiten lassen, wo CSS es nicht kann.
+ *
+ * style.css animiert die Höhe über ::details-content und interpolate-size -
+ * das gibt es nur in Chrome ab 131 und Safari ab 18.4. In Firefox und
+ * älteren WebViews sprangen die Zwischenhalte auf und zu. Dort übernimmt das
+ * hier dieselbe Bewegung mit der Web Animations API: gleiche Dauer, gleiche
+ * Kurve, gleiche Bereiche wie die CSS-Regel.
+ */
+const HOEHE_PER_CSS = typeof CSS !== 'undefined' && CSS.supports?.('interpolate-size', 'allow-keywords');
+const GLEITEND = '.journey__details, .fares, .xfer, .leg__stops, details.section, .live__msgs';
+if (!HOEHE_PER_CSS) {
+  const ms = (d, name, fallback) => parseFloat(getComputedStyle(d).getPropertyValue(name)) || fallback;
+  const gleite = (d, von, bis, dauer, fertig) => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { fertig?.(); return; }
+    d._gleit?.cancel();
+    d.style.overflow = 'hidden';
+    const a = d.animate({ height: [`${von}px`, `${bis}px`] }, { duration: dauer, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' });
+    d._gleit = a;
+    a.onfinish = () => { d.style.overflow = ''; d._gleit = null; fertig?.(); };
+    a.oncancel = () => { d.style.overflow = ''; };
+  };
+  document.addEventListener('click', (e) => {
+    const summary = e.target.closest?.('summary');
+    const d = summary?.parentElement;
+    if (!(d instanceof HTMLDetailsElement) || !d.matches(GLEITEND) || summary !== d.querySelector(':scope > summary')) return;
+    const zu = summary.offsetHeight;
+    if (d.open) {
+      // Zuklappen: erst gleiten, dann wirklich schließen.
+      e.preventDefault();
+      gleite(d, d.offsetHeight, zu, ms(d, '--close-ms', 340), () => { d.open = false; });
+    } else {
+      // Aufklappen: der Inhalt entsteht teils erst im toggle-Handler -
+      // die Zielhöhe deshalb einen Frame später messen. Bis dahin bleibt
+      // der Bereich auf Höhe der Überschrift, sonst blitzte er einmal auf.
+      d.style.height = `${zu}px`;
+      d.style.overflow = 'hidden';
+      requestAnimationFrame(() => {
+        const ziel = d.scrollHeight;
+        d.style.height = '';
+        if (d.open) gleite(d, zu, ziel, ms(d, '--open-ms', 480));
+        else d.style.overflow = '';
+      });
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   loadOutbound();
@@ -2655,6 +2702,63 @@ function setupTrainSearch() {
     liste.replaceChildren(li);
     liste.hidden = false;
   };
+  /** Eine Zeile der Liste; ein Tipp öffnet den Zug und zeigt ihn auf der Karte. */
+  const trefferZeile = (t, { badge = '', vorbei = false, weg = '' } = {}) => {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'train-search__hit' + (vorbei ? ' is-past' : '');
+    const name = document.createElement('strong');
+    name.textContent = trainLabel(t);
+    b.append(name);
+    if (badge) {
+      const mark = document.createElement('span');
+      mark.className = 'train-search__live';
+      mark.textContent = badge;
+      b.append(mark);
+    }
+    const w = document.createElement('span');
+    w.textContent = weg;
+    b.append(w);
+    b.addEventListener('click', () => {
+      liste.hidden = true;
+      showTrainDetails(t, { focus: true });
+      $('#train-panel')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+    li.append(b);
+    return li;
+  };
+
+  // VORSCHLÄGE BEIM TIPPEN: die Züge, die gerade auf der Karte fahren
+  // (Ausschnitt und Filter wie dort). Die volle Suche über den ganzen Tag
+  // bleibt beim Abschicken.
+  const norm = (v) => String(v || '').toUpperCase().replace(/\s+/g, '');
+  feld.addEventListener('input', () => {
+    const q = norm(feld.value);
+    if (q.length < 2) { if (q === '') liste.hidden = true; return; }
+    const heute = !tag?.value || tag.value === localDateTime(Date.now()).date;
+    if (!heute) return;
+    const gesehen = new Set();
+    const treffer = (map?.liveTrains || []).filter((t) => {
+      const namen = [trainLabel(t), t.name, t.line, `${t.category || ''}${t.trainNumber || ''}`, t.trainNumber].map(norm);
+      if (!namen.some((n) => n && n.startsWith(q))) return false;
+      const k = t.jid || trainLabel(t) + t.direction;
+      if (gesehen.has(k)) return false;
+      gesehen.add(k);
+      return t.jid && t.lat != null;
+    }).slice(0, 8);
+    lauf++;
+    if (treffer.length === 0) { liste.hidden = true; return; }
+    const kopf = document.createElement('li');
+    kopf.className = 'train-search__note';
+    kopf.textContent = 'Gerade unterwegs im Kartenausschnitt - Enter sucht den ganzen Tag';
+    liste.replaceChildren(kopf, ...treffer.map((t) => trefferZeile(t, {
+      badge: t.delay > 0 ? `+${t.delay} min` : 'fährt gerade',
+      weg: t.direction ? `→ ${t.direction}` : '',
+    })));
+    liste.hidden = false;
+  });
+
   let lauf = 0;
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -2673,34 +2777,57 @@ function setupTrainSearch() {
         melde(res.note || (res.error ? 'Die Zugsuche ist gerade nicht erreichbar.' : `${wann} fährt kein Zug „${q}“.`));
         return;
       }
-      liste.replaceChildren(...zuege.map((t) => {
-        const li = document.createElement('li');
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'train-search__hit';
-        const name = document.createElement('strong');
-        name.textContent = trainLabel(t);
-        const weg = document.createElement('span');
-        weg.textContent = `${t.from} ${zeit(t.departure)} → ${t.to} ${zeit(t.arrival)}`;
-        b.append(name, weg);
-        b.addEventListener('click', () => {
-          liste.hidden = true;
-          showTrainDetails(t);
-          $('#train-panel')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        });
-        li.append(b);
-        return li;
-      }));
+      // Was gerade fährt, steht oben - bei einer Linie wie "RB 65" kommen
+      // sonst erst zwanzig Läufe von heute früh. Vorbei ist blass.
+      const jetzt = Date.now();
+      const phase = (t) => {
+        const ab = Date.parse(t.departure), an = Date.parse(t.arrival);
+        if (ab <= jetzt && jetzt <= an) return 0;
+        return an < jetzt ? 2 : 1;
+      };
+      const sortiert = zuege.map((t) => ({ t, p: phase(t) })).sort((a, b) => a.p - b.p);
+      liste.replaceChildren(...sortiert.map(({ t, p }) => trefferZeile(t, {
+        badge: p === 0 ? 'fährt gerade' : '',
+        vorbei: p === 2,
+        weg: `${t.from} ${zeit(t.departure)} → ${t.to} ${zeit(t.arrival)}`,
+      })));
       liste.hidden = false;
     } catch (err) {
       if (meiner === lauf) melde('Die Zugsuche ist gerade nicht erreichbar: ' + err.message);
     }
   });
-  feld.addEventListener('input', () => { if (feld.value.trim() === '') liste.hidden = true; });
 }
 
-async function showTrainDetails(train) {
+/**
+ * Wo ein Zug JETZT ist, aus seinem Lauf geschätzt: zwischen dem letzten und
+ * dem nächsten Halt nach Zeitanteil, mit Ist-Zeiten, wo bekannt. null, wenn
+ * er nicht unterwegs ist. Für den Punkt nach der Zugsuche - steht der Zug
+ * in den gemeldeten Positionen, nimmt die Karte die (map.trainsOnMap).
+ */
+function runPosition(stops, now = Date.now()) {
+  const st = (stops || []).filter((s) => s.lat != null && s.lon != null);
+  const wann = (s, art) => Date.parse((art === 'dep' ? s.departureReal || s.departure : s.arrivalReal || s.arrival) || s.departure || s.arrival || '');
+  for (let i = 0; i < st.length - 1; i++) {
+    const t0 = wann(st[i], 'dep');
+    const t1 = wann(st[i + 1], 'arr');
+    if (!Number.isFinite(t0) || !Number.isFinite(t1) || now < t0 || now > t1) continue;
+    const f = t1 > t0 ? (now - t0) / (t1 - t0) : 0;
+    return { lat: st[i].lat + (st[i + 1].lat - st[i].lat) * f, lon: st[i].lon + (st[i + 1].lon - st[i].lon) * f };
+  }
+  // Am Halt: zwischen Ankunft und Abfahrt.
+  for (const s of st) {
+    const an = wann(s, 'arr'), ab = wann(s, 'dep');
+    if (Number.isFinite(an) && Number.isFinite(ab) && an <= now && now <= ab) return { lat: s.lat, lon: s.lon };
+  }
+  return null;
+}
+
+async function showTrainDetails(train, { focus = false } = {}) {
   const panel = $('#train-panel');
+  // Ein Tipp auf einen anderen Zug nimmt die Hervorhebung der Suche weg.
+  if (!focus || map?.focus?.jid !== train.jid) map?.focusTrain(null);
+  // Aus den Vorschlägen kommt der Zug mit Position: sofort hinfahren.
+  if (focus && train.lat != null && train.lon != null) map?.focusTrain(train);
   panel.hidden = false;
   panel.replaceChildren();
 
@@ -2732,6 +2859,7 @@ async function showTrainDetails(train) {
   close.setAttribute('aria-label', 'Schließen');
   close.addEventListener('click', () => {
     panel.hidden = true;
+    map?.focusTrain(null);
     state.trainJid = null;
     updateShareUrl();
   });
@@ -2749,6 +2877,20 @@ async function showTrainDetails(train) {
   try {
     const res = await api.trainDetails(train.jid, { signal: trainAbort.signal });
     renderTrainPanel(panel, head, res.train);
+    // Aus der Zugsuche und gerade unterwegs: den Punkt auf der Karte zeigen.
+    if (focus && train.lat == null) {
+      const pos = runPosition(res.train?.stops);
+      if (pos) {
+        const t = res.train;
+        map?.focusTrain({
+          jid: train.jid, category: t.category || train.category, line: t.line || train.line,
+          trainNumber: t.trainNumber || train.trainNumber, name: t.name || train.name,
+          direction: t.direction || train.direction, delay: t.hasRealtime ? t.delay : null,
+          lat: pos.lat, lon: pos.lon, estimated: true,
+        });
+        $('#map')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
   } catch (err) {
     if (err.name === 'AbortError') return;
     status.textContent = 'Zuglauf nicht verfügbar: ' + err.message;
