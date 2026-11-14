@@ -1063,13 +1063,13 @@ pruefe('ohne Prüfmodus kein Weg', $hbf->route('20', 'U-Nord'), null);
 pruefe('alte Wege bleiben abgenommen', $hbf->route('20', '11')['reviewed'] ?? null, true);
 
 // ---------------------------------------------------------------------
-echo "\nWegenetz-Entwürfe - Pasing und Zürich HB\n";
+echo "\nWegenetze - Pasing und Zürich HB\n";
 
 $wd = __DIR__ . '/../public/api/data/walks';
 $pasing = StationWalks::load($wd, '8004158');
 $w = $pasing->route('2', '9', true);
 pruefe('Pasing 2 -> 9: durch die Unterführung', $w !== null && in_array(-1, array_map(static fn ($p) => (int) $p[2], $w['points']), true), true);
-pruefe('Pasing: ohne Prüfmodus noch kein Weg', $pasing->route('2', '9'), null);
+pruefe('Pasing: abgenommen, also auch ohne Prüfmodus', $pasing->route('2', '9')['reviewed'] ?? null, true);
 $zh = StationWalks::load($wd, '8503000');
 $w = $zh->route('4', '16', true);
 pruefe('Zürich 4 -> 16: an den Bahnsteigköpfen entlang, unter 200 m', $w !== null && $w['meters'] < 200, true);
