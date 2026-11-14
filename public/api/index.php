@@ -2115,6 +2115,26 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
     $from = trim((string) ($_GET['from'] ?? ''));
     $to   = trim((string) ($_GET['to'] ?? ''));
 
+    // U-Bahn ohne Gleisnummer: das Gleis aus Linie und Richtung, wo der
+    // Bahnhof ein gezeichnetes Wegenetz hat (StationWalks::trackFor).
+    $netz = StationWalks::load(__DIR__ . '/data/walks', trim((string) ($_GET['eva'] ?? '')));
+    $walkNames = null;
+    if ($netz !== null) {
+        $richtung = static function (string $p): ?array {
+            return preg_match('/^(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)$/', $p, $m) ? [(float) $m[1], (float) $m[2]] : null;
+        };
+        if ($from === '' && ($_GET['fromLine'] ?? '') !== '') {
+            // Angekommen: fromToward ist der Halt davor.
+            $from = $netz->trackFor((string) $_GET['fromLine'], $richtung((string) ($_GET['fromToward'] ?? '')), true) ?? '';
+        }
+        if ($to === '' && ($_GET['toLine'] ?? '') !== '') {
+            $to = $netz->trackFor((string) $_GET['toLine'], $richtung((string) ($_GET['toToward'] ?? ''))) ?? '';
+        }
+        if ($from !== '' && $to !== '') {
+            $walkNames = ['from' => $netz->trackName($from), 'to' => $netz->trackName($to)];
+        }
+    }
+
     // Aufzüge und Rolltreppen: der Zustand von der DB (FaSta), gelegt auf
     // die Verbinder aus OSM. Nur an deutschen Bahnhöfen und mit Schlüssel.
     $station += facilityStatus($http, $config, $cache, trim((string) ($_GET['eva'] ?? '')), $station['connectors'] ?? []);
@@ -2175,6 +2195,9 @@ function handlePlatforms(Http $http, array $config, Cache $cache): void
         // review=1 auch die übrigen, für die Prüfung.
         'walk' => stationWalk(trim((string) ($_GET['eva'] ?? '')), $from, $to,
             ($_GET['review'] ?? '') === '1', $a !== null && $a === $b),
+        // Wie die beiden Enden heißen, wenn eins eine U-Bahn war: "U4/U5"
+        // statt einer Gleisnummer, die es nicht gibt.
+        'walkNames' => $walkNames,
     ]);
 }
 
