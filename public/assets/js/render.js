@@ -1149,6 +1149,27 @@ function renderTransferPlan(journey, leg, actions) {
   const lat = leg.from?.lat;
   const lon = leg.from?.lon;
   if (lat == null || lon == null || !actions?.loadPlatforms) return null;
+  // U-BAHN OHNE GLEIS: der Server sucht den Bahnsteig aus Linie und
+  // Richtung (StationWalks::trackFor). Die Richtung ist der nächste Halt der
+  // Fahrt - beim Ankommen der vorige, und der Server nimmt dann den
+  // Bahnsteig in die Gegenrichtung (dorthin fährt die U-Bahn weiter).
+  const ubahn = (l) => typeOf(l).label === 'U-Bahn' || /^U\s*\d/i.test(String(l.line || l.name || ''));
+  const punkt = (s) => (s && s.lat != null && s.lon != null ? `${Number(s.lat).toFixed(5)},${Number(s.lon).toFixed(5)}` : '');
+  const linie = (l) => String(l.line || l.name || '').replace(/\s+/g, '').toUpperCase();
+  const extra = {};
+  if (!from && ubahn(prev)) {
+    const st = prev.stops || [];
+    extra.fromLine = linie(prev);
+    extra.fromToward = punkt(st.length >= 2 ? st[st.length - 2] : prev.from);
+  }
+  if (!to && ubahn(leg)) {
+    const st = leg.stops || [];
+    extra.toLine = linie(leg);
+    extra.toToward = punkt(st.length >= 2 ? st[1] : leg.to);
+  }
+  // Das Wegenetz hängt an der DB-Nummer des Bahnhofs. Die U-Bahn-Haltestelle
+  // hat eine andere (624637 in München) - dann gilt die des Zuges davor.
+  const eva = [leg.from?.id, prev.to?.id].map(String).find((x) => /^\d{7}$/.test(x)) || leg.from?.id;
 
   const box = el('details', 'xfer');
   const sum = el('summary', 'xfer__summary');
@@ -1178,7 +1199,14 @@ function renderTransferPlan(journey, leg, actions) {
     inArbeit = true;
     try {
       for (let versuch = 1; versuch <= VERSUCHE; versuch++) {
-        const res = await actions.loadPlatforms(lat, lon, String(from), String(to), leg.from?.id);
+        const res = await actions.loadPlatforms(lat, lon, String(from), String(to), eva, extra);
+        // "Gleis 20 → U1/U2/U7/U8 Richtung Norden", "Gleis 21 → S-Bahn
+        // Gleis 1": die Namen der Enden aus dem Wegenetz.
+        if (res?.walkNames) {
+          const n = res.walkNames;
+          const name = (x) => (/^\d+[a-z]?$/i.test(x) ? `Gleis ${x}` : x);
+          sum.querySelector('.xfer__tracks').textContent = `${name(n.from)} → ${name(n.to)}`;
+        }
 
         // Wiederholt wird nur, wenn der DIENST gepatzt hat. Eine gültige
         // Antwort ohne Bahnsteige heißt "dieser Bahnhof ist in OSM nicht
