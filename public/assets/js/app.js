@@ -2426,10 +2426,11 @@ function loadSequence(p) {
 
 const platformCache = new Map();
 
-async function loadPlatforms(lat, lon, from, to, eva) {
+async function loadPlatforms(lat, lon, from, to, eva, extra = {}) {
   // Die Bahnsteige hängen nur am Bahnhof, die Hervorhebung am Gleispaar -
-  // deshalb steht beides im Schlüssel.
-  const key = `${lat.toFixed(4)},${lon.toFixed(4)}|${from}|${to}|${eva || ''}`;
+  // deshalb steht beides im Schlüssel. `extra`: Linie und Richtung einer
+  // U-Bahn ohne Gleisnummer.
+  const key = `${lat.toFixed(4)},${lon.toFixed(4)}|${from}|${to}|${eva || ''}|${JSON.stringify(extra)}`;
   if (platformCache.has(key)) return platformCache.get(key);
 
   // Ein leeres Ergebnis kommt gar nicht erst in den Zwischenspeicher: Overpass
@@ -2442,7 +2443,7 @@ async function loadPlatforms(lat, lon, from, to, eva) {
   const promise = (async () => {
     let res;
     try {
-      res = await api.platforms(lat, lon, from, to, eva);
+      res = await api.platforms(lat, lon, from, to, eva, undefined, extra);
     } catch {
       // Den Grund mitgeben: die Anzeige unterscheidet "Dienst gerade nicht
       // erreichbar" von "Bahnhof nicht kartiert" - zweierlei für den Leser.
