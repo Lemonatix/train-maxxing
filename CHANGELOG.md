@@ -30,6 +30,11 @@ erst mit dem Update auf 1.3.
   ausklappbare Texte.
 - **Züge in Großbritannien** heißen auf der Live-Karte nach ihrem Betreiber
   („Elizabeth line“, „Southern“).
+- **Umstiegswege in München-Pasing und Zürich HB.** Wie am München Hbf
+  zeigt der Lageplan dort den Weg vom Ankunfts- zum Abfahrtsgleis mit Metern
+  und Minuten: in Pasing durch die Unterführung, in Zürich an den
+  Bahnsteigköpfen der Halle (Gleise 3–18, die unterirdischen Gleise folgen
+  später).
 - **Umstiegswege zu U-Bahn und S-Bahn am München Hbf** (in Vorbereitung).
   Die Wege zur S-Bahn tief und zu den U-Bahnen sind gezeichnet. Die U-Bahn
   findet ihren Bahnsteig über Linie und Richtung, weil der Fahrplan für sie
