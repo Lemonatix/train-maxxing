@@ -1725,6 +1725,25 @@ export class RouteMap {
     this.onViewChange && this.onViewChange();
   }
 
+  /**
+   * Einen Zug aus der Zugsuche zeigen: Punkt hervorheben und hinfahren.
+   *
+   * `t` trägt jid, Name und eine Position (meist aus dem Fahrplan
+   * geschätzt). Steht der Zug in den gemeldeten Live-Zügen, gilt deren
+   * Position - siehe trainsOnMap(). null nimmt die Hervorhebung weg.
+   */
+  focusTrain(t) {
+    this.focus = t && t.lat != null && t.lon != null ? t : null;
+    if (!this.focus) {
+      if (this.built) this.render();
+      return;
+    }
+    this.center = { lat: t.lat, lon: t.lon };
+    this.zoom = Math.max(this.zoom, 10);
+    if (this.built) this.render();
+    this.onViewChange && this.onViewChange();
+  }
+
   /** Ausschnitt auf die verfolgte Route setzen. */
   fitTracked() {
     if (!this.tracked) return;
@@ -2515,16 +2534,27 @@ export class RouteMap {
    */
   trainsOnMap() {
     const trains = this.liveTrains.slice();
+    // Der Zug aus der Zugsuche: gemeldet, wenn er in den Live-Zügen steht,
+    // sonst an seiner geschätzten Stelle ergänzt - auch wenn der Filter
+    // ("nur High-speed") ihn sonst ausblenden würde.
+    let focus = null;
+    if (this.focus) {
+      focus = trains.find((t) => (this.focus.jid && t.jid === this.focus.jid) || sameTrain(this.focus, t)) || null;
+      if (!focus) {
+        focus = { ...this.focus, estimated: this.focus.estimated !== false };
+        trains.push(focus);
+      }
+    }
     const pos = this.tracked?.position;
     if (!pos || pos.lat == null || pos.lon == null) {
-      return { trains, own: null };
+      return { trains, own: null, focus };
     }
 
     // Schon gemeldet? Dann ist das die genauere Position.
     const ident = this.tracked.train;
     const found = ident ? trains.find((t) => sameTrain(ident, t)) : null;
     if (found) {
-      return { trains, own: found };
+      return { trains, own: found, focus };
     }
 
     const own = {
@@ -2536,7 +2566,7 @@ export class RouteMap {
       estimated: pos.estimated !== false,
     };
     trains.push(own);
-    return { trains, own };
+    return { trains, own, focus };
   }
 
   renderLiveTrains(svg, w, h, toPx) {
@@ -2546,7 +2576,7 @@ export class RouteMap {
     // Positionsantwort endet bei 40 Zügen im Ausschnitt, beim Herauszoomen
     // fällt er also regelmäßig heraus. Sonst wäre ausgerechnet der Zug
     // unsichtbar, den man verfolgt.
-    const { trains, own } = this.trainsOnMap();
+    const { trains, own, focus } = this.trainsOnMap();
 
     for (const t of trains) {
       if (t.lat == null || t.lon == null) continue;
@@ -2560,6 +2590,7 @@ export class RouteMap {
       g.setAttribute('class', 'map__train'
         + (t.onRoute ? ' is-onroute' : '')
         + (t === own ? ' is-tracked' : '')
+        + (t === focus ? ' is-focus' : '')
         + stadt
         + (t.source === 'mvg-plan' ? ' is-plan' : '')
         // Pünktlichkeit als Farbe: grün, ab 3 min gelb, ab 10 rot; grau,
@@ -2588,14 +2619,14 @@ export class RouteMap {
       const halo = document.createElementNS(NS, 'circle');
       halo.setAttribute('cx', x.toFixed(1));
       halo.setAttribute('cy', y.toFixed(1));
-      halo.setAttribute('r', '7');
+      halo.setAttribute('r', t === focus ? '12' : '7');
       halo.setAttribute('class', 'map__train-halo');
       g.append(halo);
 
       const dot = document.createElementNS(NS, 'circle');
       dot.setAttribute('cx', x.toFixed(1));
       dot.setAttribute('cy', y.toFixed(1));
-      dot.setAttribute('r', '3.2');
+      dot.setAttribute('r', t === focus ? '5' : '3.2');
       dot.setAttribute('class', 'map__train-dot');
       g.append(dot);
 
@@ -2609,12 +2640,12 @@ export class RouteMap {
 
       // Ab Stadtzoom steht die Linie neben U-Bahn und Tram - bei zwanzig
       // Punkten in der Innenstadt fragt man sonst jeden einzeln ab.
-      if (stadt && this.zoom >= 13 && t.line) {
+      if (t === focus || (stadt && this.zoom >= 13 && t.line)) {
         const lab = document.createElementNS(NS, 'text');
         lab.setAttribute('x', (x + 6).toFixed(1));
         lab.setAttribute('y', (y - 5).toFixed(1));
         lab.setAttribute('class', 'map__train-label');
-        lab.textContent = t.line;
+        lab.textContent = t === focus ? trainLabel(t) : t.line;
         g.append(lab);
       }
 
