@@ -1023,5 +1023,26 @@ pruefe('Absätze bleiben, Tags fallen, Entities werden Zeichen',
     Text::plain('<p>S-Bahn&nbsp;gesperrt</p><p>Bitte <b>U-Bahn</b> nutzen</p>'),
     "S-Bahn gesperrt\nBitte U-Bahn nutzen");
 
+// ---------------------------------------------------------------------
+echo "\nZugsuche - nur genaue Treffer\n";
+
+$zug = static fn (string $cat, string $line, string $num, string $name, string $dep) =>
+    ['category' => $cat, 'line' => $line, 'trainNumber' => $num, 'name' => $name, 'departure' => $dep];
+$treffer = [
+    $zug('Bus', '', '1810', 'Bus 1810', '2026-11-14T11:42'),
+    $zug('Bus', '111', '181', 'Bus 111', '2026-11-14T06:45'),
+    $zug('DRB', 'RB46', '68883', 'RB46', '2026-11-14T05:33'),
+    $zug('DRB', 'RB65', '68803', 'RB65', '2026-11-14T06:18'),
+    $zug('DRB', 'RB65', '68806', 'RB65', '2026-11-14T05:00'),
+    $zug('ICE', '', '690', 'ICE 690', '2026-11-14T08:45'),
+    $zug('IC', '', '690', 'IC 690', '2026-11-14T07:00'),
+    $zug('Bus', '690', '907224', 'Bus 690', '2026-11-14T05:12'),
+];
+$nummern = static fn (array $l) => array_map(static fn ($t) => $t['trainNumber'], $l);
+pruefe('"Bus 181": keine 1810, keine Fahrt 181 der Linie 111', OebbHafas::exactTrains($treffer, 'Bus 181'), []);
+pruefe('"RB 65": nur RB65, nach Abfahrt', $nummern(OebbHafas::exactTrains($treffer, 'RB 65')), ['68806', '68803']);
+pruefe('"ice690": nur der ICE', $nummern(OebbHafas::exactTrains($treffer, 'ice690')), ['690']);
+pruefe('"690": Züge mit der Nummer, nicht die Buslinie', $nummern(OebbHafas::exactTrains($treffer, '690')), ['690', '690']);
+
 echo "\n" . ($gesamt - $fehler) . " von $gesamt bestanden.\n";
 exit($fehler === 0 ? 0 : 1);
