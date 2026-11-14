@@ -1044,5 +1044,23 @@ pruefe('"RB 65": nur RB65, nach Abfahrt', $nummern(OebbHafas::exactTrains($treff
 pruefe('"ice690": nur der ICE', $nummern(OebbHafas::exactTrains($treffer, 'ice690')), ['690']);
 pruefe('"690": Züge mit der Nummer, nicht die Buslinie', $nummern(OebbHafas::exactTrains($treffer, '690')), ['690', '690']);
 
+// ---------------------------------------------------------------------
+echo "\nWegenetz - U-Bahn und S-Bahn am Münchner Hbf\n";
+
+$hbf = StationWalks::load(__DIR__ . '/../public/api/data/walks', '8000261');
+$stiglmaier = [48.14789, 11.556973];
+$sendlinger = [48.1340, 11.5670];
+pruefe('U1 Richtung Stiglmaierplatz: Bahnsteig Nord', $hbf->trackFor('U1', $stiglmaier), 'U-Nord');
+pruefe('U2 Richtung Sendlinger Tor: Bahnsteig Süd', $hbf->trackFor('U 2', $sendlinger), 'U-Sued');
+pruefe('aus dem Norden angekommen: steht am Bahnsteig Süd', $hbf->trackFor('U1', $stiglmaier, true), 'U-Sued');
+pruefe('U4/U5 haben einen Bahnsteig, Richtung egal', $hbf->trackFor('U5', null), 'U4U5');
+pruefe('Tram hat keinen', $hbf->trackFor('21', $stiglmaier), null);
+pruefe('S-Bahn tief unter eigener Nummer', StationWalks::load(__DIR__ . '/../public/api/data/walks', '8098263') !== null, true);
+$weg = $hbf->route('20', 'U-Nord', true);
+pruefe('Gleis 20 zur U-Bahn: bis Ebene -4', $weg !== null && end($weg['points'])[2] == -4, true);
+pruefe('neuer Einstieg ist noch nicht abgenommen', $weg['reviewed'] ?? null, false);
+pruefe('ohne Prüfmodus kein Weg', $hbf->route('20', 'U-Nord'), null);
+pruefe('alte Wege bleiben abgenommen', $hbf->route('20', '11')['reviewed'] ?? null, true);
+
 echo "\n" . ($gesamt - $fehler) . " von $gesamt bestanden.\n";
 exit($fehler === 0 ? 0 : 1);
