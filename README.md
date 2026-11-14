@@ -348,6 +348,20 @@ Netz). Zwei Dinge, die die Abnahme dabei gefunden hat: die Suche darf nicht
 durch einen fremden Bahnsteig hindurch (sonst wurden aus 300 m Gang 30 m), und
 kleine Haken an den Bahnsteigköpfen werden geglättet.
 
+**U-Bahn und S-Bahn tief (München Hbf, Entwurf vom 14. November 2026).**
+`bin/add_walk_platforms.py` hängt weitere Bahnsteige an ein abgenommenes Netz,
+ohne es neu zu rechnen: S-Bahn Gleis 1/2 (Ebene −2, eigene Nummer 8098263 über
+`aliases.json`), U4/U5 (Ebene −2) und die beiden Bahnsteige von U1/U2/U7/U8
+(Ebene −4). Die U-Bahn hat im Fahrplan kein Gleis. Welcher Bahnsteig gilt,
+steht in `lineTracks` der Netzdatei, nach Linie und Richtung, aus den
+OSM-Linienrelationen: Richtung Norden (OEZ, Feldmoching, Olympiazentrum) der
+eine, Richtung Süden der andere. Gerechnet wird mit dem nächsten Halt der
+Fahrt, beim Ankommen mit dem vorigen, und dann gilt der Bahnsteig der
+Gegenrichtung (`StationWalks::trackFor`). Die Einstiege sind noch nicht
+abgenommen; bis dahin zeigt die App diese Wege nur mit `?wegpruefung`. Für
+die Fahrt mit der U-Bahn zum Hbf fehlt in der DB-Suche oft das Ankunftsgleis
+des Zuges. Ohne Anfang gibt es dann auch keinen Weg.
+
 #### Treppen, Rolltreppen und Aufzüge je Ebene
 
 Zwischen „nur die Lage" und „ein berechneter Weg, den es so nicht gibt" liegt
