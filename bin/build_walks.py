@@ -8,6 +8,7 @@ den Fußwegen, Treppen und Rolltreppen in OpenStreetMap.
 um den Bahnhof, `out body geom`, damit die Wege ihre Knotennummern tragen):
 
     way(around:R,lat,lon)["railway"="platform"];
+    relation(around:R,lat,lon)["railway"="platform"]; way(r);
     way(around:R,lat,lon)["highway"~"^(footway|steps|corridor|pedestrian|elevator)$"];
     way(around:R,lat,lon)["conveying"];
     node(around:R,lat,lon)["highway"="elevator"];
@@ -159,6 +160,25 @@ def eisenbahn(t):
         return False
     return not any(t.get(x) == 'yes' for x in ('bus', 'tram', 'subway', 'light_rail'))
 plat_ways = [w for w in ways if eisenbahn(w.get('tags', {}))]
+# BAHNSTEIGE ALS RELATION: in Zürich und Pasing sind die Bahnsteige
+# Multipolygone - der Umriss besteht aus den äußeren Wegen, die Daten
+# (Gleise, Ebene) stehen an der Relation. Dafür muss die Abfrage auch
+#   relation(around:R,lat,lon)["railway"="platform"]; way(r);
+# enthalten (siehe oben). Ein Bahnsteig, der schon als Weg da ist, zählt
+# nicht doppelt.
+weg_nach_id = {w['id']: w for w in ways}
+schon = {tuple(tracks_of(w['tags'])) for w in plat_ways}
+for r in d['elements']:
+    if r['type'] != 'relation' or not eisenbahn(r.get('tags', {})):
+        continue
+    if tuple(tracks_of(r['tags'])) in schon:
+        continue
+    knoten = []
+    for m in r.get('members', []):
+        if m['type'] == 'way' and m.get('role', 'outer') in ('outer', '') and m['ref'] in weg_nach_id:
+            knoten.extend(weg_nach_id[m['ref']]['nodes'])
+    if knoten:
+        plat_ways.append({'id': r['id'], 'tags': r['tags'], 'nodes': knoten})
 for w in plat_ways:
     t = w['tags']
     trs = tracks_of(t)
