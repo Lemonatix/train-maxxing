@@ -362,6 +362,17 @@ abgenommen; bis dahin zeigt die App diese Wege nur mit `?wegpruefung`. Für
 die Fahrt mit der U-Bahn zum Hbf fehlt in der DB-Suche oft das Ankunftsgleis
 des Zuges. Ohne Anfang gibt es dann auch keinen Weg.
 
+**Weitere Entwürfe: München-Pasing und Zürich HB (14. November 2026).** Die
+Bahnsteige beider Bahnhöfe sind in OSM Multipolygone (Relationen); dafür kennt
+`bin/build_walks.py` jetzt auch `relation["railway"="platform"]` mit ihren
+äußeren Wegen. Pasing: alle Gleise 2–10, jeder Wechsel durch die Unterführung,
+60–110 m. Zürich HB nur mit den Gleisen 3–18 in der Halle: Die Ebenen darunter
+sind in OSM kaum als Fußwege erfasst. Die Rolltreppen der Bahnsteige enden
+dort im Nichts, und auch mit Brücken (`bin/close_walk_gaps.py`, gerade Stücke
+bis 40 m auf derselben Ebene) kam für 8 → 33 ein Weg von über 1 km heraus.
+Löwenstrasse (31–34) und Museumstrasse (41–44) fehlen deshalb, bis jemand sie
+von Hand zeichnet. Beide Entwürfe sind noch nicht abgenommen.
+
 #### Treppen, Rolltreppen und Aufzüge je Ebene
 
 Zwischen „nur die Lage" und „ein berechneter Weg, den es so nicht gibt" liegt
