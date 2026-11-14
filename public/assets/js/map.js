@@ -1294,6 +1294,10 @@ export class RouteMap {
       && st.to?.level != null && st.from.level !== st.to.level) {
       return st.from.level;
     }
+    // Mit gezeichnetem Weg beginnt der Plan an seinem Anfang - auch wenn
+    // ein Ende eine U-Bahn ist, die OSM nicht als Gleis des Bahnhofs führt.
+    const weg = st.walk?.points;
+    if ((st.from?.level == null || st.to?.level == null) && weg?.length) return Number(weg[0][2]) || 0;
     if (st.to?.level != null) return st.to.level;
     if (st.from?.level != null) return st.from.level;
     const ebenen = this.levelsPresent();
@@ -1315,6 +1319,9 @@ export class RouteMap {
     if (!st) return [];
     const set = new Set();
     for (const p of st.platforms || []) if (p.level != null) set.add(p.level);
+    // Die Ebenen des gezeichneten Weges: am Münchner Hbf führt er von den
+    // Gleisen auf 0 bis zur U-Bahn auf −4.
+    for (const p of st.walk?.points || []) if (Number.isInteger(Number(p[2]))) set.add(Number(p[2]));
     const [lo, hi] = this.levelRange();
     for (const c of st.connectors || []) {
       for (const lv of c.levels || []) if (lv >= lo && lv <= hi) set.add(lv);
@@ -1333,7 +1340,8 @@ export class RouteMap {
    * Gleise als Ebene 0.
    */
   levelRange() {
-    const lv = (this.station?.platforms || []).map((p) => p.level).filter((v) => v != null);
+    const lv = (this.station?.platforms || []).map((p) => p.level).filter((v) => v != null)
+      .concat((this.station?.walk?.points || []).map((p) => Number(p[2])).filter(Number.isFinite));
     if (lv.length === 0) return [-3, 1];
     return [Math.min(...lv) - 2, Math.max(...lv) + 1];
   }
