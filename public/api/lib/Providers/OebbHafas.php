@@ -999,7 +999,7 @@ final class OebbHafas
      * @param string $date YYYY-MM-DD - der Betriebstag, an dem der Zug fährt
      * @return array{ok:bool,error:?string,data:array}
      */
-    public function trainSearch(string $query, string $date, int $max = 12): array
+    public function trainSearch(string $query, string $date, int $max = 100): array
     {
         $res = $this->call('JourneyMatch', [
             'input'  => $query,
@@ -1041,7 +1041,72 @@ final class OebbHafas
                 break;
             }
         }
-        return ['ok' => true, 'error' => null, 'data' => $out];
+        return ['ok' => true, 'error' => null, 'data' => self::exactTrains($out, $query)];
+    }
+
+    /**
+     * Nur die Züge, die wirklich so heißen.
+     *
+     * JourneyMatch sucht die Nummer als ANFANG: "Bus 181" lieferte Bus 1810
+     * bis 1819 in Polen, aber keinen 181. Und "RB 65" brachte auch RB46-Läufe
+     * mit, die auf einem Stück als RB65 fahren. Behalten wird, was im Namen,
+     * in der Linie oder in der Zugnummer genau passt. Passt nichts genau,
+     * bleibt die Liste leer - eine Seite polnischer Busse mit ähnlicher
+     * Nummer hilft niemandem.
+     *
+     * @param array<int,array> $trains
+     * @return array<int,array>
+     */
+    public static function exactTrains(array $trains, string $query): array
+    {
+        $norm = static fn (string $v): string => (string) preg_replace('/\s+/u', '', mb_strtoupper($v));
+        $q = $norm($query);
+        preg_match('/^(\p{L}*)(.*)$/u', $q, $m);
+        $buchst = $m[1] ?? '';
+        $nummer = $m[2] ?? '';
+
+        $passt = static function (array $t) use ($norm, $q, $buchst, $nummer): bool {
+            if ($q === '') {
+                return false;
+            }
+            if ($norm((string) ($t['line'] ?? '')) === $q || $norm((string) ($t['name'] ?? '')) === $q) {
+                return true;
+            }
+            if ($nummer === '') {
+                return false;
+            }
+            if ($buchst === '' && $norm((string) ($t['line'] ?? '')) === $nummer) {
+                return true;
+            }
+            if ((string) ($t['trainNumber'] ?? '') !== $nummer) {
+                return false;
+            }
+            // Bei Bus und Tram mit Liniennummer ist die Fahrtnummer intern:
+            // "Bus 181" ist nicht die Fahrt 181 der Linie 111.
+            if (preg_match('/^\d+$/', (string) ($t['line'] ?? ''))) {
+                return false;
+            }
+            // "ICE 690" passt auf den ICE mit der Nummer 690, nicht auf den
+            // IC 690 in den Niederlanden. Die Gattung steht bei HAFAS mal mit
+            // Landesvorsatz ("DRB"), deshalb "endet mit".
+            return $buchst === ''
+                || str_ends_with($norm((string) ($t['category'] ?? '')), $buchst)
+                || str_starts_with($norm((string) ($t['name'] ?? '')), $buchst);
+        };
+
+        $genau = array_values(array_filter($trains, $passt));
+        // Nur eine Nummer ("690"): zuerst die Züge mit dieser Nummer. Die
+        // Buslinien 690 in Niederösterreich und im Jura kommen nur, wenn es
+        // keinen solchen Zug gibt - sonst begruben sie den ICE.
+        if ($buchst === '' && $nummer !== '') {
+            $zuege = array_values(array_filter($genau, static fn (array $t) => (string) ($t['trainNumber'] ?? '') === $nummer));
+            if ($zuege !== []) {
+                $genau = $zuege;
+            }
+        }
+        $liste = $genau;
+        usort($liste, static fn (array $a, array $b) => strcmp((string) $a['departure'], (string) $b['departure']));
+        return $liste;
     }
 
     /**
