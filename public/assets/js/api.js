@@ -241,8 +241,11 @@ export const api = {
    * sie am selben Bahnsteig liegen. Beide dürfen leer bleiben - dann kommt
    * schlicht der ganze Bahnhof zurück.
    */
-  platforms: (lat, lon, from, to, eva, opts) =>
+  platforms: (lat, lon, from, to, eva, opts, extra = {}) =>
     call('platforms', {
+      // U-Bahn ohne Gleisnummer: Linie und nächster Halt (StationWalks::trackFor).
+      fromLine: extra.fromLine || '', fromToward: extra.fromToward || '',
+      toLine: extra.toLine || '', toToward: extra.toToward || '',
       lat: lat.toFixed(5), lon: lon.toFixed(5),
       from: from || '', to: to || '',
       // Mit EVA-Nummer kommt an deutschen Bahnhöfen der Zustand der Aufzüge
