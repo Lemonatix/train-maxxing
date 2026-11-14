@@ -134,6 +134,9 @@ final class StationWalks
         $alleGeprueft = true;
         foreach ($kette as [$u, $i, $rueck]) {
             $e = $this->data['edges'][$i];
+            // Auch der Einstieg muss abgenommen sein: an einem neu
+            // angehängten Bahnsteig (U-Bahn) ist er das Neue am Weg.
+            $alleGeprueft = $alleGeprueft && !empty($e['reviewed']);
             if (($e['kind'] ?? '') === 'board') {
                 continue;
             }
@@ -169,6 +172,54 @@ final class StationWalks
             'changes'  => $wechsel,
             'reviewed' => $alleGeprueft,
         ];
+    }
+
+    /**
+     * Das Gleis eines Abschnitts ohne Gleisnummer - die U-Bahn.
+     *
+     * Der Fahrplan nennt für die U-Bahn kein Gleis. Welcher Bahnsteig es
+     * ist, hängt an Linie und Richtung: in München fahren U1/U2/U7/U8 nach
+     * Norden von einem Bahnsteig, nach Süden vom anderen (OSM-Linienrelationen).
+     * `lineTracks` der Netzdatei sagt es je Linie; gibt es für eine Linie
+     * mehrere Bahnsteige, gewinnt der, dessen Richtungspunkt (`toward`) dem
+     * nächsten Halt der Fahrt am nächsten liegt.
+     *
+     * BEIM ANKOMMEN ist der bekannte Punkt der VORIGE Halt (`$cameFrom`):
+     * wer aus dem Norden kommt, fährt nach Süden weiter und steht am
+     * Bahnsteig Richtung Süden. Dann gewinnt der Richtungspunkt, der am
+     * WEITESTEN weg liegt.
+     *
+     * @param ?array{0:float,1:float} $toward nächster Halt, mit $cameFrom der vorige
+     */
+    public function trackFor(string $line, ?array $toward, bool $cameFrom = false): ?string
+    {
+        $line = strtoupper((string) preg_replace('/\s+/', '', $line));
+        if ($line === '') {
+            return null;
+        }
+        $treffer = array_values(array_filter(
+            $this->data['lineTracks'] ?? [],
+            static fn ($e) => in_array($line, $e['lines'] ?? [], true)
+        ));
+        if (count($treffer) === 1) {
+            return (string) $treffer[0]['track'];
+        }
+        if ($treffer === [] || $toward === null) {
+            return null;
+        }
+        $kx = cos(deg2rad($toward[0]));
+        usort($treffer, static function ($x, $y) use ($toward, $kx, $cameFrom) {
+            $m = static fn ($e) => isset($e['toward'])
+                ? hypot($e['toward'][0] - $toward[0], ($e['toward'][1] - $toward[1]) * $kx) : INF;
+            return $cameFrom ? $m($y) <=> $m($x) : $m($x) <=> $m($y);
+        });
+        return (string) $treffer[0]['track'];
+    }
+
+    /** Anzeigename eines Gleises: "U4/U5" statt "U4U5", sonst die Nummer. */
+    public function trackName(string $track): string
+    {
+        return (string) ($this->data['trackNames'][$track] ?? $track);
     }
 
     /**
