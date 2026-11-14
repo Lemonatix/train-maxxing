@@ -989,7 +989,7 @@ function handleTrainSearch(Http $http, array $config, Cache $cache): void
     // "RJ80" und "rj 80" sind derselbe Zug.
     $q = (string) preg_replace('/^(\p{L}+)\s*(\d)/u', '$1 $2', mb_strtoupper($q));
 
-    $key = 'tsearch:' . $date . ':' . $q;
+    $key = 'tsearch3:' . $date . ':' . $q;
     $cached = $cache->get($key, 300);
     if ($cached !== null) {
         ok(['trains' => $cached, 'cached' => true]);
