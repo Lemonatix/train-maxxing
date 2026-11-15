@@ -1398,7 +1398,50 @@ final class OebbHafas
             }
         }
 
-        return $this->thin($points, $max, $anker);
+        return self::dropDetours($this->thin($points, $max, $anker), $anker);
+    }
+
+    /**
+     * Punkte entfernen, die weit neben der Strecke von Halt zu Halt liegen.
+     *
+     * HAFAS liefert gelegentlich einen kaputten Linienzug: Beim RE 4249 Ulm -
+     * Friedrichshafen machte er nach Ravensburg zweimal einen Abstecher über
+     * Würzburg, Fulda und Kassel bis Hannover und zurück - auf der
+     * Live-Karte eine Linie quer durch Deutschland. Ein Punkt bleibt, wenn
+     * er nah genug an einem Stück zwischen zwei aufeinanderfolgenden Halten
+     * liegt: 20 km, bei langen Stücken ohne Halt ein Drittel ihrer Länge.
+     * So weit holt keine Bahnstrecke aus.
+     *
+     * @param array<int,array{0:float,1:float}> $points
+     * @param array<int,array{0:float,1:float}> $stops
+     */
+    public static function dropDetours(array $points, array $stops): array
+    {
+        if (count($stops) < 2 || count($points) < 3) {
+            return $points;
+        }
+        $km = static function (array $a, array $b): array {
+            $kx = 111.32 * cos(deg2rad(($a[0] + $b[0]) / 2));
+            return [($b[1] - $a[1]) * $kx, ($b[0] - $a[0]) * 111.32];
+        };
+        $stuecke = [];
+        for ($i = 1, $n = count($stops); $i < $n; $i++) {
+            [$dx, $dy] = $km($stops[$i - 1], $stops[$i]);
+            $stuecke[] = [$stops[$i - 1], $dx, $dy, max(20.0, hypot($dx, $dy) / 3)];
+        }
+        $out = [];
+        foreach ($points as $p) {
+            foreach ($stuecke as [$a, $dx, $dy, $erlaubt]) {
+                [$px, $py] = $km($a, $p);
+                $l2 = $dx * $dx + $dy * $dy;
+                $t = $l2 > 0 ? max(0.0, min(1.0, ($px * $dx + $py * $dy) / $l2)) : 0.0;
+                if (hypot($px - $t * $dx, $py - $t * $dy) <= $erlaubt) {
+                    $out[] = $p;
+                    continue 2;
+                }
+            }
+        }
+        return count($out) >= 2 ? $out : $points;
     }
 
     /**
