@@ -21,6 +21,11 @@ erst mit dem Update auf 1.3.
     beschrifteten Punkt.
   - Schon beim Tippen erscheinen Vorschläge aus den Zügen, die gerade im
     Kartenausschnitt fahren.
+  - Auch Münchner Bus-, U- und S-Bahn-Linien („Bus 181“, „U6“), mit ganzem
+    Lauf und zum Verfolgen. Steht die Karte über München, kommen sie zuerst.
+- **Fenster zur angetippten Route:** Auf der Live-Karte zeigt ein Tipp auf
+  eine Route, welche Verbindung es ist (Zeiten, Umstiege, Züge), mit einem
+  Sprung zur Verbindung in der Liste.
 - **Streckenkilometer** an jeder Verbindung.
 - **Baustellen mit echtem Verlauf.** Der betroffene Abschnitt folgt jetzt den
   Gleisen (aus den Karten von strecken-info.de) statt einer geraden Linie.
@@ -59,7 +64,10 @@ erst mit dem Update auf 1.3.
 - **Fahrtdetails auf dem Handy:** Der Knopf „Fahrtinfo“ bleibt oben rechts.
   Zeit und Ort stehen in einer Zeile, lange Ortsnamen brechen in ihrer
   eigenen Spalte um.
-- Weiches Aufklappen jetzt auch in Firefox und älterem Safari.
+- Weiches Aufklappen jetzt auch in Firefox und älterem Safari, und ohne
+  den kleinen Sprung am Anfang und Ende bei den Zwischenhalten.
+- **Außer Betrieb im Lageplan zugeklappt:** Eine Zeile sagt, wie viele
+  Aufzüge und Rolltreppen gerade nicht gehen. Die Liste dazu klappt auf.
 
 ### Verbessert
 
@@ -79,6 +87,9 @@ erst mit dem Update auf 1.3.
   Einstiegshaltestelle. Die U6 ab Freimann „begann in Freimann“. Jetzt kommt
   der ganze Lauf von der MVV, mit Prognose an jedem Halt, und in der
   richtigen Richtung.
+- **Umstiegsweg im Lageplan fehlte manchmal:** Entstand der Plan, während
+  sein Kasten noch aufklappte, zoomte die Karte ganz heraus, und Weg und
+  Gleise lagen auf einem Punkt.
 - **Tipp auf den verfolgten Punkt:** Bei U-Bahn, Bus und manchen DB-Zügen
   passierte nichts. Jetzt öffnet sich der Zuglauf.
 - **Deutschlandticket bei MVG-Bussen:** Eine Fahrt, die vollständig im
