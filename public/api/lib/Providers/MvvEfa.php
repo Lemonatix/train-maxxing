@@ -150,6 +150,131 @@ final class MvvEfa
     }
 
     /**
+     * Fahrten einer Münchner Linie nach ihrem Namen - für die Zugsuche, wo
+     * die ÖBB-Auskunft passen muss: ihr JourneyMatch kennt "Bus 181" in
+     * Salzburg, Gstaad und Bratislava, den Münchner nicht.
+     *
+     * Erst die Linie (XML_SERVINGLINES_REQUEST, nur Linien der MVG und des
+     * MVV), dann die Abfahrten an ihren Endhalten, ab `$ab`. Am Endhalt der
+     * einen Richtung beginnen die Fahrten der anderen; jede Abfahrt bringt
+     * ihren ganzen Lauf mit (includeCompleteStopSeq). Fahrten, die erst
+     * unterwegs einsetzen, fehlen - für die Suche nach "der 181" reicht das.
+     *
+     * @return array<int,array> Treffer im Format von OebbHafas::trainSearch(),
+     *   ohne jid, dafür mit dem ganzen Lauf unter `train`
+     */
+    public function lineRuns(string $query, int $ab, int $max = 30): array
+    {
+        if (!preg_match('/^\s*(bus|tram|str|u|s|x|n|metrobus|expressbus)?\s*([a-z]?\d{1,3}[a-z]?)\s*$/i', $query, $m)) {
+            return [];
+        }
+        $art = strtolower($m[1] ?? '');
+        $nummer = strtoupper(($art === 'u' || $art === 's' || $art === 'x' || $art === 'n') ? $art . $m[2] : $m[2]);
+        $ua = ['User-Agent' => (string) ($this->cfg['user_agent'] ?? 'train-maxxing')];
+        $basis = rtrim(preg_replace('#XML_DM_REQUEST/?$#', '', (string) $this->cfg['endpoint']), '/');
+        $res = $this->http->getJson($basis . '/XML_SERVINGLINES_REQUEST?' . http_build_query([
+            'outputFormat' => 'rapidJSON', 'mode' => 'line', 'lineName' => $nummer,
+        ]), $ua);
+        $linien = [];
+        foreach (($res['ok'] ?? false) ? ($res['json']['lines'] ?? []) : [] as $l) {
+            $id = (string) ($l['id'] ?? '');
+            if (!preg_match('/^(swm|mvv):/', $id) || strtoupper((string) ($l['number'] ?? '')) !== $nummer) {
+                continue;
+            }
+            $produkt = mb_strtolower((string) ($l['product']['name'] ?? ''));
+            if ($art === 'bus' && !str_contains($produkt, 'bus')) {
+                continue;
+            }
+            if (($art === 'tram' || $art === 'str') && !str_contains($produkt, 'tram')) {
+                continue;
+            }
+            $linien[] = $l;
+        }
+        if ($linien === []) {
+            return [];
+        }
+        // Endhalte beider Richtungen; die Kennung der Linie ohne Richtung
+        // ("swm:03181:G"), um die Abfahrten am Endhalt zuzuordnen.
+        $halte = [];
+        $praefixe = [];
+        foreach ($linien as $l) {
+            if (isset($l['destination']['id'])) {
+                $halte[(string) $l['destination']['id']] = true;
+            }
+            $praefixe[implode(':', array_slice(explode(':', (string) $l['id']), 0, 2))] = true;
+        }
+        $urls = [];
+        foreach (array_slice(array_keys($halte), 0, 6) as $i => $halt) {
+            $urls["h$i"] = $this->boardUrl((string) $halt, $ab);
+        }
+        $tafeln = $this->http->getJsonAll($urls, $ua);
+        $out = [];
+        $gesehen = [];
+        $iso = static fn(?int $t): ?string => $t === null ? null : date('c', $t);
+        foreach ($tafeln as $tafel) {
+            foreach (($tafel['ok'] ?? false) ? ($tafel['json']['stopEvents'] ?? []) : [] as $e) {
+                $tr = $e['transportation'] ?? [];
+                $lid = implode(':', array_slice(explode(':', (string) ($tr['id'] ?? '')), 0, 2));
+                if (!isset($praefixe[$lid]) || strtoupper((string) ($tr['number'] ?? '')) !== $nummer) {
+                    continue;
+                }
+                $seq = self::sequence($e);
+                if (count($seq) < 2) {
+                    continue;
+                }
+                $a = $seq[0];
+                $b = $seq[count($seq) - 1];
+                $k = $a['id'] . '|' . ($a['dep'] ?? 0);
+                if (isset($gesehen[$k])) {
+                    continue;
+                }
+                $gesehen[$k] = true;
+                $minuten = static fn(?int $plan, ?int $ist): ?int => $plan !== null && $ist !== null ? (int) round(($ist - $plan) / 60) : null;
+                $stops = array_map(static fn(array $h) => [
+                    'id' => 'mvg:' . $h['id'], 'name' => $h['name'], 'lat' => $h['lat'], 'lon' => $h['lon'],
+                    'arrival' => $iso($h['arr']), 'arrivalReal' => $iso($h['arrReal']),
+                    'departure' => $iso($h['dep']), 'departureReal' => $iso($h['depReal']),
+                    'delay' => $minuten($h['dep'], $h['depReal']) ?? $minuten($h['arr'], $h['arrReal']),
+                    'platform' => $h['platform'], 'cancelled' => false,
+                ], $seq);
+                $hatEchtzeit = array_filter($stops, static fn($s) => $s['departureReal'] !== null || $s['arrivalReal'] !== null) !== [];
+                $produkt = (string) ($tr['product']['name'] ?? 'Bus');
+                $name = trim($produkt . ' ' . (string) ($tr['disassembledName'] ?? $tr['number'] ?? ''));
+                $run = [
+                    'category'    => $produkt,
+                    'line'        => (string) ($tr['number'] ?? $nummer),
+                    'trainNumber' => '',
+                    'name'        => $name,
+                    'direction'   => (string) ($tr['destination']['name'] ?? $b['name']),
+                    'delay'       => OebbHafas::currentDelay($stops),
+                    'hasRealtime' => $hatEchtzeit,
+                    'cancelled'   => false,
+                    'stops'       => $stops,
+                    'messages'    => [],
+                    'source'      => 'mvv',
+                ];
+                $out[] = [
+                    'jid'         => null,
+                    'source'      => 'mvv',
+                    'category'    => $produkt,
+                    'line'        => $run['line'],
+                    'trainNumber' => '',
+                    'name'        => $name,
+                    'direction'   => $run['direction'],
+                    'from'        => $a['name'],
+                    'to'          => $b['name'],
+                    'departure'   => $iso($a['dep']),
+                    'arrival'     => $iso($b['arr'] ?? $b['dep']),
+                    'region'      => 'München',
+                    'train'       => $run,
+                ];
+            }
+        }
+        usort($out, static fn($x, $y) => strcmp((string) $x['departure'], (string) $y['departure']));
+        return array_slice($out, 0, $max);
+    }
+
+    /**
      * Die Lage EINER Fahrt an einer Haltestelle: Verspätung, Ausfall, Gleis -
      * für die U-Bahnen und Trams der Live-Karte, deren Position nur nach
      * Fahrplan gerechnet ist (MvgRail).
