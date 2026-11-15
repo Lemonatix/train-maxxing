@@ -90,6 +90,10 @@ erst mit dem Update auf 1.3.
   Einstiegshaltestelle. Die U6 ab Freimann „begann in Freimann“. Jetzt kommt
   der ganze Lauf von der MVV, mit Prognose an jedem Halt, und in der
   richtigen Richtung.
+- **Linie quer durch Deutschland auf der Karte:** Bei manchen Zügen lieferte
+  die ÖBB-Auskunft einen kaputten Streckenverlauf (RE Ulm – Friedrichshafen
+  mit einem Abstecher bis Hannover). Punkte weit abseits der Halte fallen
+  jetzt weg.
 - **Umstiegsweg im Lageplan fehlte manchmal:** Entstand der Plan, während
   sein Kasten noch aufklappte, zoomte die Karte ganz heraus, und Weg und
   Gleise lagen auf einem Punkt.
