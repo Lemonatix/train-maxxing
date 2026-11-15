@@ -1123,6 +1123,10 @@ pruefe('Rücksprung von Bad Schussenried bis kurz vor Ulm fällt weg',
 $kopf = [[51.30, 12.20], [51.33, 12.30], [51.345, 12.382], [51.33, 12.30], [51.40, 12.32], [51.62, 12.32]];
 $kopfHalte = [[51.30, 12.20], [51.345, 12.382], [51.62, 12.32]];
 pruefe('Kopfbahnhof: Abstecher in den Bahnhof bleibt', in_array([51.345, 12.382], OebbHafas::cleanLine($kopf, $kopfHalte), true), true);
+pruefe('Zacke von Bad Schussenried bis kurz vor Ulm fällt weg (wie im Suchergebnis)',
+    in_array([48.35635, 9.92357], OebbHafas::cleanLine([[48.3994, 9.98261], [48.23155, 9.84841], [48.10184, 9.7931],
+        [47.9939, 9.66858], [48.35635, 9.92357], [47.95426, 9.64445], [47.78446, 9.60619], [47.69976, 9.55844],
+        [47.65322, 9.4739]], $halte), true), false);
 pruefe('lange Strecke ohne Halt: Bögen bleiben',
     count(OebbHafas::dropDetours([[48.14, 11.56], [48.6, 10.6], [48.40, 9.98]], [[48.14, 11.56], [48.40, 9.98]])), 3);
 
