@@ -1644,16 +1644,22 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
   // Wegwahl ändert. Auch Anlagen, die OpenStreetMap nicht kennt.
   const kaputt = res?.outages || [];
   if (kaputt.length > 0) {
-    const box = el('div', 'xfer__outages');
-    box.append(el('p', 'xfer__outages-title',
-      `${kaputt.length === 1 ? 'Außer Betrieb' : `${kaputt.length} Anlagen außer Betrieb`} (laut DB, gerade eben)`));
+    // ZUGEKLAPPT: am Münchner Hbf sind es oft zehn und mehr, und die Liste
+    // schob Plan und Weg aus dem Bild. Die Zeile sagt, wie viele es sind -
+    // wer einen Aufzug braucht, klappt auf.
+    const box = el('details', 'xfer__outages');
+    const aufzuege = kaputt.filter((o) => o.type === 'elevator').length;
+    const sum = el('summary', 'xfer__outages-title',
+      `${kaputt.length === 1 ? 'Eine Anlage außer Betrieb' : `${kaputt.length} Anlagen außer Betrieb`}`
+      + (aufzuege ? ` · ${aufzuege === 1 ? 'ein Aufzug' : `${aufzuege} Aufzüge`}` : ''));
+    sum.append(el('span', 'xfer__outages-src', ' (laut DB, gerade eben)'));
+    box.append(sum);
     const ul = el('ul', 'xfer__outages-list');
-    for (const o of kaputt.slice(0, 8)) {
+    for (const o of kaputt) {
       const was = o.type === 'elevator' ? 'Aufzug' : 'Rolltreppe';
       ul.append(el('li', '', `${was}${o.description ? ' ' + o.description : ''}`
         + (o.explanation && o.explanation !== 'außer Betrieb' ? ` — ${o.explanation}` : '')));
     }
-    if (kaputt.length > 8) ul.append(el('li', '', `… und ${kaputt.length - 8} weitere`));
     box.append(ul);
     out.push(box);
   }
@@ -1846,7 +1852,12 @@ function renderStops(leg, state) {
   const list = el('ol', 'stops');
   const land = { last: stops[0]?.country || leg.from?.country || '' };
   for (const s of mid) list.append(stopRow(s, nerd, land));
-  box.append(list);
+  // IN EINEM RAHMEN MIT INNENABSTAND, nicht mit Außenabstand an der Liste:
+  // der rutschte durch den aufklappenden Bereich nach außen - beim Öffnen
+  // war er sofort da, beim Schließen erst am Ende weg. Das war der Sprung.
+  const rahmen = el('div', 'leg__stops-body');
+  rahmen.append(list);
+  box.append(rahmen);
   return box;
 }
 
