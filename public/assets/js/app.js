@@ -162,7 +162,7 @@ document.addEventListener('click', (e) => {
  * Kurve, gleiche Bereiche wie die CSS-Regel.
  */
 const HOEHE_PER_CSS = typeof CSS !== 'undefined' && CSS.supports?.('interpolate-size', 'allow-keywords');
-const GLEITEND = '.journey__details, .fares, .xfer, .leg__stops, details.section, .live__msgs';
+const GLEITEND = '.journey__details, .fares, .xfer, .leg__stops, .xfer__outages, details.section, .live__msgs';
 if (!HOEHE_PER_CSS) {
   const ms = (d, name, fallback) => parseFloat(getComputedStyle(d).getPropertyValue(name)) || fallback;
   const gleite = (d, von, bis, dauer, fertig) => {
@@ -214,6 +214,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // Nach Verschieben oder Zoomen die Züge im neuen Ausschnitt nachladen.
   map.onViewChange = scheduleLiveTrains;
   map.onTrainClick = showTrainDetails;
+  // Aus dem Fenster einer angetippten Route zur Karte in der Liste.
+  // Die Karte liegt im Reiter Live-Karte, die Liste unter Verbindungen.
+  map.onShowJourney = (index) => {
+    showTab('search');
+    requestAnimationFrame(() => {
+      const card = $('#results-list')?.querySelector(`.journey[data-index="${index}"]`);
+      card?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  };
   // Karte sofort aufbauen, damit sie nicht erst nach der ersten Suche erscheint.
   map.setData([], 0, select);
 
@@ -2675,7 +2684,8 @@ function journeyFromRun(t, jid) {
   const ab = a.departure || a.arrival;
   const an = b.arrival || b.departure;
   return {
-    id: `zug-${jid}`,
+    // Ohne jid (Münchner Linie aus der MVV-Auskunft): Linie und Abfahrt.
+    id: jid ? `zug-${jid}` : `zug-${t.line || t.name}-${ab}`,
     source: 'train',
     departure: ab,
     arrival: an,
@@ -2684,7 +2694,9 @@ function journeyFromRun(t, jid) {
     countries: [],
     price: null,
     legs: [{
-      mode: 'train', jid,
+      // Ohne jid holt die Verfolgung den Lauf über die MVG-Kennungen der
+      // Halte (LiveTracker.sourceOf -> 'mvg').
+      mode: 'train', jid: jid || undefined,
       category: t.category || '', categoryName: t.categoryName || '', line: t.line || '',
       trainNumber: t.trainNumber || '', name: t.name || '', direction: t.direction || '', operator: t.operator || '',
       from: ort(a), to: ort(b), departure: ab, arrival: an,
@@ -2779,7 +2791,11 @@ function setupTrainSearch() {
     melde('Suche …');
     try {
       const datum = tag?.value || '';
-      const res = await api.trainSearch(q, datum);
+      // Wo die Karte gerade steht: in München kommen die Münchner Linien
+      // zuerst ("Bus 181" ist dann der an der Studentenstadt).
+      const c = map?.center;
+      const near = c ? `${c.lat.toFixed(3)},${c.lon.toFixed(3)}` : '';
+      const res = await api.trainSearch(q, datum, near);
       if (meiner !== lauf) return;
       const zuege = res.trains || [];
       if (zuege.length === 0) {
@@ -2889,7 +2905,10 @@ async function showTrainDetails(train, { focus = false } = {}) {
 
   try {
     let res;
-    if (ueberAbschnitt) {
+    if (train.train?.stops?.length) {
+      // Aus der Zugsuche mit ganzem Lauf (Münchner Linie): nichts zu holen.
+      res = { train: train.train };
+    } else if (ueberAbschnitt) {
       const src = LiveTracker.sourceOf(train.leg);
       if (!src) throw new Error('für diesen Abschnitt gibt es keinen abrufbaren Lauf');
       res = await LiveTracker.fetchRun({ leg: train.leg, jid: train.leg.jid || null, src });
@@ -3041,7 +3060,7 @@ function renderTrainPanel(panel, head, t) {
 
   // Diesen Zug verfolgen - den ganzen Lauf, vom ersten bis zum letzten Halt.
   const jid = state.trainJid;
-  if (jid && (t.stops || []).length >= 2) {
+  if ((jid || t.source === 'mvv') && (t.stops || []).length >= 2) {
     const journey = journeyFromRun(t, jid);
     const b = document.createElement('button');
     b.type = 'button';
