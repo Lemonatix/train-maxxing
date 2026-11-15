@@ -3410,8 +3410,16 @@ details.live__msg .live__msg-text {
 }
 .xfer__outages-title { margin: 0; font-weight: 600; color: var(--rose); cursor: pointer; list-style: none; }
 .xfer__outages-title::-webkit-details-marker { display: none; }
-.xfer__outages-title::before { content: '▸ '; }
-.xfer__outages[open] > .xfer__outages-title::before { content: '▾ '; }
+.xfer__outages-title::before {
+  content: '▸';
+  display: inline-block;
+  width: 1.1em;
+  transition: transform var(--close-ms, 340ms) var(--ease-expand);
+}
+.xfer__outages[open] > .xfer__outages-title::before {
+  transform: rotate(90deg);
+  transition-duration: var(--open-ms, 480ms);
+}
 .xfer__outages-src { font-weight: 400; color: var(--text-muted); }
 .xfer__outages-list { margin: 0; padding: 0.3rem 0 0 1.1rem; }
 .xfer__outages-list li { margin: 0.1rem 0; }
@@ -3812,8 +3820,19 @@ details.live__msg .live__msg-text {
 
 .leg__stops-sum:hover { color: var(--accent); }
 .leg__stops-sum::-webkit-details-marker { display: none; }
-.leg__stops-sum::before { content: '▸ '; }
-.leg__stops[open] > .leg__stops-sum::before { content: '▾ '; }
+/* DREHEN statt Zeichen tauschen: ▸ sprang beim Klick sofort auf ▾,
+   während die Höhe noch weich aufging - das sah aus wie ein Zucken. Jetzt
+   dreht sich das Dreieck im Takt der Höhe, wie bei den Verbindungsdetails. */
+.leg__stops-sum::before {
+  content: '▸';
+  display: inline-block;
+  width: 1.1em;
+  transition: transform var(--close-ms, 340ms) var(--ease-expand);
+}
+.leg__stops[open] > .leg__stops-sum::before {
+  transform: rotate(90deg);
+  transition-duration: var(--open-ms, 480ms);
+}
 
 .leg__stops-body { padding: 0.3rem 0 0.15rem; }
 .leg__stops-body > .stops { margin-top: 0; margin-bottom: 0; }
