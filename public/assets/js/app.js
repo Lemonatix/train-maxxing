@@ -8,8 +8,8 @@
 
 import { api } from './api.js';
 import { rank, highlights, setFxRates, spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
-import { renderResults, renderNotices, renderTripPair, kmLabel } from './render.js';
-import { RouteMap, setMapTheme, trainLabel, lineKey, nextOnLine, geoErrorText, legGeometryFromRun } from './map.js';
+import { renderResults, renderNotices, renderTripPair, kmLabel, setWalkPace } from './render.js';
+import { RouteMap, setMapTheme, trainLabel, lineKey, nextOnLine, geoErrorText, legGeometryFromRun, TRACKED_JID } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
 import { pendingLoads } from './prefetch.js';
 import { ROUTES, ratingsBySpeed } from './data/routes.js';
@@ -67,6 +67,7 @@ const state = {
   // Kürzestmöglicher Umstieg als Standard. Unter einer Minute gibt es keinen
   // Umstieg, deshalb ist 1 die Untergrenze.
   minChange: 1,
+  walkPace: 'normal',
   discounts: [],
   products: [],        // leer = alle erlaubt
   // Nerd-Parameter
@@ -488,7 +489,7 @@ function loadSettings() {
     // der aktuelle Zeitpunkt stehen, nicht der von letzter Woche.
     for (const key of [
       'mode', 'from', 'to', 'via', 'arrival', 'travelClass',
-      'minChange', 'discounts', 'products',
+      'minChange', 'walkPace', 'discounts', 'products',
       'modelPrefs', 'routePrefs', 'speedWeight', 'liveTrains', 'liveProducts',
       'sort', 'nightValue',
     ]) {
@@ -574,7 +575,7 @@ function saveSettings() {
         // stehen. Sie zu schreiben legte nur eine tote Uhrzeit im Storage ab.
         mode: state.mode, from: state.from, to: state.to, via: state.via,
         arrival: state.arrival, travelClass: state.travelClass,
-        minChange: state.minChange, minChangeMigrated: true,
+        minChange: state.minChange, minChangeMigrated: true, walkPace: state.walkPace,
         discounts: state.discounts, products: state.products,
         modelPrefs: state.modelPrefs, routePrefs: state.routePrefs,
         speedWeight: state.speedWeight, liveTrains: state.liveTrains,
@@ -1528,6 +1529,13 @@ function setupForm() {
     state.minChange = Math.max(1, Number(e.target.value) || 1);
     saveSettings();
   });
+  $('#walk-pace').addEventListener('change', (e) => {
+    state.walkPace = e.target.value;
+    setWalkPace(state.walkPace);
+    saveSettings();
+    // Offene Umstiegspläne zeigen die Minuten gleich im neuen Tempo.
+    if (state.ranked?.length) rerank({ keepSelection: true });
+  });
 }
 
 function applyStateToForm() {
@@ -1539,6 +1547,8 @@ function applyStateToForm() {
   $('#arrival').checked = state.arrival;
   $('#class').value = String(state.travelClass);
   $('#min-change').value = String(state.minChange ?? 1);
+  $('#walk-pace').value = state.walkPace || 'normal';
+  setWalkPace(state.walkPace);
 
   $('#via').value = state.via?.name || '';
   renderVia();
@@ -2825,6 +2835,8 @@ function runPosition(stops, now = Date.now()) {
 
 async function showTrainDetails(train, { focus = false } = {}) {
   const panel = $('#train-panel');
+  // Der verfolgte Punkt ohne jid (U-Bahn, Bus): Lauf über den Abschnitt.
+  const ueberAbschnitt = train.jid === TRACKED_JID && train.leg;
   // Ein Tipp auf einen anderen Zug nimmt die Hervorhebung der Suche weg.
   if (!focus || map?.focus?.jid !== train.jid) map?.focusTrain(null);
   // Aus den Vorschlägen kommt der Zug mit Position: sofort hinfahren.
@@ -2833,7 +2845,7 @@ async function showTrainDetails(train, { focus = false } = {}) {
   panel.replaceChildren();
 
   // Der offene Zug gehört in die Adresszeile - siehe updateShareUrl().
-  state.trainJid = train.jid || null;
+  state.trainJid = ueberAbschnitt ? null : train.jid || null;
   updateShareUrl();
 
   const head = document.createElement('div');
@@ -2876,7 +2888,15 @@ async function showTrainDetails(train, { focus = false } = {}) {
   trainAbort = new AbortController();
 
   try {
-    const res = await api.trainDetails(train.jid, { signal: trainAbort.signal });
+    let res;
+    if (ueberAbschnitt) {
+      const src = LiveTracker.sourceOf(train.leg);
+      if (!src) throw new Error('für diesen Abschnitt gibt es keinen abrufbaren Lauf');
+      res = await LiveTracker.fetchRun({ leg: train.leg, jid: train.leg.jid || null, src });
+      if (trainAbort.signal.aborted) return;
+    } else {
+      res = await api.trainDetails(train.jid, { signal: trainAbort.signal });
+    }
     renderTrainPanel(panel, head, res.train);
     // Aus der Zugsuche und gerade unterwegs: den Punkt auf der Karte zeigen.
     if (focus && train.lat == null) {
