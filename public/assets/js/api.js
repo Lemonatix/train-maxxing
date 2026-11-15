@@ -140,8 +140,12 @@ export const api = {
 
   trainDetails: (jid, opts) => call('traindetails', { jid }, opts),
 
-  /** Züge nach Namen oder Nummer finden ("RJ 80", "690") - an `date` (YYYY-MM-DD), sonst heute. */
-  trainSearch: (q, date, opts) => call('trainsearch', { q, date: date || '' }, opts),
+  /**
+   * Züge nach Namen oder Nummer finden ("RJ 80", "690", "Bus 181") - an
+   * `date` (YYYY-MM-DD), sonst heute. `near` ("lat,lon", die Kartenmitte):
+   * in München kommen die Münchner Linien zuerst.
+   */
+  trainSearch: (q, date, near, opts) => call('trainsearch', { q, date: date || '', near: near || '' }, opts),
 
   /**
    * Streckenverlauf eines Abschnitts ohne jid (aus der DB-Suche), über die
