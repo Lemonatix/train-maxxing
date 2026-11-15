@@ -1407,7 +1407,50 @@ final class OebbHafas
      */
     public static function cleanLine(array $points, array $stops): array
     {
-        return self::dropDetours(self::dropLoops($points, $stops), $stops);
+        return self::dropSpikes(self::dropDetours(self::dropLoops($points, $stops), $stops), $stops);
+    }
+
+    /**
+     * Zacken entfernen: ein Punkt, zu dem die Linie hin- und gleich wieder
+     * zurückläuft (Hin- und Rückweg zusammen mehr als dreimal so lang wie
+     * der direkte Weg, und mindestens 5 km Umweg), und der an keinem Halt
+     * liegt. Übrig blieb so beim RE 4249 ein Punkt kurz vor Ulm zwischen
+     * Bad Schussenried und Aulendorf - auf der Karte ein Strich 40 km nach
+     * Norden und zurück. Ein Kopfbahnhof ist ein Halt und bleibt.
+     *
+     * @param array<int,array{0:float,1:float}> $points
+     * @param array<int,array{0:float,1:float}> $stops
+     */
+    public static function dropSpikes(array $points, array $stops): array
+    {
+        $m = static function (array $a, array $b): float {
+            $kx = cos(deg2rad(($a[0] + $b[0]) / 2));
+            return hypot(($a[0] - $b[0]) * 111320, ($a[1] - $b[1]) * 111320 * $kx);
+        };
+        $amHalt = static function (array $p) use ($stops, $m): bool {
+            foreach ($stops as $h) {
+                if ($m($p, $h) <= 1500) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        do {
+            $weg = false;
+            for ($i = 1, $n = count($points); $i < $n - 1; $i++) {
+                $a = $points[$i - 1];
+                $p = $points[$i];
+                $b = $points[$i + 1];
+                $umweg = $m($a, $p) + $m($p, $b);
+                $direkt = $m($a, $b);
+                if ($umweg > 3 * $direkt && $umweg - $direkt > 5000 && !$amHalt($p)) {
+                    array_splice($points, $i, 1);
+                    $weg = true;
+                    break;
+                }
+            }
+        } while ($weg);
+        return $points;
     }
 
     /**
