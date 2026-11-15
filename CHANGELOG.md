@@ -39,7 +39,7 @@ erst mit dem Update auf 1.3.
   zeigt der Lageplan dort den Weg vom Ankunfts- zum Abfahrtsgleis mit Metern
   und Minuten: in Pasing durch die Unterführung, in Zürich an den
   Bahnsteigköpfen der Halle (Gleise 3–18, die unterirdischen Gleise folgen
-  später).
+  später). Der Laufweg ist im Lageplan gelb eingezeichnet.
 - **Weitere Umstiegswege:** Augsburg Hbf, München Ost, Nürnberg Hbf und
   Stuttgart Hbf (Gleise 1–16) – jeweils mit Metern und Minuten vom
   Ankunfts- zum Abfahrtsgleis.
@@ -94,6 +94,9 @@ erst mit dem Update auf 1.3.
   die ÖBB-Auskunft einen kaputten Streckenverlauf (RE Ulm – Friedrichshafen
   mit einem Abstecher bis Hannover). Punkte weit abseits der Halte fallen
   jetzt weg.
+- **Zürich HB:** Die Umstiegswege liefen mitten über die Bahnsteige und
+  damit über die Gleise. Jetzt führen sie entlang der Bahnsteigköpfe durch
+  die Halle.
 - **Umstiegsweg im Lageplan fehlte manchmal:** Entstand der Plan, während
   sein Kasten noch aufklappte, zoomte die Karte ganz heraus, und Weg und
   Gleise lagen auf einem Punkt.
