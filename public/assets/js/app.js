@@ -198,8 +198,16 @@ if (!HOEHE_PER_CSS) {
     if (d.open) {
       // Zuklappen: erst gleiten, dann wirklich schließen.
       e.preventDefault();
-      gleite(d, d.getBoundingClientRect().height, zuHoehe(), ms(d, '--close-ms', 340), () => { d.open = false; });
+      // [open] bleibt bis zum Ende der Animation stehen - das Dreieck
+      // drehte sich deshalb erst, wenn schon zu war. is-closing dreht es
+      // gleich mit zurück (style.css).
+      d.classList.add('is-closing');
+      gleite(d, d.getBoundingClientRect().height, zuHoehe(), ms(d, '--close-ms', 340), () => {
+        d.classList.remove('is-closing');
+        d.open = false;
+      });
     } else {
+      d.classList.remove('is-closing');
       const zu = d.getBoundingClientRect().height;
       d._zuHoehe = zu;
       // Aufklappen: der Inhalt entsteht teils erst im toggle-Handler -
