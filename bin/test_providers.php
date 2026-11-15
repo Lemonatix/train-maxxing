@@ -942,6 +942,18 @@ $ankunft = MvvEfa::events(['ok' => true, 'json' => ['stopEvents' => [
 ]]]);
 pruefe('EFA am Endhalt: die Ankunftstafel trägt Ankunftszeiten',
     [$ankunft[0]['line'], $ankunft[0]['real'] - $ankunft[0]['planned']], ['28', 120]);
+$ort = static fn (string $id, string $name, string $zeit) => ['parent' => ['id' => $id, 'name' => $name],
+    'coord' => [48.2, 11.6], 'departureTimePlanned' => $zeit, 'arrivalTimePlanned' => $zeit];
+$lauf = MvvEfa::events(['ok' => true, 'json' => ['stopEvents' => [
+    ['departureTimePlanned' => '2026-11-15T14:03:00Z',
+     'location' => ['parent' => ['id' => 'de:09162:420', 'name' => 'Freimann'], 'coord' => [48.18, 11.61]],
+     'transportation' => ['number' => 'U6', 'destination' => ['name' => 'Sendlinger Tor']],
+     'previousLocations' => [$ort('de:09162:470', 'Fröttmaning', '2026-11-15T13:59:00Z')],
+     'onwardLocations' => [$ort('de:09162:2', 'Marienplatz', '2026-11-15T14:16:00Z')]],
+]]]);
+pruefe('EFA: der ganze Lauf - Fröttmaning vor Freimann, Marienplatz danach',
+    array_column($lauf[0]['seq'], 'name'), ['Fröttmaning', 'Freimann', 'Marienplatz']);
+pruefe('EFA: ohne mitgelieferten Lauf keine Halteliste', $efa[0]['seq'], []);
 
 // ---------------------------------------------------------------------
 echo "\nLaufwege im Bahnhof - aus dem gezeichneten Wegenetz\n";
