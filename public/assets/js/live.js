@@ -467,9 +467,11 @@ ${url.href}`);
       line: leg.line, dep: leg.departure, arr: leg.arrival,
       fromName: leg.from.name, toName: leg.to.name,
     });
-    // Die MVG meldet nur Ein- und Ausstieg. Die Halte dazwischen kommen aus
-    // der Verbindung, verschoben um die gemeldete Verspätung - so bleiben
-    // Halteliste und Zugposition auf der Karte vollständig.
+    // Die MVV liefert den ganzen Lauf mit Prognose je Halt - der gilt so.
+    // Die MVG (Rückfall) meldet nur Ein- und Ausstieg: dann kommen die Halte
+    // dazwischen aus der Verbindung, verschoben um die gemeldete Verspätung -
+    // so bleiben Halteliste und Zugposition auf der Karte vollständig.
+    if ((res.train?.stops || []).length > 2) return res;
     res.train = { ...res.train, stops: LiveTracker.mergeStops(leg.stops || [], res.train) };
     return res;
   }
@@ -528,8 +530,16 @@ ${url.href}`);
     const finde = (p) => stops.findIndex((s) => (p?.id && String(s.id) === String(p.id)) || s.name === p?.name);
     const von = finde(leg.from);
     const bis = finde(leg.to);
-    const ein = mvg.stops?.[0];
-    const aus = mvg.stops?.[mvg.stops.length - 1];
+    // Die MVV liefert inzwischen den GANZEN Lauf, nicht nur Ein- und
+    // Ausstieg - die beiden also suchen, nicht den ersten und letzten nehmen.
+    // Gefunden über die Lage: die MVV schreibt "Freimann", die DB
+    // "Freimann, München".
+    const nah = (s, p) => s?.lat != null && p?.lat != null
+      && Math.hypot((s.lat - p.lat) * 111320, (s.lon - p.lon) * 111320 * Math.cos(p.lat * Math.PI / 180)) < 250;
+    const mStops = mvg.stops || [];
+    const mFinde = (p, fallback) => mStops.find((s) => nah(s, p) || s.name === p?.name) ?? fallback;
+    const ein = mFinde(leg.from, mStops.length === 2 ? mStops[0] : undefined);
+    const aus = mFinde(leg.to, mStops.length === 2 ? mStops[1] : undefined);
     const delay = Number.isFinite(mvg.delay) ? mvg.delay : 0;
     const plus = (iso) => (iso ? new Date(Date.parse(iso) + delay * 60_000).toISOString() : null);
     if (von >= 0 && bis > von) {
@@ -1519,6 +1529,10 @@ ${url.href}`);
         trainNumber: current.leg.trainNumber || '',
         name: current.leg.name || '',
         direction: current.leg.direction || '',
+        line: current.leg.line || '',
+        // Für den Tipp auf den Punkt: ohne jid (U-Bahn, Bus aus der MVG,
+        // DB-Abschnitte) holt die App den Lauf über den Abschnitt selbst.
+        leg: current.leg,
       } : null,
       position: this.trainPosition(),
     });
