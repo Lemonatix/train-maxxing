@@ -1507,6 +1507,36 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 
 .map__label.is-major { fill: var(--map-label); font-weight: 600; }
 
+/* --- Fenster zu einer angetippten Route ----------------------------- */
+
+.map__pop {
+  position: absolute;
+  z-index: 6;
+  min-width: 12rem;
+  max-width: min(20rem, calc(100% - 16px));
+  padding: 0.55rem 0.7rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+.map__pop-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.map__pop-head strong { color: var(--text); font-family: var(--font-mono); font-size: 0.8rem; }
+.map__pop-close {
+  border: 0; background: none; color: var(--text-muted);
+  font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0 0.15rem;
+}
+.map__pop-close:hover { color: var(--text); }
+.map__pop-time { margin: 0.25rem 0 0; color: var(--text); }
+.map__pop-trains { margin: 0.15rem 0 0; font-family: var(--font-mono); font-size: 0.75rem; }
+.map__pop-go {
+  margin-top: 0.45rem; padding: 0; border: 0; background: none;
+  color: var(--accent); font: inherit; font-size: 0.78rem; cursor: pointer;
+}
+.map__pop-go:hover { text-decoration: underline; }
+
 /* --- Live-Züge ------------------------------------------------------ */
 
 .map__train { pointer-events: auto; cursor: pointer; }
@@ -3378,8 +3408,12 @@ details.live__msg .live__msg-text {
   background: color-mix(in srgb, var(--rose) 9%, transparent);
   font-size: 0.82rem;
 }
-.xfer__outages-title { margin: 0 0 0.2rem; font-weight: 600; color: var(--rose); }
-.xfer__outages-list { margin: 0; padding-left: 1.1rem; }
+.xfer__outages-title { margin: 0; font-weight: 600; color: var(--rose); cursor: pointer; list-style: none; }
+.xfer__outages-title::-webkit-details-marker { display: none; }
+.xfer__outages-title::before { content: '▸ '; }
+.xfer__outages[open] > .xfer__outages-title::before { content: '▾ '; }
+.xfer__outages-src { font-weight: 400; color: var(--text-muted); }
+.xfer__outages-list { margin: 0; padding: 0.3rem 0 0 1.1rem; }
 .xfer__outages-list li { margin: 0.1rem 0; }
 .xfer__legend-note { flex-basis: 100%; }
 
@@ -3780,6 +3814,9 @@ details.live__msg .live__msg-text {
 .leg__stops-sum::-webkit-details-marker { display: none; }
 .leg__stops-sum::before { content: '▸ '; }
 .leg__stops[open] > .leg__stops-sum::before { content: '▾ '; }
+
+.leg__stops-body { padding: 0.3rem 0 0.15rem; }
+.leg__stops-body > .stops { margin-top: 0; margin-bottom: 0; }
 
 .stops {
   list-style: none;
@@ -5324,12 +5361,12 @@ details.journey__details { --open-ms: 600ms; --close-ms: 400ms; }
    beim Zuklappen die ohne. */
 @supports (interpolate-size: allow-keywords) {
   :root { interpolate-size: allow-keywords; }
-  :is(.journey__details, .fares, .xfer, .leg__stops, details.section, .live__msgs)::details-content {
+  :is(.journey__details, .fares, .xfer, .leg__stops, .xfer__outages, details.section, .live__msgs)::details-content {
     block-size: 0;
     overflow-y: clip;
     transition: block-size var(--close-ms) var(--ease-expand), content-visibility var(--close-ms) allow-discrete;
   }
-  :is(.journey__details, .fares, .xfer, .leg__stops, details.section, .live__msgs)[open]::details-content {
+  :is(.journey__details, .fares, .xfer, .leg__stops, .xfer__outages, details.section, .live__msgs)[open]::details-content {
     block-size: auto;
     transition: block-size var(--open-ms) var(--ease-expand), content-visibility var(--open-ms) allow-discrete;
   }
