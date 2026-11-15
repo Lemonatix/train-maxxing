@@ -1492,6 +1492,32 @@ export function kmLabel(journey) {
 }
 
 /** Inhalt des Umstiegsplans: der Bahnhof aus OpenStreetMap, oder eine Erklärung. */
+/**
+ * GEHTEMPO für die Umstiegswege - eine Einstellung, nicht eine Anzeige je
+ * Weg: wer mit Kinderwagen oder großem Koffer reist, tut das die ganze
+ * Reise. Der Server rechnet mit 1,1 m/s (StationWalks::SPEED); hier wird
+ * die Zeit aus Metern und Ebenenwechseln für das eigene Tempo neu gerechnet.
+ */
+export const WALK_PACES = {
+  langsam: { mps: 0.8, factor: 1.6, label: 'gemütlichem Tempo' },
+  normal: { mps: 1.1, factor: 1, label: 'normalem Tempo' },
+  zuegig: { mps: 1.4, factor: 0.8, label: 'zügigem Tempo' },
+};
+/** Zuschlag je Ebenenwechsel in Sekunden, wie StationWalks::LEVEL_CHANGE_S. */
+const LEVEL_CHANGE_S = { steps: 25, escalator: 20, elevator: 60 };
+let walkPace = 'normal';
+
+export function setWalkPace(p) {
+  walkPace = WALK_PACES[p] ? p : 'normal';
+}
+
+/** Minuten für einen gezeichneten Weg beim eingestellten Tempo. */
+export function walkMinutes(walk, pace = walkPace) {
+  const t = WALK_PACES[pace] || WALK_PACES.normal;
+  const wechsel = (walk.changes || []).reduce((s, c) => s + (LEVEL_CHANGE_S[c.kind] ?? 25), 0) * t.factor;
+  return Math.max(1, Math.ceil(((walk.meters || 0) / t.mps + wechsel) / 60));
+}
+
 function transferPlanBody(res, fromTrack, toTrack, stationName) {
   const platforms = res?.platforms || [];
 
@@ -1562,7 +1588,7 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
   if (walk && !res?.samePlatform) {
     const NAMEN = { steps: 'Treppe', escalator: 'Rolltreppe', elevator: 'Aufzug' };
     const wechsel = (walk.changes || []).map((c) => `${NAMEN[c.kind] || 'Treppe'} ${c.to > c.from ? 'hoch' : 'runter'}`);
-    line.textContent = `Etwa ${walk.meters} m zu Fuß, gut ${walk.minutes} min ab dem Bahnsteigzugang`
+    line.textContent = `Etwa ${walk.meters} m zu Fuß, gut ${walkMinutes(walk)} min bei ${WALK_PACES[walkPace].label} ab dem Bahnsteigzugang`
       + (wechsel.length ? ` · ${wechsel.join(', ')}` : '') + ' — der Weg ist eingezeichnet.';
     if (!walk.reviewed) {
       line.append(el('span', 'xfer__level', ' Prüfmodus: dieser Weg ist noch nicht abgenommen.'));
@@ -1997,7 +2023,12 @@ async function runInto(body, leg, state, actions) {
   }
 
   const out = [];
-  const gleich = (s, ort) => (ort?.id && String(s.id) === String(ort.id)) || s.name === ort?.name;
+  // Über Kennung, Namen - oder die Lage: die MVV schreibt "Freimann", die DB
+  // "Freimann, München". Ohne den dritten Weg fiel der Einstieg auf den
+  // ersten Halt, und der Zug "begann hier".
+  const nah = (s, ort) => s.lat != null && ort?.lat != null
+    && Math.hypot((s.lat - ort.lat) * 111320, (s.lon - ort.lon) * 111320 * Math.cos(ort.lat * Math.PI / 180)) < 250;
+  const gleich = (s, ort) => (ort?.id && String(s.id) === String(ort.id)) || s.name === ort?.name || nah(s, ort);
   let ein = stops.findIndex((s) => gleich(s, leg.from));
   let aus = stops.findIndex((s, i) => i > ein && gleich(s, leg.to));
   if (ein < 0) ein = 0;
