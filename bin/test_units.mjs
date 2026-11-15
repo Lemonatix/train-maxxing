@@ -1129,5 +1129,16 @@ console.log('\nPendelstrecken - nächster Pendeltag und Lage der Verbindung');
 }
 
 // ---------------------------------------------------------------------
+{
+  console.log('\nGehtempo beim Umsteigen');
+  const { walkMinutes } = await import('../public/assets/js/render.js');
+  const weg = { meters: 350, changes: [{ kind: 'escalator' }, { kind: 'steps' }] };
+  pruefe('normal: 350 m und zwei Ebenenwechsel', walkMinutes(weg, 'normal'), 7);
+  pruefe('gemütlich dauert länger', walkMinutes(weg, 'langsam') > walkMinutes(weg, 'normal'), true);
+  pruefe('zügig geht schneller', walkMinutes(weg, 'zuegig') < walkMinutes(weg, 'normal'), true);
+  pruefe('nie unter einer Minute', walkMinutes({ meters: 10, changes: [] }, 'zuegig'), 1);
+}
+
+// ---------------------------------------------------------------------
 console.log(`\n${gesamt - fehlgeschlagen} von ${gesamt} bestanden.`);
 process.exit(fehlgeschlagen === 0 ? 0 : 1);
