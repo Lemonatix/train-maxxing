@@ -57,6 +57,8 @@
   --green: #059669;
   --green-soft: rgba(5, 150, 105, 0.11);
   --amber: #b45309;
+  /* Laufweg im Umstiegsplan: kräftiges Gelb, auf hellen Kacheln noch sichtbar. */
+  --xwalk: #eab308;
   --amber-soft: rgba(234, 179, 8, 0.15);
   --rose: #e11d48;
   --rose-soft: rgba(225, 29, 72, 0.10);
@@ -127,6 +129,7 @@
   --green: #34d399;
   --green-soft: rgba(52, 211, 153, 0.14);
   --amber: #fbbf24;
+  --xwalk: #facc15;
   --amber-soft: rgba(251, 191, 36, 0.15);
   --rose: #fb7185;
   --rose-soft: rgba(251, 113, 133, 0.14);
@@ -1455,12 +1458,14 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   pointer-events: none;
 }
 .map__xwalk-casing { stroke: var(--map-casing); stroke-width: 6; opacity: 0.85; }
-.map__xwalk { stroke: var(--purple); stroke-width: 3; }
-.map__xwalk.is-unreviewed { stroke: var(--amber); stroke-dasharray: 6 4; }
+/* GELB, wie die Fußwege zwischen zwei Halten in der Karte darüber - ein
+   Laufweg ist ein Laufweg. Noch nicht abgenommen: gestrichelt. */
+.map__xwalk { stroke: var(--xwalk); stroke-width: 3.5; }
+.map__xwalk.is-unreviewed { stroke-dasharray: 6 4; opacity: 0.85; }
 .map__xwalk.is-other-level, .map__xwalk-casing.is-other-level { opacity: 0.3; }
 .map__xwalk-board {
   fill: none;
-  stroke: var(--purple);
+  stroke: var(--xwalk);
   stroke-width: 2;
   stroke-dasharray: 1 5;
   stroke-linecap: round;
@@ -5417,6 +5422,13 @@ details.is-opening[open] > :not(summary) {
 :is(.journey__details, details.section)[open] > summary::before {
   transform: rotate(90deg);
   transition-duration: var(--open-ms);
+}
+
+/* Zuklappen ohne CSS-Höhenanimation (Firefox, siehe app.js): [open] steht
+   bis zum Ende der Animation, das Dreieck soll aber gleich mitdrehen. */
+details.is-closing > summary::before {
+  transform: none !important;
+  transition-duration: var(--close-ms, 340ms) !important;
 }
 
 /* Tab-Wechsel: die neue Ansicht gleitet ein. */
