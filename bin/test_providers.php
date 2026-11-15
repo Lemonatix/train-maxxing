@@ -1111,13 +1111,18 @@ echo "\nStreckenverlauf - kaputte Abstecher von HAFAS\n";
 $halte = [[48.3994, 9.9826], [48.2311, 9.8482], [48.1018, 9.7931], [47.9531, 9.6441], [47.7845, 9.6061], [47.6532, 9.4739]];
 $linie = [[48.3994, 9.9826], [48.2316, 9.8484], [48.1018, 9.7931], [47.9531, 9.6441], [47.7845, 9.6061],
     [49.7968, 9.9516], [51.4279, 9.4641], [52.1014, 9.3757], [49.7968, 9.9516], [47.7000, 9.5580], [47.6532, 9.4739]];
-$sauber = OebbHafas::dropDetours($linie, $halte);
+$sauber = OebbHafas::cleanLine($linie, $halte);
 pruefe('Abstecher bis Hannover fällt weg', max(array_column($sauber, 0)) < 48.5, true);
 pruefe('die echte Strecke bleibt', count($sauber), 7);
-$zurueck = OebbHafas::dropDetours([[48.3994, 9.9826], [48.1018, 9.7931], [47.9939, 9.6686], [48.3564, 9.9236],
+$zurueck = OebbHafas::cleanLine([[48.3994, 9.9826], [48.2311, 9.8482], [48.1018, 9.7931], [47.9939, 9.6686], [48.3564, 9.9236],
     [47.9939, 9.6686], [47.7845, 9.6061], [47.6532, 9.4739]], $halte);
 pruefe('Rücksprung von Bad Schussenried bis kurz vor Ulm fällt weg',
     in_array([48.3564, 9.9236], $zurueck, true), false);
+// Kopfbahnhof: hinein und auf demselben Gleis wieder hinaus. Der Abstecher
+// muss bleiben, sonst liegt Leipzig Hbf 14 km neben der Linie (ICE 508).
+$kopf = [[51.30, 12.20], [51.33, 12.30], [51.345, 12.382], [51.33, 12.30], [51.40, 12.32], [51.62, 12.32]];
+$kopfHalte = [[51.30, 12.20], [51.345, 12.382], [51.62, 12.32]];
+pruefe('Kopfbahnhof: Abstecher in den Bahnhof bleibt', in_array([51.345, 12.382], OebbHafas::cleanLine($kopf, $kopfHalte), true), true);
 pruefe('lange Strecke ohne Halt: Bögen bleiben',
     count(OebbHafas::dropDetours([[48.14, 11.56], [48.6, 10.6], [48.40, 9.98]], [[48.14, 11.56], [48.40, 9.98]])), 3);
 
