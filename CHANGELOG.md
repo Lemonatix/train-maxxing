@@ -81,7 +81,6 @@ erst mit dem Update auf 1.3.
   richtigen Richtung.
 - **Tipp auf den verfolgten Punkt:** Bei U-Bahn, Bus und manchen DB-Zügen
   passierte nichts. Jetzt öffnet sich der Zuglauf.
-
 - **Deutschlandticket bei MVG-Bussen:** Eine Fahrt, die vollständig im
   Deutschlandticket liegt, bekam trotzdem einen Preis („ca. 2,35 €“).
 - **Umstieg an derselben Haltestelle:** Statt „Garching → Garching, Umstieg
