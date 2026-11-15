@@ -35,6 +35,10 @@ erst mit dem Update auf 1.3.
   und Minuten: in Pasing durch die Unterführung, in Zürich an den
   Bahnsteigköpfen der Halle (Gleise 3–18, die unterirdischen Gleise folgen
   später).
+- **Gehtempo beim Umsteigen** in den Einstellungen: gemütlich (Gepäck,
+  Kinder, Kinderwagen), normal oder zügig. Die Minuten der gezeichneten
+  Umstiegswege richten sich danach, und der Plan sagt, mit welchem Tempo
+  gerechnet ist.
 - **Umstiegswege zu U-Bahn und S-Bahn am München Hbf** (in Vorbereitung).
   Die Wege zur S-Bahn tief und zu den U-Bahnen sind gezeichnet. Die U-Bahn
   findet ihren Bahnsteig über Linie und Richtung, weil der Fahrplan für sie
@@ -48,8 +52,9 @@ erst mit dem Update auf 1.3.
 - **Live-Karte in Pünktlichkeitsfarben:** grün pünktlich, gelb ab 3 Minuten,
   rot ab 10 Minuten, grau ohne Echtzeitdaten. Die Verspätung steht im
   Tooltip. Beim Drüberfahren bleibt die Farbe erhalten.
-- **Der verfolgte Zug ist blau**, wie seine Strecke. Rot heißt jetzt „mehr
-  als zehn Minuten zu spät“.
+- **Der verfolgte Zug ist ein großer weißer Punkt mit blauem Ring** und
+  seinem Namen daneben. Auf seiner eigenen blauen Strecke war er vorher kaum
+  zu sehen. Rot heißt jetzt „mehr als zehn Minuten zu spät“.
 - Symbole an den Reitern und Platzhalter, solange Ergebnisse laden.
 - **Fahrtdetails auf dem Handy:** Der Knopf „Fahrtinfo“ bleibt oben rechts.
   Zeit und Ort stehen in einer Zeile, lange Ortsnamen brechen in ihrer
@@ -69,6 +74,13 @@ erst mit dem Update auf 1.3.
 - Die Baustellen stehen wieder unter der Suche.
 
 ### Behoben
+
+- **Zuglauf von U-Bahn, Tram und Bus:** Er begann an der eigenen
+  Einstiegshaltestelle. Die U6 ab Freimann „begann in Freimann“. Jetzt kommt
+  der ganze Lauf von der MVV, mit Prognose an jedem Halt, und in der
+  richtigen Richtung.
+- **Tipp auf den verfolgten Punkt:** Bei U-Bahn, Bus und manchen DB-Zügen
+  passierte nichts. Jetzt öffnet sich der Zuglauf.
 
 - **Deutschlandticket bei MVG-Bussen:** Eine Fahrt, die vollständig im
   Deutschlandticket liegt, bekam trotzdem einen Preis („ca. 2,35 €“).
