@@ -989,17 +989,46 @@ function handleTrainSearch(Http $http, array $config, Cache $cache): void
     // "RJ80" und "rj 80" sind derselbe Zug.
     $q = (string) preg_replace('/^(\p{L}+)\s*(\d)/u', '$1 $2', mb_strtoupper($q));
 
-    $key = 'tsearch3:' . $date . ':' . $q;
-    $cached = $cache->get($key, 300);
-    if ($cached !== null) {
-        ok(['trains' => $cached, 'cached' => true]);
+    // In der Nähe von München zuerst die Münchner Linien: wer an der
+    // Studentenstadt "Bus 181" sucht, meint nicht den in Gstaad.
+    $nah = preg_match('/^(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)$/', (string) ($_GET['near'] ?? ''), $nm)
+        && Mvg::inArea((float) $nm[1], (float) $nm[2]);
+
+    $key = 'tsearch4:' . $date . ':' . $q;
+    $cached = $cache->get($key, 120);
+    if ($cached === null) {
+        $res = (new OebbHafas($http, $config['providers']['oebb']))->trainSearch($q, $date);
+        // DIE MÜNCHNER LINIEN aus der MVV-Auskunft: Bus, Tram, U- und
+        // S-Bahn, die JourneyMatch dort nicht findet. Heute ab einer Stunde
+        // vor jetzt, an einem anderen Tag ab sechs Uhr früh.
+        $mvv = [];
+        $efa = new MvvEfa($http, $config['providers']['mvv'] ?? []);
+        if ($efa->isEnabled()) {
+            $tz = new DateTimeZone('Europe/Berlin');
+            $heute = (new DateTimeImmutable('now', $tz))->format('Y-m-d');
+            $ab = $date === $heute ? time() - 3600 : (new DateTimeImmutable($date . ' 06:00', $tz))->getTimestamp();
+            try {
+                $mvv = $efa->lineRuns($q, $ab);
+            } catch (Throwable) {
+                $mvv = [];
+            }
+        }
+        if (!$res['ok'] && $mvv === []) {
+            ok(['trains' => [], 'error' => $res['error']]);
+        }
+        // Derselbe Münchner Zug aus beiden Quellen (S-Bahn): einmal.
+        $hafas = $res['ok'] ? $res['data'] : [];
+        $schon = [];
+        foreach ($mvv as $t) {
+            $schon[$t['line'] . '|' . substr((string) $t['departure'], 0, 16)] = true;
+        }
+        $hafas = array_values(array_filter($hafas, static fn($t) =>
+            !isset($schon[$t['line'] . '|' . substr((string) $t['departure'], 0, 16)])));
+        $cached = ['hafas' => $hafas, 'mvv' => $mvv];
+        $cache->set($key, $cached);
     }
-    $res = (new OebbHafas($http, $config['providers']['oebb']))->trainSearch($q, $date);
-    if (!$res['ok']) {
-        ok(['trains' => [], 'error' => $res['error']]);
-    }
-    $cache->set($key, $res['data']);
-    ok(['trains' => $res['data'], 'cached' => false]);
+    $liste = $nah ? array_merge($cached['mvv'], $cached['hafas']) : array_merge($cached['hafas'], $cached['mvv']);
+    ok(['trains' => $liste, 'cached' => false]);
 }
 
 /**
