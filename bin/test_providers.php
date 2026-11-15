@@ -1114,6 +1114,10 @@ $linie = [[48.3994, 9.9826], [48.2316, 9.8484], [48.1018, 9.7931], [47.9531, 9.6
 $sauber = OebbHafas::dropDetours($linie, $halte);
 pruefe('Abstecher bis Hannover fällt weg', max(array_column($sauber, 0)) < 48.5, true);
 pruefe('die echte Strecke bleibt', count($sauber), 7);
+$zurueck = OebbHafas::dropDetours([[48.3994, 9.9826], [48.1018, 9.7931], [47.9939, 9.6686], [48.3564, 9.9236],
+    [47.9939, 9.6686], [47.7845, 9.6061], [47.6532, 9.4739]], $halte);
+pruefe('Rücksprung von Bad Schussenried bis kurz vor Ulm fällt weg',
+    in_array([48.3564, 9.9236], $zurueck, true), false);
 pruefe('lange Strecke ohne Halt: Bögen bleiben',
     count(OebbHafas::dropDetours([[48.14, 11.56], [48.6, 10.6], [48.40, 9.98]], [[48.14, 11.56], [48.40, 9.98]])), 3);
 
