@@ -180,6 +180,13 @@ export function trainLabel(t) {
  * @param {?object} a Zug mit {jid, category, line, trainNumber, name}
  * @param {?object} b dito
  */
+/**
+ * Kennung des verfolgten Punktes, wenn sein Abschnitt keine jid hat (U-Bahn,
+ * Bus, DB-Abschnitte). Vorher bekam er dann keine - und ein Tipp darauf tat
+ * nichts. Die App erkennt sie und holt den Lauf über den Abschnitt (`leg`).
+ */
+export const TRACKED_JID = 'verfolgt';
+
 export function sameTrain(a, b) {
   if (!a || !b) return false;
   if (a.jid && b.jid && a.jid === b.jid) return true;
@@ -2567,6 +2574,8 @@ export class RouteMap {
 
     const own = {
       ...(ident || {}),
+      // Ohne jid ist der Punkt trotzdem antippbar - siehe TRACKED_JID.
+      jid: ident?.jid || TRACKED_JID,
       lat: pos.lat,
       lon: pos.lon,
       onRoute: true,
@@ -2627,14 +2636,14 @@ export class RouteMap {
       const halo = document.createElementNS(NS, 'circle');
       halo.setAttribute('cx', x.toFixed(1));
       halo.setAttribute('cy', y.toFixed(1));
-      halo.setAttribute('r', t === focus ? '12' : '7');
+      halo.setAttribute('r', t === focus ? '12' : t === own ? '14' : '7');
       halo.setAttribute('class', 'map__train-halo');
       g.append(halo);
 
       const dot = document.createElementNS(NS, 'circle');
       dot.setAttribute('cx', x.toFixed(1));
       dot.setAttribute('cy', y.toFixed(1));
-      dot.setAttribute('r', t === focus ? '5' : '3.2');
+      dot.setAttribute('r', t === focus ? '5' : t === own ? '6' : '3.2');
       dot.setAttribute('class', 'map__train-dot');
       g.append(dot);
 
@@ -2648,12 +2657,13 @@ export class RouteMap {
 
       // Ab Stadtzoom steht die Linie neben U-Bahn und Tram - bei zwanzig
       // Punkten in der Innenstadt fragt man sonst jeden einzeln ab.
-      if (t === focus || (stadt && this.zoom >= 13 && t.line)) {
+      if (t === focus || t === own || (stadt && this.zoom >= 13 && t.line)) {
         const lab = document.createElementNS(NS, 'text');
         lab.setAttribute('x', (x + 6).toFixed(1));
         lab.setAttribute('y', (y - 5).toFixed(1));
         lab.setAttribute('class', 'map__train-label');
-        lab.textContent = t === focus ? trainLabel(t) : t.line;
+        lab.setAttribute('x', (x + (t === own ? 10 : 6)).toFixed(1));
+        lab.textContent = t === focus || t === own ? trainLabel(t) : t.line;
         g.append(lab);
       }
 
