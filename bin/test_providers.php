@@ -1087,5 +1087,21 @@ $w = $zh->route('4', '16', true);
 pruefe('Zürich 4 -> 16: an den Bahnsteigköpfen entlang, unter 200 m', $w !== null && $w['meters'] < 200, true);
 pruefe('Zürich: Gleise unter der Halle noch nicht im Netz', $zh->route('8', '33', true), null);
 
+// ---------------------------------------------------------------------
+echo "\nWegenetze - kein Umweg über 700 m in irgendeinem Bahnhof\n";
+
+foreach (glob(__DIR__ . '/../public/api/data/walks/[0-9]*.json') ?: [] as $datei) {
+    $eva = basename($datei, '.json');
+    $netz = StationWalks::load(__DIR__ . '/../public/api/data/walks', $eva);
+    $gleise = array_keys($netz->raw()['tracks']);
+    $laengster = 0;
+    foreach ($gleise as $i => $a) {
+        foreach (array_slice($gleise, $i + 1) as $b) {
+            $laengster = max($laengster, $netz->route((string) $a, (string) $b, true)['meters'] ?? 0);
+        }
+    }
+    pruefe("$eva ({$netz->raw()['name']}): längster Weg {$laengster} m", $laengster > 0 && $laengster <= 700, true);
+}
+
 echo "\n" . ($gesamt - $fehler) . " von $gesamt bestanden.\n";
 exit($fehler === 0 ? 0 : 1);
