@@ -1103,5 +1103,19 @@ foreach (glob(__DIR__ . '/../public/api/data/walks/[0-9]*.json') ?: [] as $datei
     pruefe("$eva ({$netz->raw()['name']}): längster Weg {$laengster} m", $laengster > 0 && $laengster <= 700, true);
 }
 
+// ---------------------------------------------------------------------
+echo "\nStreckenverlauf - kaputte Abstecher von HAFAS\n";
+
+// RE 4249 Ulm - Friedrichshafen, wie HAFAS ihn am 16.11.2026 lieferte:
+// nach Ravensburg ein Abstecher über Würzburg und Kassel bis Hannover.
+$halte = [[48.3994, 9.9826], [48.2311, 9.8482], [48.1018, 9.7931], [47.9531, 9.6441], [47.7845, 9.6061], [47.6532, 9.4739]];
+$linie = [[48.3994, 9.9826], [48.2316, 9.8484], [48.1018, 9.7931], [47.9531, 9.6441], [47.7845, 9.6061],
+    [49.7968, 9.9516], [51.4279, 9.4641], [52.1014, 9.3757], [49.7968, 9.9516], [47.7000, 9.5580], [47.6532, 9.4739]];
+$sauber = OebbHafas::dropDetours($linie, $halte);
+pruefe('Abstecher bis Hannover fällt weg', max(array_column($sauber, 0)) < 48.5, true);
+pruefe('die echte Strecke bleibt', count($sauber), 7);
+pruefe('lange Strecke ohne Halt: Bögen bleiben',
+    count(OebbHafas::dropDetours([[48.14, 11.56], [48.6, 10.6], [48.40, 9.98]], [[48.14, 11.56], [48.40, 9.98]])), 3);
+
 echo "\n" . ($gesamt - $fehler) . " von $gesamt bestanden.\n";
 exit($fehler === 0 ? 0 : 1);
