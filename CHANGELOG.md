@@ -40,9 +40,9 @@ erst mit dem Update auf 1.3.
   und Minuten: in Pasing durch die Unterführung, in Zürich an den
   Bahnsteigköpfen der Halle (Gleise 3–18, die unterirdischen Gleise folgen
   später).
-- **Weitere Umstiegswege (in Prüfung):** Augsburg Hbf, München Ost,
-  Nürnberg Hbf und Stuttgart Hbf sind gezeichnet und erscheinen, sobald sie
-  geprüft sind.
+- **Weitere Umstiegswege:** Augsburg Hbf, München Ost, Nürnberg Hbf und
+  Stuttgart Hbf (Gleise 1–16) – jeweils mit Metern und Minuten vom
+  Ankunfts- zum Abfahrtsgleis.
 - **Gehtempo beim Umsteigen** in den Einstellungen: gemütlich (Gepäck,
   Kinder, Kinderwagen), normal oder zügig. Die Minuten der gezeichneten
   Umstiegswege richten sich danach, und der Plan sagt, mit welchem Tempo
