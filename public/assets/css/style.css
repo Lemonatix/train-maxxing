@@ -1555,25 +1555,32 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
    "mehr als zehn Minuten zu spät". Er wird ein zweites Mal gezeichnet, über
    der verfolgten Route; die Farbe gewinnt deshalb über die Pünktlichkeit. */
 .map__train.is-tracked { --train-color: var(--tracked); }
+/* WEISS MIT BLAUEM RING, nicht blau auf blau: der Punkt liegt auf seiner
+   eigenen, blauen Strecke und verschwand darin. Größer, mit Hof und mit
+   Namen daneben. */
 .map__train.is-tracked .map__train-dot {
-  fill: var(--tracked);
-  stroke-width: 2;
+  fill: #ffffff;
+  stroke: var(--tracked);
+  stroke-width: 3.2;
 }
 
-.map__train.is-tracked .map__train-halo { fill: var(--tracked); opacity: 0.3; }
+.map__train.is-tracked .map__train-halo { fill: var(--tracked); opacity: 0.28; }
+.map__train.is-tracked .map__train-label { fill: var(--text); font-size: 10.5px; }
 
 /* Hochgerechnete Position: derselbe Punkt, nur hohl. Kommt vor, wenn der Zug
    nicht in der Positionsantwort steht und seine Stelle aus dem Fahrplan
    geschätzt wurde — der Tooltip sagt es dann auch. */
 .map__train.is-tracked.is-estimated .map__train-dot {
-  fill: var(--map-stop-fill);
+  fill: #ffffff;
   stroke: var(--tracked);
+  stroke-dasharray: 3 2;
 }
 
 .map__train.is-tracked:hover .map__train-dot,
 .map__train.is-tracked:focus-visible .map__train-dot {
-  fill: var(--map-stop-fill);
+  fill: #ffffff;
   stroke: var(--tracked);
+  stroke-width: 4;
 }
 
 /* Der Zug aus der Zugsuche: größer, mit kräftigem Hof und Beschriftung -
