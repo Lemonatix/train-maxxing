@@ -57,9 +57,22 @@ final class MvvEfa
         }
 
         $linie = self::norm($leg['line']);
-        $finde = static function (?array $liste, int $plan, ?string $fahrt) use ($linie): ?array {
+        // RICHTUNG: In Freimann fährt die U6 in beide Richtungen fast zur
+        // selben Minute; nach Linie und Zeit allein kam der Zug nach
+        // Fröttmaning heraus statt der nach Marienplatz. Wo die Tafel den
+        // Lauf mitliefert, muss das Ziel NACH dem Einstieg kommen.
+        $richtig = static function (array $e) use ($leg): bool {
+            $ids = array_column($e['seq'] ?? [], 'id');
+            if ($ids === []) {
+                return true;
+            }
+            $von = array_search($leg['from'], $ids, true);
+            $bis = array_search($leg['to'], $ids, true);
+            return $von === false || $bis === false || $bis > $von;
+        };
+        $finde = static function (?array $liste, int $plan, ?string $fahrt) use ($linie, $richtig): ?array {
             foreach ($liste ?? [] as $e) {
-                if ($e['line'] !== $linie || abs($e['planned'] - $plan) > 90) {
+                if ($e['line'] !== $linie || abs($e['planned'] - $plan) > 90 || !$richtig($e)) {
                     continue;
                 }
                 if ($fahrt !== null && $e['trip'] !== null && $e['trip'] !== $fahrt) {
@@ -83,6 +96,33 @@ final class MvvEfa
         $arrDelay = $arrReal !== null ? (int) round(($arrReal - $tArr) / 60) : null;
         $iso = static fn(?int $t): ?string => $t === null ? null : date('c', $t);
 
+        // Der ganze Lauf, wo die Tafel ihn mitliefert. Die Zeiten jedes
+        // Halts sind dort schon mit Prognose; Ein- und Ausstieg behalten die
+        // Namen der Suche, damit die App sie im Lauf wiederfindet.
+        $stops = null;
+        $seq = $a['seq'] ?? $b['seq'] ?? [];
+        if (count($seq) >= 2) {
+            $minuten = static fn(?int $plan, ?int $ist): ?int => $plan !== null && $ist !== null ? (int) round(($ist - $plan) / 60) : null;
+            $stops = [];
+            foreach ($seq as $h) {
+                $stop = [
+                    'id' => 'mvg:' . $h['id'], 'name' => $h['name'],
+                    'lat' => $h['lat'], 'lon' => $h['lon'],
+                    'arrival' => $iso($h['arr']), 'arrivalReal' => $iso($h['arrReal']),
+                    'departure' => $iso($h['dep']), 'departureReal' => $iso($h['depReal']),
+                    'delay' => $minuten($h['dep'], $h['depReal']) ?? $minuten($h['arr'], $h['arrReal']),
+                    'platform' => $h['platform'], 'cancelled' => false,
+                ];
+                if ($h['id'] === $leg['from'] && ($leg['fromName'] ?? '') !== '') {
+                    $stop['name'] = $leg['fromName'];
+                }
+                if ($h['id'] === $leg['to'] && ($leg['toName'] ?? '') !== '') {
+                    $stop['name'] = $leg['toName'];
+                }
+                $stops[] = $stop;
+            }
+        }
+
         return ['ok' => true, 'error' => null, 'data' => [
             'category'    => (string) ($a['category'] ?? $b['category'] ?? ''),
             'line'        => $leg['line'],
@@ -92,7 +132,7 @@ final class MvvEfa
             'delay'       => $depDelay ?? $arrDelay,
             'hasRealtime' => $depReal !== null || ($b['real'] ?? null) !== null,
             'cancelled'   => (bool) (($a['cancelled'] ?? false) || ($b['cancelled'] ?? false)),
-            'stops'       => [
+            'stops'       => $stops ?? [
                 [
                     'id' => 'mvg:' . $leg['from'], 'name' => $leg['fromName'] ?? '',
                     'departure' => $leg['dep'], 'departureReal' => $iso($depReal), 'delay' => $depDelay,
@@ -169,6 +209,13 @@ final class MvvEfa
             'itdDate'      => $t->format('Ymd'),
             'itdTime'      => $t->format('Hi'),
             'limit'        => 40,
+            // DER GANZE LAUF je Abfahrt (previousLocations/onwardLocations),
+            // mit Koordinaten. Ohne ihn bestand der Lauf einer U-Bahn nur aus
+            // Ein- und Ausstieg - und die App hielt Freimann für den
+            // Startbahnhof der U6. Geht nur zusammen mit depType=stopEvents.
+            'includeCompleteStopSeq' => 1,
+            'depType'      => 'stopEvents',
+            'coordOutputFormat' => 'WGS84[dd.ddddd]',
         ]);
     }
 
@@ -205,9 +252,50 @@ final class MvvEfa
                 'cancelled' => array_filter($status, static fn(string $s): bool => str_contains($s, 'CANCEL')) !== [],
                 'direction' => (string) ($tr['destination']['name'] ?? ''),
                 'category'  => (string) ($tr['product']['name'] ?? ''),
+                'seq'       => self::sequence($e),
             ];
         }
         return $out;
+    }
+
+    /**
+     * Der ganze Lauf einer Abfahrt: vorige Halte, dieser, folgende - je mit
+     * Plan- und Ist-Zeiten und Lage. Leer, wenn die Antwort ihn nicht hat.
+     *
+     * @return array<int,array{id:string,name:string,lat:?float,lon:?float,arr:?int,arrReal:?int,dep:?int,depReal:?int,platform:?string}>
+     */
+    private static function sequence(array $e): array
+    {
+        $vorher = (array) ($e['previousLocations'] ?? []);
+        $nachher = (array) ($e['onwardLocations'] ?? []);
+        if ($vorher === [] && $nachher === []) {
+            return [];
+        }
+        $zeit = static function (array $l, string $k): ?int {
+            $t = isset($l[$k]) ? strtotime((string) $l[$k]) : false;
+            return $t === false ? null : $t;
+        };
+        $halt = static function (array $l) use ($zeit): array {
+            $ort = $l['parent'] ?? [];
+            $c = $l['coord'] ?? $ort['coord'] ?? null;
+            return [
+                'id'       => (string) ($ort['id'] ?? $l['id'] ?? ''),
+                'name'     => (string) ($ort['name'] ?? $l['name'] ?? ''),
+                'lat'      => is_array($c) ? (float) $c[0] : null,
+                'lon'      => is_array($c) ? (float) $c[1] : null,
+                'arr'      => $zeit($l, 'arrivalTimePlanned'),
+                'arrReal'  => $zeit($l, 'arrivalTimeEstimated'),
+                'dep'      => $zeit($l, 'departureTimePlanned'),
+                'depReal'  => $zeit($l, 'departureTimeEstimated'),
+                'platform' => self::platform($l['properties'] ?? []),
+            ];
+        };
+        $hier = $halt($e['location'] ?? []);
+        $hier['dep'] = $zeit($e, 'departureTimePlanned');
+        $hier['depReal'] = $zeit($e, 'departureTimeEstimated');
+        $hier['arr'] = $zeit($e, 'arrivalTimePlanned');
+        $hier['arrReal'] = $zeit($e, 'arrivalTimeEstimated');
+        return array_merge(array_map($halt, $vorher), [$hier], array_map($halt, $nachher));
     }
 
     /** "Gleis 1" -> "1", "Pos. 2" -> "2"; ohne Nummer null. */
