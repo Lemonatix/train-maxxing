@@ -1398,7 +1398,84 @@ final class OebbHafas
             }
         }
 
-        return self::dropDetours($this->thin($points, $max, $anker), $anker);
+        return self::cleanLine($this->thin($points, $max, $anker), $anker);
+    }
+
+    /**
+     * Kaputte Linienzüge von HAFAS bereinigen: erst Schleifen, dann Punkte
+     * weit neben der Strecke. Siehe dropLoops() und dropDetours().
+     */
+    public static function cleanLine(array $points, array $stops): array
+    {
+        return self::dropDetours(self::dropLoops($points, $stops), $stops);
+    }
+
+    /**
+     * Schleifen aus einem Linienzug nehmen: Kehrt er an eine Stelle zurück,
+     * an der er schon war (unter 500 m, aber mindestens 2 km Weg dazwischen),
+     * fällt das Stück dazwischen weg.
+     *
+     * Der Zuglauf des RE 4249 fuhr von Bad Schussenried zurück bis Biberach
+     * und wieder hin - dicht an der echten Strecke, also durch keine
+     * Abstandsprüfung zu fangen. Ein echter Zug fährt eine Strecke nicht
+     * zweimal. AUSNAHME Kopfbahnhof: Dort fährt er tatsächlich hinein und
+     * auf demselben Gleis wieder hinaus. Deshalb gilt das Ergebnis nur, wenn
+     * danach jeder Halt höchstens 1,5 km von der Linie entfernt liegt -
+     * sonst bleibt der Linienzug, wie er war.
+     *
+     * @param array<int,array{0:float,1:float}> $points
+     * @param array<int,array{0:float,1:float}> $stops
+     */
+    public static function dropLoops(array $points, array $stops): array
+    {
+        if (count($points) < 4) {
+            return $points;
+        }
+        $m = static function (array $a, array $b): float {
+            $kx = cos(deg2rad(($a[0] + $b[0]) / 2));
+            return hypot(($a[0] - $b[0]) * 111320, ($a[1] - $b[1]) * 111320 * $kx);
+        };
+        $stapel = [];   // [punkt, Weg bis hierher in m]
+        foreach ($points as $p) {
+            $weg = $stapel === [] ? 0.0 : end($stapel)[1] + $m(end($stapel)[0], $p);
+            $zurueck = null;
+            for ($k = count($stapel) - 2; $k >= 0; $k--) {
+                if ($weg - $stapel[$k][1] > 2000 && $m($stapel[$k][0], $p) < 500) {
+                    $zurueck = $k;
+                }
+            }
+            if ($zurueck !== null) {
+                $stapel = array_slice($stapel, 0, $zurueck + 1);
+                continue;
+            }
+            $stapel[] = [$p, $weg];
+        }
+        $ohne = array_column($stapel, 0);
+        if (count($ohne) === count($points)) {
+            return $points;
+        }
+        foreach ($stops as $h) {
+            $nah = false;
+            for ($i = 1, $n = count($ohne); $i < $n && !$nah; $i++) {
+                $nah = self::segmentMeters($h, $ohne[$i - 1], $ohne[$i]) <= 1500;
+            }
+            if (!$nah && count($ohne) > 1) {
+                return $points;
+            }
+        }
+        return $ohne;
+    }
+
+    /** Abstand eines Punktes von einer Strecke a-b, in Metern. */
+    private static function segmentMeters(array $p, array $a, array $b): float
+    {
+        $kx = 111320 * cos(deg2rad($p[0]));
+        $ax = ($a[1] - $p[1]) * $kx; $ay = ($a[0] - $p[0]) * 111320;
+        $bx = ($b[1] - $p[1]) * $kx; $by = ($b[0] - $p[0]) * 111320;
+        $dx = $bx - $ax; $dy = $by - $ay;
+        $l2 = $dx * $dx + $dy * $dy;
+        $t = $l2 > 0 ? max(0.0, min(1.0, -($ax * $dx + $ay * $dy) / $l2)) : 0.0;
+        return hypot($ax + $t * $dx, $ay + $t * $dy);
     }
 
     /**
@@ -1429,30 +1506,20 @@ final class OebbHafas
             [$dx, $dy] = $km($stops[$i - 1], $stops[$i]);
             $stuecke[] = [$stops[$i - 1], $dx, $dy, max(20.0, hypot($dx, $dy) / 3)];
         }
-        // NUR VORWÄRTS: Jeder Punkt bekommt eine Stelle entlang der Halte
-        // (Nummer des Stücks plus Anteil darin). Fällt sie zurück, gehört der
-        // Punkt zu einer Schleife - beim RE 4249 sprang die Linie von Bad
-        // Schussenried zurück bis kurz vor Ulm, nah genug an der echten
-        // Strecke, um die Abstandsprüfung zu bestehen.
+        // NUR DER ABSTAND, KEINE RICHTUNG. Eine Regel "nur vorwärts entlang
+        // der Halte" schnitt bei Kopfbahnhöfen den Abstecher in den Bahnhof
+        // ab (ICE 508: Leipzig Hbf lag danach 14 km neben der Linie).
+        // Rücksprünge und Pendelstücke nimmt dropLoops().
         $out = [];
-        $stelle = 0.0;
         foreach ($points as $p) {
-            $beste = null;
-            foreach ($stuecke as $k => [$a, $dx, $dy, $erlaubt]) {
+            foreach ($stuecke as [$a, $dx, $dy, $erlaubt]) {
                 [$px, $py] = $km($a, $p);
                 $l2 = $dx * $dx + $dy * $dy;
                 $t = $l2 > 0 ? max(0.0, min(1.0, ($px * $dx + $py * $dy) / $l2)) : 0.0;
-                $abstand = hypot($px - $t * $dx, $py - $t * $dy);
-                if ($abstand > $erlaubt || $k + $t < $stelle - 0.05) {
-                    continue;
+                if (hypot($px - $t * $dx, $py - $t * $dy) <= $erlaubt) {
+                    $out[] = $p;
+                    continue 2;
                 }
-                if ($beste === null || $abstand < $beste[0]) {
-                    $beste = [$abstand, $k + $t];
-                }
-            }
-            if ($beste !== null) {
-                $out[] = $p;
-                $stelle = max($stelle, $beste[1]);
             }
         }
         return count($out) >= 2 ? $out : $points;
