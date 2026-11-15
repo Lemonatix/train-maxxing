@@ -373,8 +373,8 @@ bis 40 m auf derselben Ebene) kam für 8 → 33 ein Weg von über 1 km heraus.
 Löwenstrasse (31–34) und Museumstrasse (41–44) fehlen deshalb, bis jemand sie
 von Hand zeichnet. Beide Netze sind am 14. November 2026 abgenommen.
 
-**Entwürfe Augsburg Hbf, München Ost, Nürnberg Hbf, Stuttgart Hbf (15. November
-2026).** Alle Gleispaare verbunden, längster Weg 130–210 m, jeder Wechsel durch
+**Augsburg Hbf, München Ost, Nürnberg Hbf, Stuttgart Hbf (15. November
+2026, abgenommen).** Alle Gleispaare verbunden, längster Weg 130–210 m, jeder Wechsel durch
 die Unterführung bzw. über den Querbahnsteig. Augsburg ohne die „Gleise“
 101/501/801/901 (Teilstücke von Bahnsteigen in OSM), Stuttgart ohne die S-Bahn
 tief (Umweg von 1,1 km im Entwurf). Ulm Hbf fehlt: Dort sind die Bahnsteige in
