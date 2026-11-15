@@ -1429,16 +1429,30 @@ final class OebbHafas
             [$dx, $dy] = $km($stops[$i - 1], $stops[$i]);
             $stuecke[] = [$stops[$i - 1], $dx, $dy, max(20.0, hypot($dx, $dy) / 3)];
         }
+        // NUR VORWÄRTS: Jeder Punkt bekommt eine Stelle entlang der Halte
+        // (Nummer des Stücks plus Anteil darin). Fällt sie zurück, gehört der
+        // Punkt zu einer Schleife - beim RE 4249 sprang die Linie von Bad
+        // Schussenried zurück bis kurz vor Ulm, nah genug an der echten
+        // Strecke, um die Abstandsprüfung zu bestehen.
         $out = [];
+        $stelle = 0.0;
         foreach ($points as $p) {
-            foreach ($stuecke as [$a, $dx, $dy, $erlaubt]) {
+            $beste = null;
+            foreach ($stuecke as $k => [$a, $dx, $dy, $erlaubt]) {
                 [$px, $py] = $km($a, $p);
                 $l2 = $dx * $dx + $dy * $dy;
                 $t = $l2 > 0 ? max(0.0, min(1.0, ($px * $dx + $py * $dy) / $l2)) : 0.0;
-                if (hypot($px - $t * $dx, $py - $t * $dy) <= $erlaubt) {
-                    $out[] = $p;
-                    continue 2;
+                $abstand = hypot($px - $t * $dx, $py - $t * $dy);
+                if ($abstand > $erlaubt || $k + $t < $stelle - 0.05) {
+                    continue;
                 }
+                if ($beste === null || $abstand < $beste[0]) {
+                    $beste = [$abstand, $k + $t];
+                }
+            }
+            if ($beste !== null) {
+                $out[] = $p;
+                $stelle = max($stelle, $beste[1]);
             }
         }
         return count($out) >= 2 ? $out : $points;
