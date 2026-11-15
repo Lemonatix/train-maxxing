@@ -178,19 +178,40 @@ if (!HOEHE_PER_CSS) {
     const summary = e.target.closest?.('summary');
     const d = summary?.parentElement;
     if (!(d instanceof HTMLDetailsElement) || !d.matches(GLEITEND) || summary !== d.querySelector(':scope > summary')) return;
-    const zu = summary.offsetHeight;
+    // DIE HÖHE IM ZUGEKLAPPTEN ZUSTAND, nicht die der Überschrift: die
+    // Zwischenhalte sind zu 25,6 px hoch, die Überschrift aber nur 19 px
+    // (Zeilenhöhe um die inline-block-Zeile). Mit 19 px schrumpfte der
+    // Bereich in Firefox beim Aufklappen erst und sprang beim Zuklappen am
+    // Ende - das Zucken. Vor dem Öffnen lässt sie sich direkt messen; beim
+    // Schließen gilt die gemerkte, sonst die eines zugeklappten Abbilds.
+    const zuHoehe = () => {
+      if (d._zuHoehe) return d._zuHoehe;
+      const abbild = d.cloneNode(false);
+      abbild.open = false;
+      abbild.append(summary.cloneNode(true));
+      abbild.style.cssText = `position:absolute;visibility:hidden;pointer-events:none;width:${d.getBoundingClientRect().width}px`;
+      d.after(abbild);
+      const h = abbild.getBoundingClientRect().height;
+      abbild.remove();
+      return h;
+    };
     if (d.open) {
       // Zuklappen: erst gleiten, dann wirklich schließen.
       e.preventDefault();
-      gleite(d, d.offsetHeight, zu, ms(d, '--close-ms', 340), () => { d.open = false; });
+      gleite(d, d.getBoundingClientRect().height, zuHoehe(), ms(d, '--close-ms', 340), () => { d.open = false; });
     } else {
+      const zu = d.getBoundingClientRect().height;
+      d._zuHoehe = zu;
       // Aufklappen: der Inhalt entsteht teils erst im toggle-Handler -
       // die Zielhöhe deshalb einen Frame später messen. Bis dahin bleibt
       // der Bereich auf Höhe der Überschrift, sonst blitzte er einmal auf.
       d.style.height = `${zu}px`;
       d.style.overflow = 'hidden';
       requestAnimationFrame(() => {
-        const ziel = d.scrollHeight;
+        // Ganze Höhe des Inhalts; getBoundingClientRect kennt die
+        // Nachkommastellen, scrollHeight nicht (sonst ein letzter Mini-Sprung).
+        d.style.height = 'auto';
+        const ziel = d.getBoundingClientRect().height;
         d.style.height = '';
         if (d.open) gleite(d, zu, ziel, ms(d, '--open-ms', 480));
         else d.style.overflow = '';
