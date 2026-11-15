@@ -888,7 +888,16 @@ export class RouteMap {
       }
 
       const g = hit.closest?.('.map__route');
-      if (g && this.onSelect) this.onSelect(Number(g.dataset.index));
+      if (g && this.onSelect) {
+        const idx = Number(g.dataset.index);
+        this.onSelect(idx);
+        // Welche Verbindung ist das? Ein kleines Fenster an der Stelle des
+        // Tipps - die Liste liegt oft weit unter der Karte.
+        const r = (this.viewport || this.el).getBoundingClientRect();
+        this.showRoutePopup(idx, e.clientX - r.left, e.clientY - r.top);
+        return;
+      }
+      this.hideRoutePopup();
     });
 
     // Doppelklick zum Reinzoomen auf den Zeiger — klassisches Karten-UX.
@@ -932,6 +941,8 @@ export class RouteMap {
   }
 
   panBy(dx, dy) {
+    // Das Fenster hängt an der Stelle des Tipps - beim Verschieben passt es nicht mehr.
+    this.hideRoutePopup();
     const { lat, lon } = this.center;
     const z = this.zoom;
     this.center = {
@@ -1013,6 +1024,7 @@ export class RouteMap {
    *   nachladen lassen, das passiert am Ende einmal.
    */
   zoomBy(delta, px, py, quiet = false) {
+    this.hideRoutePopup();
     const z0 = this.zoom;
     const z1 = Math.max(TILES.minZoom, Math.min(TILES.maxZoom, z0 + delta));
     if (z1 === z0) return;
@@ -1113,6 +1125,17 @@ export class RouteMap {
       this.pendingView = () => this.fitPoints(pts, pad);
       return;
     }
+    // NOCH OHNE ECHTE GRÖSSE: Der Lageplan im Umstieg entsteht manchmal,
+    // während sein Kasten noch aufklappt und kaum breit ist. Dann passte
+    // nichts hinein, die Schleife unten zoomte bis ganz hinaus, und Weg und
+    // Gleise lagen alle auf einem Pixel - "die gelben Linien fehlen". Also
+    // warten, bis der Kasten Platz hat, und dann einpassen.
+    const vp = this.viewport || this.el;
+    if (vp.clientWidth < 2 * pad + 40 || vp.clientHeight < 2 * pad + 40) {
+      this.pendingView = () => this.fitPoints(pts, pad);
+      this.refitWhenSized();
+      return;
+    }
 
     let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
     for (const [la, lo] of pts) {
@@ -1137,6 +1160,8 @@ export class RouteMap {
 
   setData(ranked, activeIdx, onSelect) {
     const hadNone = this.ranked.length === 0;
+    // Eine neue Liste: die Nummer im offenen Fenster stimmt nicht mehr.
+    if (ranked !== this.ranked && this.routePopup && ranked?.[this.popupIndex ?? -1]?.journey !== this.ranked[this.popupIndex ?? -1]?.journey) this.hideRoutePopup();
     this.ranked = ranked || [];
     this.activeIdx = activeIdx || 0;
     this.onSelect = onSelect;
@@ -1802,6 +1827,92 @@ export class RouteMap {
    * wurde, ruckelte die Trefferliste auf schwachen Geräten. Verborgen nimmt
    * sie jetzt nur Daten an; gezeichnet wird beim Sichtbarwerden, einmal.
    */
+  /**
+   * Das Fenster zu einer angetippten Route: Nummer in der Liste, Zeiten,
+   * Umstiege, Züge - und ein Knopf zur Karte in der Liste (onShowJourney).
+   */
+  showRoutePopup(index, x, y) {
+    const j = this.ranked[index]?.journey;
+    if (!j) return;
+    this.hideRoutePopup();
+    const uhr = (iso) => (iso ? new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–');
+    const dauer = Number.isFinite(j.durationMin)
+      ? `${Math.floor(j.durationMin / 60)}:${String(j.durationMin % 60).padStart(2, '0')} h` : '';
+    const zuege = (j.legs || []).filter((l) => l.mode === 'train').map((l) => trainLabel(l)).filter(Boolean);
+
+    const box = document.createElement('div');
+    box.className = 'map__pop';
+    box.addEventListener('pointerdown', (e) => e.stopPropagation());
+    box.addEventListener('click', (e) => e.stopPropagation());
+
+    const kopf = document.createElement('div');
+    kopf.className = 'map__pop-head';
+    const nr = document.createElement('strong');
+    nr.textContent = `Verbindung ${index + 1}`;
+    const zu = document.createElement('button');
+    zu.type = 'button';
+    zu.className = 'map__pop-close';
+    zu.textContent = '×';
+    zu.setAttribute('aria-label', 'Schließen');
+    zu.addEventListener('click', () => this.hideRoutePopup());
+    kopf.append(nr, zu);
+
+    const zeit = document.createElement('p');
+    zeit.className = 'map__pop-time';
+    const umst = j.changes === 0 ? 'direkt' : `${j.changes} Umstieg${j.changes === 1 ? '' : 'e'}`;
+    zeit.textContent = `${uhr(j.departureReal || j.departure)} – ${uhr(j.arrivalReal || j.arrival)}`
+      + (dauer ? ` · ${dauer}` : '') + ` · ${umst}`;
+
+    const linien = document.createElement('p');
+    linien.className = 'map__pop-trains';
+    linien.textContent = zuege.join(' → ');
+
+    box.append(kopf, zeit);
+    if (zuege.length) box.append(linien);
+    if (this.onShowJourney) {
+      const hin = document.createElement('button');
+      hin.type = 'button';
+      hin.className = 'map__pop-go';
+      hin.textContent = 'In der Liste zeigen ↓';
+      hin.addEventListener('click', () => { this.hideRoutePopup(); this.onShowJourney(index); });
+      box.append(hin);
+    }
+
+    // In die Kartenfläche, nicht in den äußeren Kasten: der ist nicht
+    // positioniert, und das Fenster landete über der Karte.
+    const flaeche = this.viewport || this.el;
+    flaeche.append(box);
+    this.popupIndex = index;
+    // Im Kasten halten: rechts und unten nicht hinausragen.
+    const { width: bw, height: bh } = box.getBoundingClientRect();
+    const W = flaeche.clientWidth, H = flaeche.clientHeight;
+    // Rechts Platz für die Zoom-Knöpfe lassen.
+    box.style.left = `${Math.max(8, Math.min(x + 12, W - bw - 58))}px`;
+    box.style.top = `${Math.max(8, Math.min(y + 12, H - bh - 8))}px`;
+    this.routePopup = box;
+  }
+
+  hideRoutePopup() {
+    this.routePopup?.remove();
+    this.routePopup = null;
+  }
+
+  /** Einen aufgeschobenen Ausschnitt nachholen, sobald der Kasten Platz hat. */
+  refitWhenSized() {
+    if (this.sizeWatch || typeof ResizeObserver === 'undefined') return;
+    const vp = this.viewport || this.el;
+    this.sizeWatch = new ResizeObserver(() => {
+      if (vp.clientWidth < 120 || vp.clientHeight < 120) return;
+      this.sizeWatch.disconnect();
+      this.sizeWatch = null;
+      const view = this.pendingView;
+      this.pendingView = null;
+      view?.();
+      if (this.built) this.render();
+    });
+    this.sizeWatch.observe(vp);
+  }
+
   setActive(on) {
     this.active = Boolean(on);
     if (!this.active) return;
