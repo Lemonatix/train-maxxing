@@ -215,22 +215,39 @@ final class MvvEfa
         }
         $tafeln = $this->http->getJsonAll($urls, $ua);
 
-        // ZWEITE RUNDE am vorletzten Halt jeder Richtung: dort kommt jede
-        // Fahrt vorbei, auch die, die nicht am Endhalt beginnen (der 181 ab
-        // Wallnerstraße). Ihr ganzer Lauf steht in previousLocations.
-        $vorletzte = [];
+        // ZWEITE RUNDE am zweiten, einem mittleren und dem vorletzten Halt der
+        // längsten Fahrt jeder Richtung. Am Endhalt beginnen nicht alle Fahrten - der 181
+        // um 9:34 am Josef-Wirth-Weg startet erst an der Wallnerstraße. Eine
+        // Fahrt fehlt jetzt nur noch, wenn sie an keinem dieser Halte
+        // vorbeikommt. Ihr ganzer Lauf steht ohnehin in
+        // previousLocations/onwardLocations.
+        $laengste = [];
         foreach ($tafeln as $tafel) {
             foreach (($tafel['ok'] ?? false) ? ($tafel['json']['stopEvents'] ?? []) : [] as $e) {
                 $seq = self::sequence($e);
                 $lid = (string) ($e['transportation']['id'] ?? '');
-                if (count($seq) >= 3 && $lid !== '' && !isset($vorletzte[$lid])) {
-                    $vorletzte[$lid] = $seq[count($seq) - 2]['id'];
+                if ($lid !== '' && count($seq) >= 3 && count($seq) > count($laengste[$lid] ?? [])) {
+                    $laengste[$lid] = $seq;
                 }
             }
         }
+        // Gefragt wird jeder dieser Halte mit JEDER Richtung der Linie: ist
+        // sie geteilt (U6 im November 2026: Garching - Goetheplatz und
+        // Großhadern - Implerstraße), kennt die längste Fahrt der einen
+        // Richtung nur das eine Stück - die Halte der Gegenrichtung liegen
+        // auch auf dem anderen.
+        $proben = [];
+        foreach (array_slice($laengste, 0, 4, true) as $seq) {
+            $n = count($seq);
+            foreach ([1, intdiv($n, 2), $n - 2] as $i) {
+                $proben[$seq[$i]['id']] = true;
+            }
+        }
         $urls2 = [];
-        foreach (array_slice($vorletzte, 0, 4, true) as $lid => $halt) {
-            $urls2['v' . count($urls2)] = $this->boardUrl((string) $halt, $ab, false, $lid);
+        foreach (array_slice(array_keys($proben), 0, 8) as $halt) {
+            foreach ($linienIds as $lid) {
+                $urls2['v' . count($urls2)] = $this->boardUrl((string) $halt, $ab, false, $lid);
+            }
         }
         if ($urls2 !== []) {
             $tafeln = array_merge(array_values($tafeln), array_values($this->http->getJsonAll($urls2, $ua)));
