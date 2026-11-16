@@ -994,7 +994,7 @@ function handleTrainSearch(Http $http, array $config, Cache $cache): void
     $nah = preg_match('/^(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)$/', (string) ($_GET['near'] ?? ''), $nm)
         && Mvg::inArea((float) $nm[1], (float) $nm[2]);
 
-    $key = 'tsearch4:' . $date . ':' . $q;
+    $key = 'tsearch5:' . $date . ':' . $q;
     $cached = $cache->get($key, 120);
     if ($cached === null) {
         $res = (new OebbHafas($http, $config['providers']['oebb']))->trainSearch($q, $date);
