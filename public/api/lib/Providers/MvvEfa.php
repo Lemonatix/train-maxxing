@@ -163,7 +163,7 @@ final class MvvEfa
      * @return array<int,array> Treffer im Format von OebbHafas::trainSearch(),
      *   ohne jid, dafür mit dem ganzen Lauf unter `train`
      */
-    public function lineRuns(string $query, int $ab, int $max = 30): array
+    public function lineRuns(string $query, int $ab, int $max = 80): array
     {
         if (!preg_match('/^\s*(bus|tram|str|u|s|x|n|metrobus|expressbus)?\s*([a-z]?\d{1,3}[a-z]?)\s*$/i', $query, $m)) {
             return [];
@@ -203,11 +203,39 @@ final class MvvEfa
             }
             $praefixe[implode(':', array_slice(explode(':', (string) $l['id']), 0, 2))] = true;
         }
+        // NACH LINIE GEFILTERT: Ungefiltert reichten 40 Abfahrten an der
+        // Studentenstadt nur für 27 Minuten (viele Linien), darin vier Busse
+        // 181 - der um 9:34 fehlte. Mit `line` sind alle 40 von dieser Linie.
+        $linienIds = array_slice(array_map(static fn($l) => (string) $l['id'], $linien), 0, 4);
         $urls = [];
-        foreach (array_slice(array_keys($halte), 0, 6) as $i => $halt) {
-            $urls["h$i"] = $this->boardUrl((string) $halt, $ab);
+        foreach (array_slice(array_keys($halte), 0, 4) as $i => $halt) {
+            foreach ($linienIds as $k => $lid) {
+                $urls["h{$i}l{$k}"] = $this->boardUrl((string) $halt, $ab, false, $lid);
+            }
         }
         $tafeln = $this->http->getJsonAll($urls, $ua);
+
+        // ZWEITE RUNDE am vorletzten Halt jeder Richtung: dort kommt jede
+        // Fahrt vorbei, auch die, die nicht am Endhalt beginnen (der 181 ab
+        // Wallnerstraße). Ihr ganzer Lauf steht in previousLocations.
+        $vorletzte = [];
+        foreach ($tafeln as $tafel) {
+            foreach (($tafel['ok'] ?? false) ? ($tafel['json']['stopEvents'] ?? []) : [] as $e) {
+                $seq = self::sequence($e);
+                $lid = (string) ($e['transportation']['id'] ?? '');
+                if (count($seq) >= 3 && $lid !== '' && !isset($vorletzte[$lid])) {
+                    $vorletzte[$lid] = $seq[count($seq) - 2]['id'];
+                }
+            }
+        }
+        $urls2 = [];
+        foreach (array_slice($vorletzte, 0, 4, true) as $lid => $halt) {
+            $urls2['v' . count($urls2)] = $this->boardUrl((string) $halt, $ab, false, $lid);
+        }
+        if ($urls2 !== []) {
+            $tafeln = array_merge(array_values($tafeln), array_values($this->http->getJsonAll($urls2, $ua)));
+        }
+
         $out = [];
         $gesehen = [];
         $iso = static fn(?int $t): ?string => $t === null ? null : date('c', $t);
@@ -321,7 +349,7 @@ final class MvvEfa
     }
 
     /** Die Abfahrts- (oder Ankunfts-)tafel einer Haltestelle ab einem Zeitpunkt (Ortszeit München). */
-    private function boardUrl(string $globalId, int $ab, bool $arrival = false): string
+    private function boardUrl(string $globalId, int $ab, bool $arrival = false, ?string $line = null): string
     {
         $t = (new DateTimeImmutable('@' . $ab))->setTimezone(new DateTimeZone('Europe/Berlin'));
         return rtrim((string) $this->cfg['endpoint'], '/') . '?' . http_build_query([
@@ -341,7 +369,7 @@ final class MvvEfa
             'includeCompleteStopSeq' => 1,
             'depType'      => 'stopEvents',
             'coordOutputFormat' => 'WGS84[dd.ddddd]',
-        ]);
+        ] + ($line !== null ? ['line' => $line] : []));
     }
 
     /**
