@@ -57,8 +57,8 @@ export function initWorks(mount) {
 
   const note = document.createElement('p');
   note.className = 'works__note';
-  note.textContent = 'Totalsperrungen ab einer Woche Dauer, Deutschland zuerst. '
-    + 'Quellen: DB InfraGO (strecken.info) und ÖBB.';
+  note.textContent = 'Totalsperrungen: in Deutschland und Österreich ab einer Woche Dauer, in der Schweiz '
+    + 'alle geplanten Unterbrüche. Quellen: DB InfraGO (strecken.info), ÖBB und opentransportdata.swiss.';
   details.append(note);
 
   const mapEl = document.createElement('div');
