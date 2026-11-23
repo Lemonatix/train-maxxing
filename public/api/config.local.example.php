@@ -20,6 +20,12 @@ return [
             // "Train Formation Service" - eigener Token: SBB-Wagenreihung
             // im Umstiegsplan und die Baureihe Schweizer Züge.
             'formation_token' => '',
+            // "SIRI-SX Planned" - eigener Token: geplante Bauarbeiten und
+            // Unterbrüche in der Schweiz für die Baustellen-Karte.
+            'sirisx_planned_token' => '',
+            // "SIRI-SX Unplanned" - eigener Token: kurzfristige Störungen
+            // (noch nicht genutzt).
+            'sirisx_unplanned_token' => '',
         ],
 
         // DB API Marketplace (developers.deutschebahn.com): Anwendung anlegen,
