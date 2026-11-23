@@ -46,6 +46,7 @@ require $lib . '/Providers/SwissOpenData.php';
 require $lib . '/Providers/SwissTransport.php';
 require $lib . '/Locations.php';
 require $lib . '/Punctuality.php';
+require $lib . '/DbDelayArchive.php';
 require $lib . '/Providers/SwissSiriSx.php';
 require $lib . '/MvgRail.php';
 require $lib . '/Providers/DbApi.php';
@@ -1200,6 +1201,18 @@ pruefe('SIRI-SX: Bus-Baustelle fällt weg',
     SwissSiriSx::situation(simplexml_load_string(str_replace('IR56', '144', $sxXml))), null);
 pruefe('Haltestellen-Kennung zur Bahnhofsnummer', [SwissSiriSx::uic('ch:1:sloid:7000'), SwissSiriSx::uic('ch:1:sloid:10'), SwissSiriSx::uic('8301003')],
     ['8507000', '8500010', '8301003']);
+
+// ---------------------------------------------------------------------
+echo "\nDB-Archiv - Verspätung am Ziel je Tag\n";
+
+$archivTag = ['ICE 690' => [2], 'RB 17178' => [5, 43], 'ICE 618' => ['x']];
+pruefe('Archiv: genaue Gattung', DbDelayArchive::lookup($archivTag, 'ICE', '690'), [2]);
+pruefe('Archiv: HAFAS-Gattung DRB findet RB', DbDelayArchive::lookup($archivTag, 'DRB', '17178'), [5, 43]);
+pruefe('Archiv: fremde Nummer nicht', DbDelayArchive::lookup($archivTag, 'ICE', '17178'), null);
+pruefe('Archiv vor eigener Messung, eigener Grund bleibt',
+    DbDelayArchive::merge([['d' => '2026-11-22', 'v' => 5, 'r' => 'eigen'], ['d' => '2026-11-20', 'v' => 3]], [['d' => '2026-11-22', 'v' => 2]]),
+    [['d' => '2026-11-20', 'v' => 3], ['d' => '2026-11-22', 'v' => 2, 'r' => 'eigen', 'src' => 'db']]);
+pruefe('Grund-Code 43 als Text', DbApi::reasonText(43), 'Verspätung eines vorausfahrenden Zuges');
 
 echo "\n" . ($gesamt - $fehler) . " von $gesamt bestanden.\n";
 exit($fehler === 0 ? 0 : 1);
