@@ -2229,9 +2229,15 @@ export function delayChart(days, heute = new Date()) {
   const sortiert = werte.map((x) => x.v).sort((a, b) => a - b);
   const m = sortiert.length % 2 ? sortiert[(sortiert.length - 1) / 2]
     : Math.round((sortiert[sortiert.length / 2 - 1] + sortiert[sortiert.length / 2]) / 2);
+  // Woher die Werte kommen: das DB-Archiv (jeder Tag, src "db") oder die
+  // eigenen Messungen (nur, wenn jemand den Zug angesehen hat).
+  const archiv = werte.some((x) => x.src === 'db');
   box.append(el('p', 'delay-chart__note',
     `Median ${m > 0 ? '+' : ''}${m} min an ${werte.length} von 7 Tagen – einzelne Ausreißer verschieben ihn kaum. `
-    + 'Gemessen, wenn jemand den Zug in train-maxxing angesehen hat; Tage ohne Balken fehlen dort.'));
+    + (archiv
+      ? 'Quelle: Deutsche Bahn (CC BY 4.0) über das Archiv piebro/deutsche-bahn-data, ergänzt um eigene Messungen. '
+        + 'Späte Ankünfte sind die letzte Prognose davor.'
+      : 'Gemessen, wenn jemand den Zug in train-maxxing angesehen hat; Tage ohne Balken fehlen dort.')));
   return box;
 }
 
