@@ -382,6 +382,23 @@ OSM in Nord und Süd geteilt („2 Nord“, „2 Süd“), der Fahrplan nennt nu
 und viele Verbindungen fehlen. Ein Test prüft für jedes Netz, dass kein Weg
 länger als 700 m ist.
 
+#### Verspätung je Tag aus dem DB-Archiv
+
+Das Diagramm im Reiter „Zug“ zeigt je Tag der letzten Woche die Verspätung am
+Ziel. Für deutsche Züge kommt sie aus dem Archiv
+[piebro/deutsche-bahn-data](https://github.com/piebro/deutsche-bahn-data)
+(Daten der DB, CC BY 4.0): je Tag rund 140 MB Rohantworten der Timetables-API
+als Parquet, alle sechs Stunden ergänzt. Das ist zu groß für den Webspace und
+für PHP nicht lesbar. Deshalb rechnet eine GitHub Action
+(`.github/workflows/db-delays.yml`, jede Nacht 07:30 UTC) mit
+`bin/db_daily_delays.py` je Tag eine kleine Datei (Zug → Minuten, Grund-Code)
+und legt sie in den Zweig `db-delays`. `lib/DbDelayArchive.php` holt sie bei
+Bedarf von raw.githubusercontent.com und merkt sie sich, ohne Cron-Job auf dem
+Webspace. Grenzen: Endbahnhof = Ankunft ohne Abfahrt im Sollfahrplan; weil das
+Archiv nur alle sechs Stunden abfragt, ist bei späten Ankünften der Wert die
+letzte Prognose davor. Eigene Messungen (`Punctuality`) füllen Lücken und
+bringen Gründe mit.
+
 #### Treppen, Rolltreppen und Aufzüge je Ebene
 
 Zwischen „nur die Lage" und „ein berechneter Weg, den es so nicht gibt" liegt
