@@ -316,6 +316,38 @@ function renderGroupHead(group) {
   return head;
 }
 
+/**
+ * EINSTIEG UND AUSSTIEG schon auf der zugeklappten Karte: "ab München Hbf
+ * Gl. 12 → an Augsburg Hbf Gl. 4". Das Gleis war vorher erst nach dem
+ * Aufklappen zu sehen - am Bahnsteig ist es aber die erste Frage. Beginnt
+ * die Reise mit einem Fußweg, steht die Uhrzeit des Zuges dabei, denn die
+ * Zeit oben ist dann die, zu der man zu Hause losgeht.
+ */
+export function stationsLine(j) {
+  const zuege = (j.legs || []).filter((l) => l.mode === 'train');
+  if (zuege.length === 0) return null;
+  const a = zuege[0];
+  const b = zuege[zuege.length - 1];
+  const zeile = el('div', 'journey__stations');
+  const halt = (richtung, ort, gleis, zeit, zeigeZeit) => {
+    const s = el('span', 'journey__station');
+    s.append(el('span', 'journey__station-dir', richtung));
+    s.append(document.createTextNode(` ${ort?.name || '?'}`));
+    if (zeigeZeit && zeit) s.append(el('span', 'journey__station-time', ` ${formatTime(zeit)}`));
+    if (gleis) s.append(el('span', 'journey__platform', `Gl. ${gleis}`));
+    return s;
+  };
+  const anders = (x, y) => Boolean(x && y) && formatTime(x) !== formatTime(y);
+  zeile.append(
+    halt('ab', a.from, a.from?.platformReal || a.from?.platform, a.departureReal || a.departure,
+      anders(a.departureReal || a.departure, j.departureReal || j.departure)),
+    el('span', 'journey__arrow', '→'),
+    halt('an', b.to, b.to?.platformReal || b.to?.platform, b.arrivalReal || b.arrival,
+      anders(b.arrivalReal || b.arrival, j.arrivalReal || j.arrival)),
+  );
+  return zeile;
+}
+
 function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   const j = entry.journey;
   const card = el('article', 'journey');
@@ -371,7 +403,10 @@ function renderCard(entry, index, marks, state, onSelect, liveCtl) {
   if (km) meta.append(km);
 
   const left = el('div', 'journey__main');
-  left.append(times, meta);
+  left.append(times);
+  const strecke = stationsLine(j);
+  if (strecke) left.append(strecke);
+  left.append(meta);
   const leiste = journeyBar(j);
   if (leiste) left.append(leiste);
 
