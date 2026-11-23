@@ -1627,6 +1627,8 @@ function transferPlanBody(res, fromTrack, toTrack, stationName) {
       + (wechsel.length ? ` · ${wechsel.join(', ')}` : '') + ' — der Weg ist eingezeichnet.';
     if (!walk.reviewed) {
       line.append(el('span', 'xfer__level', ' Prüfmodus: dieser Weg ist noch nicht abgenommen.'));
+    } else if (walk.trial) {
+      line.append(el('span', 'xfer__level', ' Neu und noch in Erprobung - vor Ort kann es anders aussehen.'));
     }
   }
 
