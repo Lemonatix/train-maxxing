@@ -1,5 +1,26 @@
 # Änderungen
 
+## 1.4 (in Arbeit)
+
+### Neu
+
+- **Einstieg und Ausstieg mit Gleis** schon auf der zugeklappten Karte:
+  „ab Nürnberg Hbf Gl. 12 → an München Marienplatz Gl. 1“. Beginnt die
+  Reise mit einem Fußweg, steht die Abfahrtszeit des Zuges dabei.
+- **Störungen im ganzen MVV:** Der Ticker zeigt neben U-Bahn, Tram und
+  Stadtbus jetzt auch Regionalzüge, S-Bahn-Ersatzverkehre und Regionalbusse
+  (aus der MVV-Auskunft).
+- **Hinweis auf eine neue App-Version:** Ist die installierte App älter als
+  die auf der Website, steht oben, welche Version es seit wann gibt, mit
+  Link zum Herunterladen.
+
+### Behoben
+
+- **Fußwege in gemerkten Reisen** fehlten im Streckenverlauf.
+- **Falscher Zielort in Österreich:** „Niederau Wildenbach, Wildschönau“
+  führte nach Peygarten-Ottenstein in Niederösterreich, weil die DB für
+  Halte im Ausland eigene Nummern hat, die die ÖBB anders liest.
+
 ## 1.3 (November 2026)
 
 Gilt für Website und App. Was der Server rechnet (Zugsuche, Baustellen,
