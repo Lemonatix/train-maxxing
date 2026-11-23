@@ -103,6 +103,9 @@ export function reviewWalks() {
 export const api = {
   health: (opts) => call('health', {}, opts),
 
+  /** Die neueste Android-App: { app: { version, build, released, download } }. */
+  appVersion: (opts) => call('appversion', {}, opts),
+
   catalogue: (opts) => call('catalogue', {}, opts),
 
   locations: (q, opts) => call('locations', { q }, opts),
