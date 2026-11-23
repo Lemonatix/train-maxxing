@@ -665,7 +665,7 @@ final class DbVendo
                 'id'       => $fromEva,
                 'name'     => (string) ($a['abfahrtsOrt'] ?? ''),
                 'country'  => $this->countryFromEva($fromEva),
-                'platform' => $a['halte'][0]['gleis'] ?? null,
+                'platform' => ($a['halte'][0]['ezGleis'] ?? null) ?: (($a['halte'][0]['gleis'] ?? null) ?: null),
                 'lat'      => null,
                 'lon'      => null,
             ];
@@ -673,7 +673,11 @@ final class DbVendo
                 'id'       => $toEva,
                 'name'     => (string) ($a['ankunftsOrt'] ?? ''),
                 'country'  => $this->countryFromEva($toEva),
-                'platform' => null,
+                // Ankunftsgleis: der letzte Halt des Abschnitts. Fehlte bisher -
+                // ohne Gleis gab es keinen Umstiegsweg im Lageplan.
+                'platform' => ($a['halte'] ?? []) !== []
+                    ? ((end($a['halte'])['ezGleis'] ?? null) ?: ((end($a['halte'])['gleis'] ?? null) ?: null))
+                    : null,
                 'lat'      => null,
                 'lon'      => null,
             ];
