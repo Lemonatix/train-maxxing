@@ -22,7 +22,7 @@
 
 // Bei jeder Änderung an dieser Datei hochzählen - dann räumt activate()
 // die alten Caches weg.
-const VERSION = 'train-maxxing-v13';
+const VERSION = 'train-maxxing-v14';
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 
@@ -56,6 +56,7 @@ const SHELL_FILES = [
   'assets/js/qr.js',
   'assets/js/data/stations.js',
   'assets/js/works.js',
+  'assets/js/update.js',
   'assets/js/data/routes.js',
   'assets/js/data/trains.js',
 ];
