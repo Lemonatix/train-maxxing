@@ -132,11 +132,15 @@ final class StationWalks
         $meter = 0.0;
         $wechsel = [];
         $alleGeprueft = true;
+        $probe = false;
         foreach ($kette as [$u, $i, $rueck]) {
             $e = $this->data['edges'][$i];
             // Auch der Einstieg muss abgenommen sein: an einem neu
             // angehängten Bahnsteig (U-Bahn) ist er das Neue am Weg.
             $alleGeprueft = $alleGeprueft && !empty($e['reviewed']);
+            // Probeweise freigegeben (München Hbf zur S- und U-Bahn, 1.4):
+            // gezeigt, aber als neu gekennzeichnet.
+            $probe = $probe || !empty($e['trial']);
             if (($e['kind'] ?? '') === 'board') {
                 continue;
             }
@@ -171,6 +175,7 @@ final class StationWalks
             'minutes'  => max(1, (int) ceil($dist[$b] / 60)),
             'changes'  => $wechsel,
             'reviewed' => $alleGeprueft,
+            'trial'    => $probe,
         ];
     }
 
