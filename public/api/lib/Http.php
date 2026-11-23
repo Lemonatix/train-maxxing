@@ -265,6 +265,45 @@ class Http
         return self::finish($ch, $url, $raw);
     }
 
+    /**
+     * Eine große Datei direkt auf die Platte laden - ohne sie in den
+     * Speicher zu holen (SIRI-SX: 140 MB XML). Gepackt übertragen, bis zu
+     * drei Weiterleitungen (opentransportdata.swiss leitet auf eine
+     * signierte Adresse um).
+     *
+     * @param array<string,string> $headers
+     * @return array{ok:bool,status:int,error:?string}
+     */
+    public function download(string $url, string $datei, array $headers = [], int $timeout = 120): array
+    {
+        if (!function_exists('curl_init')) {
+            return ['ok' => false, 'status' => 0, 'error' => 'cURL fehlt'];
+        }
+        $f = fopen($datei, 'wb');
+        if ($f === false) {
+            return ['ok' => false, 'status' => 0, 'error' => 'Datei nicht schreibbar'];
+        }
+        $zeilen = [];
+        foreach ($headers as $k => $v) {
+            $zeilen[] = $k . ': ' . $v;
+        }
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_FILE           => $f,
+            CURLOPT_HTTPHEADER     => $zeilen,
+            CURLOPT_ENCODING       => '',
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 3,
+            CURLOPT_TIMEOUT        => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 10,
+        ]);
+        $ok = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $fehler = curl_error($ch);
+        fclose($f);
+        return ['ok' => $ok !== false && $status === 200, 'status' => $status, 'error' => $fehler !== '' ? $fehler : null];
+    }
+
     /** @param array<string,string> $headers */
     public function getJson(string $url, array $headers = []): array
     {
