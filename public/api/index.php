@@ -438,7 +438,7 @@ function handleLocations(Http $http, array $config, Cache $cache): void
 
     // "loc2": seit die Suche auch Adressen liefert. Die alten Einträge ohne
     // sie sollen nicht noch einen Tag lang ausgeliefert werden.
-    $key    = 'loc2:' . mb_strtolower($q);
+    $key    = 'loc3:' . mb_strtolower($q);
     $cached = $cache->get($key, (int) $config['cache_ttl']['locations']);
     if ($cached !== null) {
         ok(['locations' => $cached, 'cached' => true]);
