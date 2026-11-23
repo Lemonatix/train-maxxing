@@ -14,6 +14,7 @@ import { TRAIN_MODELS } from './data/trains.js';
 import { pendingLoads } from './prefetch.js';
 import { ROUTES, ratingsBySpeed } from './data/routes.js';
 import { initMvgTicker } from './mvgTicker.js';
+import { checkForUpdate } from './update.js';
 import { initWorks } from './works.js';
 import { LiveTracker } from './live.js';
 import { setupAutocomplete, renderFavoriteChips, isStation } from './autocomplete.js';
@@ -287,6 +288,8 @@ document.addEventListener('DOMContentLoaded', () => {
   applyStateToForm();
   // MVG-Störungsticker München einblenden, wenn der Endpoint Meldungen hat.
   initMvgTicker(document.getElementById('mvg-ticker'));
+  // In der App: gibt es eine neuere Version? Hinweis oben auf der Seite.
+  checkForUpdate(document.querySelector('.wrap'));
   // Bauarbeiten im Netz: Liste plus eigene Karte, ganz unten in der Suche.
   // Die Baustellen gehören nicht auf die Routenkarte, siehe works.js.
   initWorks(document.getElementById('works'));
