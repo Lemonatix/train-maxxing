@@ -105,7 +105,7 @@ final class Punctuality
      *
      * @param int $delay Verspätung in Minuten (0 = pünktlich)
      */
-    public function record(string $category, string $number, int $delay, string $date): void
+    public function record(string $category, string $number, int $delay, string $date, ?string $reason = null): void
     {
         if ($this->dir === null || $number === '') {
             return;
@@ -115,13 +115,28 @@ final class Punctuality
         $data = $this->read($file);
 
         $day = substr($date, 0, 10);
-        foreach ($data['samples'] as $s) {
+        // EIN WERT JE TAG, DER LETZTE GILT: Eine Fahrt wird im Lauf des Tages
+        // mehrmals angesehen; die späteste Beobachtung liegt am nächsten an
+        // der Verspätung bei der Ankunft - wie bei delaybahn, die je Tag die
+        // Ankunftsverspätung zeigt. Vorher zählte der erste Blick, oft vor
+        // der Abfahrt mit +0. Negative Werte (zu früh) bleiben erhalten.
+        $eintrag = ['d' => $day, 'v' => max(-30, min(600, $delay))];
+        $grund = trim((string) $reason);
+        if ($grund !== '') {
+            $eintrag['r'] = mb_substr($grund, 0, 140);
+        }
+        foreach ($data['samples'] as $i => $s) {
             if (($s['d'] ?? '') === $day) {
-                return; // heute schon erfasst
+                if (!isset($eintrag['r']) && isset($s['r'])) {
+                    $eintrag['r'] = $s['r'];
+                }
+                $data['samples'][$i] = $eintrag;
+                $this->write($file, $data);
+                return;
             }
         }
 
-        $data['samples'][] = ['d' => $day, 'v' => max(0, min(600, $delay))];
+        $data['samples'][] = $eintrag;
 
         // Altes wegwerfen: erst nach Alter, dann nach Anzahl.
         $cutoff = (new DateTimeImmutable('-' . self::MAX_AGE_DAYS . ' days'))->format('Y-m-d');
@@ -153,7 +168,9 @@ final class Punctuality
         $samples  = $data['samples'] ?? [];
         $baseline = $this->baselineFor($category);
 
-        $vals = array_map(static fn($s) => (int) ($s['v'] ?? 0), $samples);
+        // Zu früh zählt für Schnitt und Quote als pünktlich (0), im
+        // Diagramm (days) bleibt der echte Wert stehen.
+        $vals = array_map(static fn($s) => max(0, (int) ($s['v'] ?? 0)), $samples);
         $n    = count($vals);
 
         // Fenster "letzte 7 Tage" - beantwortet konkret, wie es aktuell
@@ -163,7 +180,7 @@ final class Punctuality
             $samples,
             static fn($s) => ($s['d'] ?? '') >= $cutoff
         ));
-        $valsR   = array_map(static fn($s) => (int) ($s['v'] ?? 0), $recent);
+        $valsR   = array_map(static fn($s) => max(0, (int) ($s['v'] ?? 0)), $recent);
         $nRecent = count($valsR);
 
         // Bayes-Blend: eigene Messungen + Baseline als Prior. Bei 0 eigenen
@@ -186,7 +203,26 @@ final class Punctuality
             'avg7d'     => round($avgRecent, 1),
             'max'       => $n > 0 ? max($vals) : null,
             'source'    => $source,
+            // Je Tag der letzten zwei Wochen ein Wert, für das Diagramm.
+            'days'      => self::days($samples, 14),
         ];
+    }
+
+    /**
+     * Die Messungen der letzten $n Tage, nach Datum: [{d, v, r?}].
+     *
+     * @param array<int,array{d:string,v:int,r?:string}> $samples
+     */
+    public static function days(array $samples, int $n, ?string $heute = null): array
+    {
+        $heute ??= date('Y-m-d');
+        $ab = (new DateTimeImmutable($heute))->modify('-' . ($n - 1) . ' days')->format('Y-m-d');
+        $out = array_values(array_filter($samples, static fn($s) => ($s['d'] ?? '') >= $ab && ($s['d'] ?? '') <= $heute));
+        usort($out, static fn($a, $b) => strcmp($a['d'], $b['d']));
+        return array_map(static fn($s) => array_filter(
+            ['d' => $s['d'], 'v' => (int) $s['v'], 'r' => $s['r'] ?? null],
+            static fn($v) => $v !== null
+        ), $out);
     }
 
     /** Statistiken für alle Züge einer Verbindung. */
