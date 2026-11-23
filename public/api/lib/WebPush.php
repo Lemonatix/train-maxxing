@@ -84,6 +84,10 @@ final class WebPush
     public function send(array $sub, array $message, int $ttl = 900, string $urgency = 'high'): array
     {
         $endpoint = (string) ($sub['endpoint'] ?? '');
+        // Android-App: Anmeldung über Firebase, siehe Fcm.php.
+        if (str_starts_with($endpoint, 'fcm:')) {
+            return (new Fcm($this->http, $this->cfg))->send(substr($endpoint, 4), $message, $ttl);
+        }
         if (!self::allowedEndpoint($endpoint)) {
             return ['ok' => false, 'status' => 0, 'gone' => true];
         }
