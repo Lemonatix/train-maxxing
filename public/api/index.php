@@ -804,11 +804,25 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
     // jedem Kartenklick erneut.
     $t = $res['data'];
     if (($t['hasRealtime'] ?? false) && ($t['trainNumber'] ?? '') !== '') {
+        // Die Verspätung am Ziel, sobald der Zug angekommen ist - sonst die
+        // aktuelle. Dazu der Grund, wenn der Lauf einen nennt.
+        $letzter = $t['stops'][count($t['stops'] ?? []) - 1] ?? [];
+        $angekommen = isset($letzter['arrivalReal']) && strtotime((string) $letzter['arrivalReal']) <= time();
+        $wert = $angekommen && isset($letzter['delay']) ? (int) $letzter['delay'] : (int) ($t['delay'] ?? 0);
+        $grund = null;
+        foreach ((array) ($t['messages'] ?? []) as $m) {
+            $text = trim((string) (is_array($m) ? ($m['text'] ?? '') : $m));
+            if ($text !== '' && preg_match('/verspät|störung|reparatur|bauarbeit|personal|bereitstellung|polizei|notarzt|unwetter|signal|weiche|stellwerk|vorausfahrend|verzögerung/iu', $text)) {
+                $grund = $text;
+                break;
+            }
+        }
         (new Punctuality((string) $config['cache_dir']))->record(
             (string) $t['category'],
             (string) $t['trainNumber'],
-            (int) ($t['delay'] ?? 0),
-            (string) (($t['stops'][0]['departure'] ?? null) ?? date('Y-m-d'))
+            $wert,
+            (string) (($t['stops'][0]['departure'] ?? null) ?? date('Y-m-d')),
+            $grund
         );
     }
 
