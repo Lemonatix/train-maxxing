@@ -2102,6 +2102,19 @@ export class RouteMap {
       (errFine) => {
         console.warn('[locate] fine failed:', errFine.code, errFine.message);
         if (errFine.code === errFine.PERMISSION_DENIED) {
+          // iOS-Web-App: lehnt oft ab, obwohl alles erlaubt ist (siehe
+          // geoErrorText). Dann wenigstens ungefähr über die IP, mit einer
+          // kurzen Erklärung statt der langen roten Anleitung.
+          if (IOS && STANDALONE) {
+            this.locateByIp()
+              .then(({ lat, lon, acc }) => {
+                apply(lat, lon, acc, 'ip');
+                this.setHint('Ungefährer Standort per IP — iOS gibt der Web-App das GPS nicht. '
+                  + 'In Safari geöffnet klappt es meist genau.');
+              })
+              .catch(() => { done(); this.setHint(errMsg(errFine), true); });
+            return;
+          }
           done();
           this.setHint(errMsg(errFine), true);
           return;
