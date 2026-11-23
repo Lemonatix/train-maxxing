@@ -1610,7 +1610,7 @@ function boardStillDue(array $e, int $von): bool
 }
 
 /**
- * Eine Tafel um die Echtzeit von DB (Timetables) bzw. SBB (OJP) ergänzen.
+ * Eine Tafel um die Echtzeit von DB (OpenBoards, sonst Timetables) bzw. SBB (OJP) ergänzen.
  * Ohne Schlüssel, bei anderen Ländern oder wenn die Quelle schweigt, bleibt
  * die Tafel, wie sie ist.
  *
@@ -1624,7 +1624,12 @@ function enrichBoardRealtime(Http $http, array $config, Cache $cache, string $st
             if (!$db->isConfigured()) {
                 return [$entries, null];
             }
-            $res = $db->board($station, $von, $bis);
+            // OpenBoards zuerst; Timetables nur noch als Rückfall, bis die
+            // DB sie abschaltet (vrsl. Mitte 2027).
+            $res = $db->openBoard($station, $von, $bis, $arrivals);
+            if (!$res['ok'] || $res['data'] === []) {
+                $res = $db->board($station, $von, $bis);
+            }
             $r = DbApi::enrichBoard($entries, $res['ok'] ? $res['data'] : [], $arrivals);
             return [$r['entries'], $r['matched'] > 0 ? 'db' : null];
         }
