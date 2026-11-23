@@ -2527,6 +2527,11 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     $fromIsMvg = str_starts_with($from, 'mvg:');
     $toIsMvg   = str_starts_with($to, 'mvg:');
     $mvgScroll = CityTrips::parseScroll($scroll);
+    // Ein Zeit-Kontext (MVG, oder Rückfall ohne HAFAS-Kontext): weiter ab
+    // diesem Zeitpunkt, auch für HAFAS.
+    if ($mvgScroll !== null) {
+        [$date, $time] = $mvgScroll;
+    }
     if ($mvg !== null && $viaIds === []) {
         $fromGid = CityTrips::station($mvg, $cache, $from, $coord('fromLat'), $coord('fromLon'));
         if ($fromGid !== null || $toIsMvg) {
@@ -2793,6 +2798,17 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 
     $scrollF = $sched['scrollF'] ?? null;
     $scrollB = $sched['scrollB'] ?? null;
+    // Kein Blätterkontext von HAFAS (Fehler, DB-Rückfall, Zeit-Kontext):
+    // dann über die Uhrzeit weiterblättern, sonst fehlten die Knöpfe
+    // "Frühere" und "Spätere Verbindungen".
+    if ($scrollF === null && $scrollB === null && $journeys !== []) {
+        $abfahrten = array_filter(array_map(static fn($j) => $j['departure'] ?? null, $journeys));
+        usort($abfahrten, static fn($x, $y) => strtotime($x) <=> strtotime($y));
+        if ($abfahrten !== []) {
+            $scrollF = CityTrips::scrollFor(end($abfahrten), 1);
+            $scrollB = CityTrips::scrollFor($abfahrten[0], -60);
+        }
+    }
     if ($localJourneys !== []) {
         $journeys = CityTrips::merge($journeys, $localJourneys, 'trainLabels');
         // Reine Stadtfahrt: kein Preis zu schätzen, die MVG nennt Tarifzonen.
