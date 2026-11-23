@@ -16,6 +16,9 @@
 - **Umstiegswege am München Hbf zur S-Bahn und U-Bahn** (Probe): Gleis 1/2
   tief, U4/U5 und die Bahnsteige von U1/U2/U7/U8. Der Lageplan sagt dazu,
   dass der Weg neu ist und noch erprobt wird.
+- **Baustellen in der Schweiz:** geplante Unterbrüche auf Bahnstrecken aus
+  den Ereignismeldungen des öffentlichen Verkehrs (opentransportdata.swiss),
+  z. B. Laufen – Basel SBB oder Bern – Bern Brünnen.
 - **Ruhigere Farben im hellen Modus:** dieselben Farbfamilien, gedämpft und
   aufeinander abgestimmt, auf einem neutraleren Grau.
 - **Hinweis auf eine neue App-Version:** Ist die installierte App älter als
