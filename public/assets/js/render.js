@@ -1053,9 +1053,12 @@ function renderTransferWarning(leg, risiko = null) {
     const prozent = Math.round(risiko.chance * 10) * 10;
     const t = el('span', 'leg__transfer-next', risiko.chance >= 1
       ? 'Anschluss laut Echtzeit weg'
-      : `${zubringer}: ${Math.round(risiko.rate * 100)} % pünktlich — `
-        + `Anschluss in etwa ${prozent >= 100 ? 'fast allen' : `${Math.max(10, prozent) / 10} von 10`} Fällen weg`);
-    t.title = 'Geschätzt aus der Pünktlichkeit des ankommenden Zuges'
+      : risiko.days
+        ? `${zubringer}: Umstieg hätte an ${risiko.days.ok} von ${risiko.days.n} Tagen gereicht`
+        : `${zubringer}: ${Math.round(risiko.rate * 100)} % pünktlich — `
+          + `Anschluss in etwa ${prozent >= 100 ? 'fast allen' : `${Math.max(10, prozent) / 10} von 10`} Fällen weg`);
+    t.title = (risiko.days ? 'Aus der Verspätung des ankommenden Zuges an seinem Ziel in den letzten Tagen. ' : '')
+      + 'Geschätzt aus der Pünktlichkeit des ankommenden Zuges'
       + (risiko.avg != null ? ` (Ø +${String(risiko.avg).replace('.', ',')} min)` : '')
       + (risiko.source === 'baseline' ? ', Näherung aus der Jahresstatistik des Betreibers' : ', aus eigenen Messungen')
       + '. Darunter die nächsten Möglichkeiten — übernehmbar, falls es so kommt.';
