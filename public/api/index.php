@@ -3463,21 +3463,29 @@ function handleDisruptions(Http $http, array $config, Cache $cache): void
         ok(['disruptions' => [], 'note' => 'MVG-Provider ist in der Konfiguration deaktiviert.']);
     }
 
-    $key    = 'mvg:disruptions';
+    $key    = 'mvg:disruptions3';
     $cached = $cache->get($key, (int) ($config['cache_ttl']['disruptions'] ?? 120));
     if ($cached !== null) {
         ok(['disruptions' => $cached, 'cached' => true]);
     }
 
+    // Beide gleichzeitig: die MVG für ihr Netz, die MVV-Auskunft für den
+    // Rest des Verbunds (Regionalzüge wie die RB 40, Regionalbusse).
     $mvg = new Mvg($http, $config['providers']['mvg']);
-    $res = $mvg->messages();
-    if (!$res['ok']) {
-        // Fehler nicht durchreichen, damit ein MVG-Ausfall die UI nicht bricht.
-        ok(['disruptions' => [], 'error' => $res['error']]);
+    $efa = new MvvEfa($http, $config['providers']['mvv'] ?? []);
+    $holen = function () use ($mvg, $efa): array {
+        return ['mvg' => $mvg->messages(), 'mvv' => $efa->isEnabled() ? $efa->messages() : ['ok' => false, 'data' => []]];
+    };
+    Http::prefetch(Http::record($holen));
+    $res = $holen();
+    if (!$res['mvg']['ok'] && !$res['mvv']['ok']) {
+        // Fehler nicht durchreichen, damit ein Ausfall die UI nicht bricht.
+        ok(['disruptions' => [], 'error' => $res['mvg']['error'] ?? null]);
     }
+    $alle = array_merge($res['mvg']['data'] ?? [], $res['mvv']['data'] ?? []);
 
-    $cache->set($key, $res['data']);
-    ok(['disruptions' => $res['data'], 'cached' => false]);
+    $cache->set($key, $alle);
+    ok(['disruptions' => $alle, 'cached' => false]);
 }
 
 function rateLimitOk(Cache $cache, array $config): bool
