@@ -1880,7 +1880,8 @@ function shareSlim(array $j): array
         'changes', 'countries', 'legs', 'source', 'rerouted', 'trains'];
     $legKeys = ['mode', 'kind', 'jid', 'dbJourneyId', 'category', 'categoryName', 'line', 'trainNumber',
         'name', 'direction', 'operator', 'from', 'to', 'stops', 'departure', 'arrival', 'departureReal',
-        'arrivalReal', 'durationMin', 'cancelled', 'geometry', 'changesPlace', 'transferMin'];
+        'arrivalReal', 'durationMin', 'cancelled', 'geometry', 'changesPlace', 'transferMin',
+        'distance', 'durationEstimated', 'distanceEstimated'];
     $out = array_intersect_key($j, array_flip($journeyKeys));
     $out['legs'] = [];
     foreach ($j['legs'] as $leg) {
