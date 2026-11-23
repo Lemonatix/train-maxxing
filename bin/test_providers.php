@@ -45,6 +45,7 @@ require $lib . '/Providers/CoachSequence.php';
 require $lib . '/Providers/SwissOpenData.php';
 require $lib . '/Providers/SwissTransport.php';
 require $lib . '/Locations.php';
+require $lib . '/Punctuality.php';
 require $lib . '/MvgRail.php';
 require $lib . '/Providers/DbApi.php';
 require $lib . '/Providers/SwissOjp.php';
@@ -1159,6 +1160,21 @@ pruefe('OpenBoards: Nummer, Plan, Ist, Gleis und Grund',
     [$ob[0]['number'], substr($ob[0]['dp']['pt'], 11, 5), substr($ob[0]['dp']['ct'], 11, 5), $ob[0]['dp']['pp'], $ob[0]['dp']['cp'], $ob[0]['dp']['reasons'][0]],
     ['1500', '19:35', '19:55', '21', '22', 'Verspätete Bereitstellung des Zuges']);
 pruefe('OpenBoards: Ausfall und Linie der S-Bahn', [$ob[1]['dp']['cancelled'] ?? false, $ob[1]['dp']['line']], [true, 'S5']);
+
+// ---------------------------------------------------------------------
+echo "\nPünktlichkeit je Tag - für das Diagramm\n";
+
+$pdir = sys_get_temp_dir() . '/tm-test-punct-' . getmypid();
+@mkdir($pdir);
+$p = new Punctuality($pdir);
+$heute = date('Y-m-d');
+$p->record('ICE', '618', 0, $heute . 'T21:00:00+01:00');
+$p->record('ICE', '618', 11, $heute . 'T23:50:00+01:00', 'Verspätetes Personal aus vorheriger Fahrt');
+$tage = $p->stats('ICE', '618')['days'] ?? [];
+pruefe('je Tag zählt der letzte Wert, mit Grund', [count($tage), $tage[0]['v'] ?? null, $tage[0]['r'] ?? null],
+    [1, 11, 'Verspätetes Personal aus vorheriger Fahrt']);
+pruefe('nur die letzten Tage im Diagramm',
+    count(Punctuality::days([['d' => '2026-11-01', 'v' => 3], ['d' => '2026-11-20', 'v' => 5]], 7, '2026-11-23')), 1);
 
 echo "\n" . ($gesamt - $fehler) . " von $gesamt bestanden.\n";
 exit($fehler === 0 ? 0 : 1);
