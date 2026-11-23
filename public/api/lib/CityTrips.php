@@ -176,9 +176,84 @@ final class CityTrips
      */
     public static function merge(array $primary, array $secondary, callable $labels): array
     {
-        $out = self::fastestPerTrains(array_merge($primary, $secondary));
+        $out = self::fastestPerTrains(self::harmonize(array_merge($primary, $secondary)));
         usort($out, static fn($a, $b) => strcmp((string) ($a['departure'] ?? ''), (string) ($b['departure'] ?? '')));
         return $out;
+    }
+
+    /**
+     * Gleiche Halte gleich schreiben. Die DB nennt U-Bahn-Halte "Hauptbahnhof,
+     * München" und kennt kein Gleis, die MVG schreibt "München Hbf" mit
+     * Gleis 1. Stehen beide in derselben Liste, sah dieselbe Fahrt zweimal
+     * verschieden aus. Hält dieselbe Linie an derselben Stelle (150 m), nimmt
+     * die Verbindung ohne Gleis Namen und Gleis der MVG.
+     */
+    public static function harmonize(array $journeys): array
+    {
+        $ref = [];   // MVG-Halte: [lat, lon, name, linie, gleis]
+        foreach ($journeys as $j) {
+            foreach ($j['legs'] ?? [] as $l) {
+                if (($l['mode'] ?? '') !== 'train' || !str_starts_with((string) ($l['from']['id'] ?? ''), 'mvg:')) {
+                    continue;
+                }
+                foreach (['from', 'to'] as $e) {
+                    $p = $l[$e] ?? [];
+                    if (isset($p['lat'], $p['lon']) && ($p['name'] ?? '') !== '') {
+                        $ref[] = [$p['lat'], $p['lon'], $p['name'], self::lineKey($l), $p['platform'] ?? null];
+                    }
+                }
+            }
+        }
+        if ($ref === []) {
+            return $journeys;
+        }
+        foreach ($journeys as $ji => $j) {
+            foreach ($j['legs'] ?? [] as $li => $l) {
+                if (($l['mode'] ?? '') !== 'train' || str_starts_with((string) ($l['from']['id'] ?? ''), 'mvg:')) {
+                    continue;
+                }
+                $linie = self::lineKey($l);
+                foreach (['from', 'to'] as $e) {
+                    $p = $l[$e] ?? [];
+                    if (!isset($p['lat'], $p['lon'])) {
+                        continue;
+                    }
+                    $name = null;
+                    $gleise = [];
+                    foreach ($ref as [$la, $lo, $n, $rl, $g]) {
+                        $dy = ($la - $p['lat']) * 111000;
+                        $dx = ($lo - $p['lon']) * 111000 * cos(deg2rad($p['lat']));
+                        if ($dx * $dx + $dy * $dy > 150 * 150) {
+                            continue;
+                        }
+                        $name ??= $n;
+                        if ($rl === $linie) {
+                            $gleise[(string) $g] = true;
+                        }
+                    }
+                    // Sonst wenigstens wie die MVG schreiben: "Odeonsplatz,
+                    // München" heißt dort "Odeonsplatz".
+                    if ($name === null && preg_match('/^(.+), München$/u', (string) ($p['name'] ?? ''), $m)) {
+                        $name = $m[1] === 'Hauptbahnhof' ? 'München Hbf' : $m[1];
+                    }
+                    if ($name !== null) {
+                        $journeys[$ji]['legs'][$li][$e]['name'] = $name;
+                    }
+                    // Nur wenn sich alle MVG-Fahrten einig sind - an Endstationen
+                    // wechselt das Gleis (Garching-Forschungszentrum 1 oder 2).
+                    if (($p['platform'] ?? null) === null && count($gleise) === 1 && array_key_first($gleise) !== '') {
+                        $journeys[$ji]['legs'][$li][$e]['platform'] = (string) array_key_first($gleise);
+                    }
+                }
+            }
+        }
+        return $journeys;
+    }
+
+    private static function lineKey(array $l): string
+    {
+        $linie = (string) (($l['line'] ?? '') !== '' ? $l['line'] : ($l['name'] ?? ''));
+        return mb_strtolower((string) preg_replace('/^(bus|tram|str)\s+|\s+/iu', '', trim($linie)));
     }
 
     /**
