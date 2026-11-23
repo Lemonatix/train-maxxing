@@ -33,7 +33,10 @@ const JOURNEY_KEYS = ['id', 'departure', 'arrival', 'departureReal', 'arrivalRea
   'changes', 'countries', 'legs', 'source', 'trains', 'price', 'co2'];
 const LEG_KEYS = ['mode', 'kind', 'jid', 'dbJourneyId', 'category', 'categoryName', 'line', 'trainNumber',
   'name', 'direction', 'operator', 'from', 'to', 'stops', 'departure', 'arrival', 'departureReal',
-  'arrivalReal', 'durationMin', 'cancelled', 'transferMin', 'distance'];
+  'arrivalReal', 'durationMin', 'cancelled', 'transferMin', 'distance',
+  // Fußwege: ohne changesPlace blendete die Anzeige sie bei gemerkten Reisen
+  // aus, ohne die beiden "ca."-Merker stand die Schätzung als genaue Angabe da.
+  'changesPlace', 'durationEstimated', 'distanceEstimated'];
 
 // `private`: Koordinaten einer Person, siehe hereLocation() in app.js.
 const LOC_KEYS = ['id', 'name', 'kind', 'lat', 'lon', 'country', 'private'];
@@ -42,7 +45,14 @@ const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o?.[k] !== undef
 
 function slim(journey) {
   const j = pick(journey, JOURNEY_KEYS);
-  j.legs = (journey.legs || []).map((l) => pick(l, LEG_KEYS));
+  j.legs = (journey.legs || []).map((l) => {
+    const leg = pick(l, LEG_KEYS);
+    // Den Fußweg auf der Straße mit: er ist kurz und sonst auf der Karte
+    // nur eine gerade Linie. Streckenverläufe der Züge bleiben weg - die
+    // sind groß und kommen bei Bedarf neu (loadLines).
+    if (l.mode === 'walk' && Array.isArray(l.geometry) && l.geometry.length <= 200) leg.geometry = l.geometry;
+    return leg;
+  });
   return j;
 }
 
