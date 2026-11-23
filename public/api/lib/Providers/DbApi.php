@@ -249,7 +249,101 @@ final class DbApi
     }
 
     // -----------------------------------------------------------------
-    // Timetables: Echtzeit für die Tafel
+    // OpenBoards: Echtzeit für die Tafel (Nachfolger von Timetables)
+    // -----------------------------------------------------------------
+
+    /**
+     * Abfahrten oder Ankünfte eines Bahnhofs aus OpenBoards, im selben
+     * Format wie board() - enrichBoard() merkt keinen Unterschied.
+     *
+     * OpenBoards löst die Timetables-API ab (Abschaltung vrsl. Mitte 2027).
+     * Eine Abfrage statt Plan je Stunde plus Änderungen je EVA-Nummer, JSON
+     * statt XML, und der Bahnhof samt S-Bahn tief und Flügelbahnhöfen kommt
+     * von selbst mit (meta.consideredStopPlaces). Höchstens 50 Einträge je
+     * Verkehrsmittel; das Zeitfenster geht über timeStart/timeEnd.
+     *
+     * @return array{ok:bool,error:?string,data:array<int,array<string,mixed>>}
+     */
+    public function openBoard(string $eva, int $von, int $bis, bool $arrivals): array
+    {
+        $tz = new DateTimeZone('Europe/Berlin');
+        $iso = static fn(int $t): string => (new DateTimeImmutable('@' . $t))->setTimezone($tz)->format('c');
+        $art = $arrivals ? 'arrivals' : 'departures';
+        $key = 'ob:' . $art . ':' . $eva . ':' . intdiv($von, 60) . ':' . intdiv($bis - $von, 60);
+        $hit = $this->cache?->get($key, 60);
+        if ($hit !== null) {
+            return ['ok' => true, 'error' => null, 'data' => $hit];
+        }
+        $res = $this->http->postJson($this->base() . '/open-boards/v1/' . $art, [
+            'stopPlaceOrStation'         => ['evaNumbers' => [$eva]],
+            'timeWindow'                 => ['timeStart' => $iso($von), 'timeEnd' => $iso($bis)],
+            'maxViaStops'                => 0,
+            'maxEntriesPerTransportType' => 50,
+            'languages'                  => ['deu'],
+        ], $this->headers());
+        $json = $res['ok'] ? json_decode((string) $res['body'], true) : null;
+        if (!is_array($json) || !isset($json[$art])) {
+            return ['ok' => false, 'error' => 'OpenBoards: HTTP ' . ($res['status'] ?? 0), 'data' => []];
+        }
+        $data = self::parseOpenBoard($json, $arrivals);
+        $this->cache?->set($key, $data);
+        return ['ok' => true, 'error' => null, 'data' => $data];
+    }
+
+    /**
+     * Eine OpenBoards-Antwort in das Format von parseStops(): je Fahrt
+     * Gattung, Nummer und unter 'ar' bzw. 'dp' Plan- und Ist-Zeit, Plan- und
+     * Ist-Gleis, Linie, Ausfall und Verspätungsgründe.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function parseOpenBoard(array $json, bool $arrivals): array
+    {
+        $gruende = [];
+        foreach ((array) ($json['messages']['risCauseCodes'] ?? []) as $m) {
+            $text = (string) ($m['descriptions'][0]['text'] ?? '');
+            if ($text !== '' && isset($m['messageID'])) {
+                $gruende[(int) $m['messageID']] = $text;
+            }
+        }
+        $out = [];
+        foreach ((array) ($json[$arrivals ? 'arrivals' : 'departures'] ?? []) as $x) {
+            $tr = $x['transport'] ?? $x['journeyInfo']['transportAtStart'] ?? [];
+            $warum = [];
+            foreach ((array) ($x['messages'] ?? []) as $id) {
+                if (isset($gruende[(int) $id])) {
+                    $warum[] = $gruende[(int) $id];
+                }
+            }
+            $halt = array_filter([
+                'pt'        => self::isoMinute($x['timeSchedule'] ?? null),
+                'ct'        => self::isoMinute($x['time'] ?? null),
+                'pp'        => $x['platformSchedule']['name'] ?? null,
+                'cp'        => $x['platform']['name'] ?? null,
+                'line'      => $tr['line']['name'] ?? null,
+                'cancelled' => !empty($x['cancelled']) ? true : null,
+                'reasons'   => $warum !== [] ? array_values(array_unique($warum)) : null,
+            ], static fn($v) => $v !== null);
+            $out[] = [
+                'id'       => (string) ($x[$arrivals ? 'arrivalId' : 'departureId'] ?? ($x['journeyId'] ?? '')),
+                'category' => (string) ($tr['category'] ?? ''),
+                'number'   => (string) ($tr['journeyNumber'] ?? ''),
+                $arrivals ? 'ar' : 'dp' => $halt,
+            ];
+        }
+        return $out;
+    }
+
+    /** ISO-Zeit mit Sekunden auf die Minute, wie time() sie liefert. */
+    private static function isoMinute(?string $t): ?string
+    {
+        $ts = $t !== null ? strtotime($t) : false;
+        return $ts === false ? null
+            : (new DateTimeImmutable('@' . $ts))->setTimezone(new DateTimeZone('Europe/Berlin'))->format('Y-m-d\TH:i:sP');
+    }
+
+    // -----------------------------------------------------------------
+    // Timetables: Echtzeit für die Tafel (alt, Rückfall bis zur Abschaltung)
     // -----------------------------------------------------------------
 
     /**
