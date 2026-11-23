@@ -207,8 +207,13 @@ export function setupAutocomplete(input, list, onPick, opts = {}) {
     if (input.value.trim() === '') showSaved();
   });
 
-  const fromServer = (locs) => {
-    items = locs.filter(usable).map((loc) => ({ loc }));
+  const fromServer = (locs, q) => {
+    // Favoriten, deren Name so beginnt, bleiben oben - auch wenn der Server
+    // sie anders schreibt oder gar nicht nennt.
+    const favs = places.favorites().filter((f) => usable(f) && instantScore(f.name, q) === 2);
+    const ids = new Set(favs.map((f) => String(f.id || f.name)));
+    items = [...favs, ...locs.filter((l) => usable(l) && !ids.has(String(l.id || l.name)))]
+      .map((loc) => ({ loc }));
     active = -1;
     draw();
   };
@@ -221,7 +226,7 @@ export function setupAutocomplete(input, list, onPick, opts = {}) {
     if (q.length === 0) { showSaved(); return; }
 
     const key = q.toLowerCase();
-    if (answered.has(key)) { fromServer(answered.get(key)); return; }
+    if (answered.has(key)) { fromServer(answered.get(key), q); return; }
 
     // Sofort, was die eigene Liste weiß - schon ab dem ersten Buchstaben.
     const stations = await loadStations();
@@ -245,7 +250,7 @@ export function setupAutocomplete(input, list, onPick, opts = {}) {
         const locs = res.locations || [];
         answered.set(key, locs);
         if (answered.size > MAX_ANSWERED) answered.delete(answered.keys().next().value);
-        if (input.value.trim() === q) fromServer(locs);
+        if (input.value.trim() === q) fromServer(locs, q);
       } catch (err) {
         // Ohne Server bleiben die Sofort-Treffer stehen, statt zu verschwinden.
         if (err.name !== 'AbortError' && !sofort.length) close();
