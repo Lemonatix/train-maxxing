@@ -2067,7 +2067,7 @@ function handleWorks(Http $http, array $config, Cache $cache): void
 
     // "works2": seit dem Verlauf aus den Kacheln von strecken-info - die
     // alten Einträge ohne ihn sollen nicht noch eine Stunde gelten.
-    $key    = 'works2:' . $days;
+    $key    = 'works3:' . $days;
     $cached = $cache->get($key, (int) ($config['cache_ttl']['works'] ?? 3600));
     if ($cached !== null) {
         ok(['works' => $cached, 'cached' => true]);
