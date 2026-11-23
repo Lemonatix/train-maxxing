@@ -8,7 +8,7 @@
 
 import { api } from './api.js';
 import { rank, highlights, setFxRates, spliceJourney, bridgeOption, mergeAlternatives } from './scoring.js';
-import { renderResults, renderNotices, renderTripPair, kmLabel, setWalkPace } from './render.js';
+import { renderResults, renderNotices, renderTripPair, kmLabel, setWalkPace, delayChart } from './render.js';
 import { RouteMap, setMapTheme, trainLabel, lineKey, nextOnLine, geoErrorText, legGeometryFromRun, TRACKED_JID } from './map.js';
 import { TRAIN_MODELS } from './data/trains.js';
 import { pendingLoads } from './prefetch.js';
@@ -3149,6 +3149,9 @@ function renderTrainPanel(panel, head, t) {
   // Ort: man hat den Zug angetippt, um zu erfahren, woran man mit ihm ist.
   const hist = renderTrainHistory(t.history);
   if (hist) panel.append(hist);
+  // Die letzten sieben Tage als Balken, wie bei delaybahn.
+  const diagramm = delayChart(t.history?.days);
+  if (diagramm) panel.append(diagramm);
 
   const list = document.createElement('ol');
   list.className = 'train-panel__stops';
