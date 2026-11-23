@@ -1071,8 +1071,8 @@ pruefe('Tram hat keinen', $hbf->trackFor('21', $stiglmaier), null);
 pruefe('S-Bahn tief unter eigener Nummer', StationWalks::load(__DIR__ . '/../public/api/data/walks', '8098263') !== null, true);
 $weg = $hbf->route('20', 'U-Nord', true);
 pruefe('Gleis 20 zur U-Bahn: bis Ebene -4', $weg !== null && end($weg['points'])[2] == -4, true);
-pruefe('neuer Einstieg ist noch nicht abgenommen', $weg['reviewed'] ?? null, false);
-pruefe('ohne Prüfmodus kein Weg', $hbf->route('20', 'U-Nord'), null);
+pruefe('Probe in 1.4: freigegeben und als Probe gekennzeichnet', [$weg['reviewed'] ?? null, $weg['trial'] ?? null], [true, true]);
+pruefe('auch ohne Prüfmodus zu sehen', $hbf->route('20', 'U-Nord') !== null, true);
 pruefe('alte Wege bleiben abgenommen', $hbf->route('20', '11')['reviewed'] ?? null, true);
 
 // ---------------------------------------------------------------------
