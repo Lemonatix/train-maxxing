@@ -12,3 +12,7 @@ public/api/config.local.php
 # Das Android-APK zum Herunterladen: wird gebaut (app/README.md) und direkt
 # auf den Server gelegt, nicht ins Repository.
 public/downloads/
+
+# Firebase (Push in der App): Konfiguration und Dienstkonto nicht ins Repo
+app/android/app/google-services.json
+public/api/fcm-service-account.json
