@@ -1130,5 +1130,14 @@ pruefe('Zacke von Bad Schussenried bis kurz vor Ulm fällt weg (wie im Suchergeb
 pruefe('lange Strecke ohne Halt: Bögen bleiben',
     count(OebbHafas::dropDetours([[48.14, 11.56], [48.6, 10.6], [48.40, 9.98]], [[48.14, 11.56], [48.40, 9.98]])), 3);
 
+// ---------------------------------------------------------------------
+echo "\nOrtssuche - DB-Nummern für Halte im Ausland\n";
+
+pruefe('DB-Halt in Österreich mit eigener Nummer erkannt',
+    Locations::dbForeignLocalId(['id' => '313363', 'name' => 'Niederau Wildenbach, Wildschönau (A)']), true);
+pruefe('deutscher Stadthalt bleibt (gleiche Nummer bei DB und ÖBB)',
+    Locations::dbForeignLocalId(['id' => '625213', 'name' => 'Stiglmaierplatz, München']), false);
+pruefe('Bahnhof mit EVA-Nummer bleibt', Locations::dbForeignLocalId(['id' => '8100013', 'name' => 'Wörgl Hbf (A)']), false);
+
 echo "\n" . ($gesamt - $fehler) . " von $gesamt bestanden.\n";
 exit($fehler === 0 ? 0 : 1);
