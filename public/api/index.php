@@ -126,6 +126,7 @@ require __DIR__ . '/lib/Products.php';
 require __DIR__ . '/lib/Shops.php';
 require __DIR__ . '/lib/Locations.php';
 require __DIR__ . '/lib/Punctuality.php';
+require __DIR__ . '/lib/DbDelayArchive.php';
 require __DIR__ . '/lib/Fleet.php';
 require __DIR__ . '/lib/Health.php';
 require __DIR__ . '/lib/Walks.php';
@@ -781,6 +782,7 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
         }
         $stats = (new Punctuality((string) $config['cache_dir']))->stats($cat, $num);
         if ($stats !== null) {
+            $stats['days'] = withArchiveDays($http, $cache, $config, $cat, $num, $stats['days'] ?? []);
             $t['history'] = $stats;
         }
         return $t;
@@ -829,6 +831,25 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
 
     $cache->set($key, $t);
     ok(['train' => $historie($t), 'cached' => false]);
+}
+
+/**
+ * Die Tage für das Verspätungsdiagramm: das DB-Archiv (jeder Zug, jeder Tag,
+ * siehe DbDelayArchive) plus die eigenen Messungen. Nur für Züge mit
+ * Nummer - das Archiv kennt deutsche Halte, Österreich und die Schweiz
+ * bleiben bei den eigenen Messungen.
+ */
+function withArchiveDays(Http $http, Cache $cache, array $config, string $cat, string $num, array $eigene): array
+{
+    if (($config['providers']['delayarchive']['enabled'] ?? true) !== true || trim($num) === '') {
+        return $eigene;
+    }
+    try {
+        $archiv = (new DbDelayArchive($http, $cache, $config['providers']['delayarchive'] ?? []))->days($cat, $num, 7);
+    } catch (Throwable) {
+        return $eigene;
+    }
+    return DbDelayArchive::merge($eigene, $archiv);
 }
 
 /**
@@ -2746,6 +2767,10 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
     if ($punct->isAvailable()) {
         foreach ($journeys as $i => $j) {
             $h = $punct->forJourney($j);
+            foreach ($h as $zug => $s) {
+                [$cat, $num] = array_pad(explode(' ', $zug, 2), 2, '');
+                $h[$zug]['days'] = withArchiveDays($http, $cache, $config, $cat, $num, $s['days'] ?? []);
+            }
             if ($h !== []) {
                 $journeys[$i]['history'] = $h;
             }
