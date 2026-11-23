@@ -1,0 +1,78 @@
+# Verspätung am Ziel je Zug und Tag aus dem DB-Archiv (piebro/deutsche-bahn-data)
+# - für das Tagesdiagramm in train-maxxing, wie bei delaybahn.
+#
+# Läuft jede Nacht, rechnet die Tage, die im Zweig `db-delays` noch fehlen
+# (höchstens die letzten acht), und legt dort <Tag>.json ab. Die Website holt
+# sich die Dateien von raw.githubusercontent.com (lib/DbDelayArchive.php) -
+# auf dem Webspace braucht es dafür keinen Cron-Job.
+#
+# Das Archiv wird alle sechs Stunden ergänzt; um 07:30 UTC ist der Vortag
+# samt erstem Lauf des neuen Tages da.
+name: DB-Verspätungen
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: db-delays
+  cancel-in-progress: false
+
+jobs:
+  tage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Skript holen
+        uses: actions/checkout@v4
+        with:
+          path: code
+
+      - name: Datenzweig holen (oder neu anlegen)
+        run: |
+          if git ls-remote --exit-code --heads "https://github.com/${GITHUB_REPOSITORY}.git" db-delays >/dev/null; then
+            git clone --depth 1 --branch db-delays "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" daten
+          else
+            mkdir daten && cd daten && git init -b db-delays \
+              && git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git"
+            printf '%s\n' '# Verspätung am Ziel je Zug und Tag' '' \
+              'Erzeugt von .github/workflows/db-delays.yml aus dem Archiv piebro/deutsche-bahn-data.' \
+              'Daten: Deutsche Bahn, CC BY 4.0.' > README.md
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: pyarrow
+        run: pip install pyarrow
+
+      - name: Fehlende Tage rechnen
+        run: |
+          for i in 1 2 3 4 5 6 7 8; do
+            tag=$(date -u -d "-$i day" +%F)
+            if [ ! -f "daten/$tag.json" ]; then
+              python3 code/bin/db_daily_delays.py "$tag" daten || echo "$tag: noch nicht im Archiv"
+            fi
+          done
+          # Älter als 40 Tage braucht das Diagramm nicht. Nach dem Namen,
+          # nicht nach dem Dateidatum - nach dem Klonen sind alle frisch.
+          grenze=$(date -u -d '-40 day' +%F)
+          for f in daten/20*.json; do
+            [ -e "$f" ] || continue
+            if [ "$(basename "$f" .json)" \< "$grenze" ]; then rm -f "$f"; fi
+          done
+
+      - name: Ablegen
+        run: |
+          cd daten
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then echo 'nichts Neues'; exit 0; fi
+          git commit -m "Verspätungen bis $(date -u -d '-1 day' +%F)"
+          git push origin db-delays
