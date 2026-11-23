@@ -12,7 +12,10 @@
   (aus der MVV-Auskunft).
 - **Verspätung je Tag wie bei delaybahn:** Im Reiter „Zug“ der Fahrtinfo und
   im Zugfenster der Live-Karte ein Balken je Tag der letzten Woche, grün,
-  gelb oder rot, mit dem Grund beim Antippen und dem Median darunter.
+  gelb oder rot, mit dem Grund beim Antippen und dem Median darunter. Für
+  deutsche Züge ist jeder Tag gefüllt: Die Werte kommen aus dem Archiv der
+  DB-Fahrplandaten (piebro/deutsche-bahn-data, CC BY 4.0), jede Nacht von
+  einer GitHub Action vorgerechnet.
 - **Umstiegswege am München Hbf zur S-Bahn und U-Bahn** (Probe): Gleis 1/2
   tief, U4/U5 und die Bahnsteige von U1/U2/U7/U8. Der Lageplan sagt dazu,
   dass der Weg neu ist und noch erprobt wird.
