@@ -107,6 +107,40 @@ function b64uBytes(s) {
   return Uint8Array.from(b, (c) => c.charCodeAt(0));
 }
 
+/**
+ * PUSH IN DER ANDROID-APP. Im WebView gibt es weder Notification noch
+ * PushManager; die App meldet sich über das Capacitor-Plugin bei Firebase an
+ * und gibt dem Server das Token als Endpunkt "fcm:<token>" (lib/Fcm.php).
+ */
+const pushPlugin = () => (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.()
+  ? window.Capacitor.Plugins?.PushNotifications : null) || null;
+const nativePush = () => Boolean(pushPlugin());
+
+let tokenPromise = null;
+/** Das FCM-Token dieses Geräts; einmal je Start geholt. */
+function nativeToken() {
+  const pn = pushPlugin();
+  if (!pn) return Promise.reject(new Error('kein Push-Plugin'));
+  tokenPromise ??= new Promise((ok, fehler) => {
+    const zeit = setTimeout(() => { tokenPromise = null; fehler(new Error('kein Token von Firebase')); }, 15000);
+    pn.addListener('registration', (t) => { clearTimeout(zeit); ok(t.value); });
+    pn.addListener('registrationError', (e) => { clearTimeout(zeit); tokenPromise = null; fehler(new Error(e?.error || 'Firebase-Anmeldung fehlgeschlagen')); });
+    // Eigener Kanal mit hoher Wichtigkeit, damit die Meldung aufpoppt.
+    Promise.resolve(pn.createChannel?.({ id: 'reise', name: 'Reise', description: 'Umstiege, Verspätungen, Gleiswechsel', importance: 5, vibration: true }))
+      .catch(() => {})
+      .then(() => pn.register());
+  });
+  return tokenPromise;
+}
+
+/** Erlaubnis in der App, in den Werten der Notification-API. */
+async function nativePermission() {
+  const pn = pushPlugin();
+  let r = await pn.checkPermissions();
+  if (r.receive === 'prompt' || r.receive === 'prompt-with-rationale') r = await pn.requestPermissions();
+  return r.receive === 'granted' ? 'granted' : 'denied';
+}
+
 /** iPhone/iPad - und läuft die Seite als App vom Home-Bildschirm? */
 const IS_IOS = typeof navigator !== 'undefined'
   && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
@@ -207,7 +241,7 @@ export class LiveTracker {
 
     /** Benachrichtigungen bei Ausfall, Verspätung, Gleiswechsel. */
     this.notify = readNotifyPref() && LiveTracker.canNotify()
-      && Notification.permission === 'granted';
+      && (nativePush() ? true : Notification.permission === 'granted');
     /**
      * Web Push: der Server verfolgt die Fahrt mit und meldet auch bei
      * gesperrtem Bildschirm. `on` = angemeldet, `running` = sein Minutentakt
@@ -300,6 +334,7 @@ ${url.href}`);
 
   /** Kann dieser Browser überhaupt benachrichtigen? */
   static canNotify() {
+    if (nativePush()) return true;
     return typeof window !== 'undefined' && 'Notification' in window && window.isSecureContext;
   }
 
@@ -308,6 +343,7 @@ ${url.href}`);
    * als App vom Home-Bildschirm - in Safari selbst fehlt der PushManager.
    */
   static canPush() {
+    if (nativePush()) return true;
     return LiveTracker.canNotify() && 'serviceWorker' in navigator && 'PushManager' in window;
   }
 
@@ -320,6 +356,18 @@ ${url.href}`);
    */
   async enablePush(confirm = false) {
     if (!LiveTracker.canPush() || !this.journey) return false;
+    if (nativePush()) {
+      try {
+        const token = await nativeToken();
+        const res = await api.pushSubscribe({ subscription: { endpoint: 'fcm:' + token }, journey: this.journey, confirm });
+        this.push = { on: true, running: Boolean(res.running) };
+        return true;
+      } catch (err) {
+        console.warn('[push]', err);
+        this.push = { on: false, running: false };
+        return false;
+      }
+    }
     try {
       const { key, running } = await api.pushKey();
       const reg = await Promise.race([
@@ -351,6 +399,10 @@ ${url.href}`);
     const war = this.push?.on;
     this.push = { on: false, running: false };
     if (!war || !LiveTracker.canPush()) return;
+    if (nativePush()) {
+      try { await api.pushUnsubscribe('fcm:' + await nativeToken()); } catch { /* räumt der Server auf */ }
+      return;
+    }
     try {
       const reg = await navigator.serviceWorker.getRegistration();
       const sub = await reg?.pushManager.getSubscription();
@@ -913,7 +965,7 @@ ${url.href}`);
       this.render();
       return;
     }
-    let perm = Notification.permission;
+    let perm = nativePush() ? await nativePermission() : Notification.permission;
     if (perm === 'default') {
       try { perm = await Notification.requestPermission(); } catch { perm = 'denied'; }
     }
@@ -1045,6 +1097,9 @@ ${url.href}`);
    * Service Worker.
    */
   static async showNotification(title, body, kind) {
+    // In der App meldet der Server über Firebase - die Seite selbst kann im
+    // WebView keine Benachrichtigung zeigen.
+    if (nativePush()) return;
     const opts = {
       body,
       // Eine Sorte ersetzt die vorige, statt sich zu stapeln.
