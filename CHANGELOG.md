@@ -10,12 +10,22 @@
 - **Störungen im ganzen MVV:** Der Ticker zeigt neben U-Bahn, Tram und
   Stadtbus jetzt auch Regionalzüge, S-Bahn-Ersatzverkehre und Regionalbusse
   (aus der MVV-Auskunft).
+- **Verspätung je Tag wie bei delaybahn:** Im Reiter „Zug“ der Fahrtinfo und
+  im Zugfenster der Live-Karte ein Balken je Tag der letzten Woche, grün,
+  gelb oder rot, mit dem Grund beim Antippen und dem Median darunter.
+- **Ruhigere Farben im hellen Modus:** dieselben Farbfamilien, gedämpft und
+  aufeinander abgestimmt, auf einem neutraleren Grau.
 - **Hinweis auf eine neue App-Version:** Ist die installierte App älter als
   die auf der Website, steht oben, welche Version es seit wann gibt, mit
   Link zum Herunterladen.
 
 ### Behoben
 
+- **Baustellen in Deutschland fehlten:** strecken-info.de hatte seine
+  Schnittstelle geändert; die App holt den nötigen Datenstand jetzt so wie
+  die Webseite selbst.
+- **Echtzeit an der Abfahrtstafel** kommt jetzt aus der neuen OpenBoards-API
+  der DB, die die alte Timetables-API ablöst.
 - **Fußwege in gemerkten Reisen** fehlten im Streckenverlauf.
 - **Falscher Zielort in Österreich:** „Niederau Wildenbach, Wildschönau“
   führte nach Peygarten-Ottenstein in Niederösterreich, weil die DB für
