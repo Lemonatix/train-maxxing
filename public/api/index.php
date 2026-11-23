@@ -206,6 +206,7 @@ if (random_int(1, 100) === 1) {
 const RATE_COST = [
     'health'         => 0,
     'catalogue'      => 0,
+    'appversion'     => 0,
     'fxrate'         => 0,
     'disruptions'    => 1,
     'locations'      => 1,
@@ -284,6 +285,12 @@ try {
     switch ($action) {
         case 'health':
             handleHealth($http, $config, $cache);
+            break;
+        case 'appversion':
+            // Die neueste Android-App: Version, Build-Nummer, seit wann und
+            // wo es sie gibt. Bei jeder neuen APK in data/app.json nachtragen.
+            $app = json_decode((string) @file_get_contents(__DIR__ . '/data/app.json'), true);
+            ok(['app' => is_array($app) ? $app : null]);
             break;
         case 'catalogue':
             ok([
