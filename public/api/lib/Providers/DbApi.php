@@ -67,6 +67,12 @@ final class DbApi
      * erlaubt 60 Timetables-Aufrufe je Minute, und München Hbf allein hat
      * vier EVA-Nummern (oben, zwei Flügelbahnhöfe, S-Bahn tief).
      */
+    /** Text zu einem Verspätungsgrund-Code der DB, sonst null. */
+    public static function reasonText(int $code): ?string
+    {
+        return self::GRUENDE[$code] ?? null;
+    }
+
     public function __construct(Http $http, array $cfg, ?Cache $cache = null)
     {
         $this->http  = $http;
