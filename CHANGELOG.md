@@ -13,6 +13,9 @@
 - **Verspätung je Tag wie bei delaybahn:** Im Reiter „Zug“ der Fahrtinfo und
   im Zugfenster der Live-Karte ein Balken je Tag der letzten Woche, grün,
   gelb oder rot, mit dem Grund beim Antippen und dem Median darunter.
+- **Umstiegswege am München Hbf zur S-Bahn und U-Bahn** (Probe): Gleis 1/2
+  tief, U4/U5 und die Bahnsteige von U1/U2/U7/U8. Der Lageplan sagt dazu,
+  dass der Weg neu ist und noch erprobt wird.
 - **Ruhigere Farben im hellen Modus:** dieselben Farbfamilien, gedämpft und
   aufeinander abgestimmt, auf einem neutraleren Grau.
 - **Hinweis auf eine neue App-Version:** Ist die installierte App älter als
