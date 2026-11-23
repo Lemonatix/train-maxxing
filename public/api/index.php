@@ -143,6 +143,7 @@ require __DIR__ . '/lib/Mvt.php';
 require __DIR__ . '/lib/Providers/StreckenInfo.php';
 require __DIR__ . '/lib/Providers/SwissOpenData.php';
 require __DIR__ . '/lib/Providers/SwissOjp.php';
+require __DIR__ . '/lib/Providers/SwissSiriSx.php';
 require __DIR__ . '/lib/Providers/SwissFormation.php';
 require __DIR__ . '/lib/Providers/DbApi.php';
 require __DIR__ . '/lib/RailGeometry.php';
@@ -2081,7 +2082,7 @@ function handleWorks(Http $http, array $config, Cache $cache): void
 
     // "works2": seit dem Verlauf aus den Kacheln von strecken-info - die
     // alten Einträge ohne ihn sollen nicht noch eine Stunde gelten.
-    $key    = 'works3:' . $days;
+    $key    = 'works4:' . $days;
     $cached = $cache->get($key, (int) ($config['cache_ttl']['works'] ?? 3600));
     if ($cached !== null) {
         ok(['works' => $cached, 'cached' => true]);
@@ -2102,13 +2103,26 @@ function handleWorks(Http $http, array $config, Cache $cache): void
         }
     }
 
-    // --- Österreich und Schweiz ---------------------------------------
+    // --- Österreich ------------------------------------------------------
     $oebb = new OebbHafas($http, $config['providers']['oebb']);
     $res  = $oebb->works($days);
     if ($res['ok']) {
         $works = array_merge($works, $res['data']);
     } else {
         $fehler[] = $res['error'];
+    }
+
+    // --- Schweiz: geplante Unterbrüche aus SIRI-SX ----------------------
+    // Eigener Token (opentransportdata.swiss, "SIRI-SX Planned"). Die ÖBB
+    // liefert nur Österreich.
+    $ch = new SwissSiriSx($http, $cache, $config['providers']['swiss'] ?? [], $oebb);
+    if ($ch->isConfigured()) {
+        $res = $ch->works($days);
+        if ($res['ok']) {
+            $works = array_merge($works, $res['data']);
+        } else {
+            $fehler[] = $res['error'];
+        }
     }
 
     if ($works === []) {
