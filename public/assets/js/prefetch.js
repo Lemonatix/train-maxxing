@@ -83,9 +83,22 @@ export function missChance(journey, leg) {
   if (!h || typeof h.rate !== 'number') return null;
   const spaet = Math.min(0.95, Math.max(0.01, 1 - h.rate));
   const puffer = Math.max(0.5, gap - MIN_CHANGE_MIN);
+  const modell = Math.pow(spaet, puffer / 6);
+  // MIT TAGESWERTEN (eigene Messungen und DB-Archiv, je Tag die Verspätung
+  // am Ziel des Zubringers): wie oft hätte der Puffer gereicht? Das Modell
+  // zählt als ein zusätzlicher Tag, damit 7 von 7 nicht "sicher" heißt.
+  const tage = (Array.isArray(h.days) ? h.days : []).filter((d) => typeof d.v === 'number');
+  let days = null;
+  let chance = modell;
+  if (tage.length >= 3) {
+    const ok = tage.filter((d) => d.v <= puffer).length;
+    days = { n: tage.length, ok };
+    chance = (tage.length - ok + modell) / (tage.length + 1);
+  }
   return {
     ...base,
-    chance: Math.pow(spaet, puffer / 6),
+    chance,
+    days,
     rate: h.rate,
     avg: typeof h.avg === 'number' ? h.avg : null,
     source: h.source || '',
