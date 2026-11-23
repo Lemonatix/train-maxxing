@@ -47,7 +47,11 @@ final class DbDelayArchive
             $tag = date('Y-m-d', strtotime("$heute -$i days"));
             $zuege = $this->day($tag);
             $wert = self::lookup($zuege, $category, $number);
-            if ($wert === null || !is_int($wert[0] ?? null)) {
+            // Mehr als fünf Minuten zu früh am Ziel kommt praktisch nicht
+            // vor - dann fehlte die letzte Meldung (das Archiv fragt nur alle
+            // sechs Stunden) oder der Zug endete woanders. ICE 1060 stand
+            // so am 22.11. mit -29 im Archiv.
+            if ($wert === null || !is_int($wert[0] ?? null) || $wert[0] < -5) {
                 continue;
             }
             $e = ['d' => $tag, 'v' => $wert[0]];
