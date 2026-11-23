@@ -24,6 +24,15 @@
   z. B. Laufen – Basel SBB oder Bern – Bern Brünnen.
 - **Ruhigere Farben im hellen Modus:** dieselben Farbfamilien, gedämpft und
   aufeinander abgestimmt, auf einem neutraleren Grau.
+- **Benachrichtigungen in der Android-App,** auch bei gesperrtem Bildschirm:
+  Umstiege vorher, Verspätungen, Gleiswechsel und Ausfälle (über Firebase
+  Cloud Messaging).
+- **Eigener Reiter „Pünktlichkeit“** in der Fahrtinfo mit Quote, Schnitt
+  und dem Balken je Tag.
+- **Klappt der Umstieg?** Bei knappen Umstiegen steht, an wie vielen der
+  letzten Tage der Puffer gereicht hätte.
+- **Favoriten zuerst:** Beginnt ein Favorit mit dem Getippten, steht er in
+  den Vorschlägen ganz oben.
 - **Hinweis auf eine neue App-Version:** Ist die installierte App älter als
   die auf der Website, steht oben, welche Version es seit wann gibt, mit
   Link zum Herunterladen.
@@ -36,6 +45,17 @@
 - **Echtzeit an der Abfahrtstafel** kommt jetzt aus der neuen OpenBoards-API
   der DB, die die alte Timetables-API ablöst.
 - **Fußwege in gemerkten Reisen** fehlten im Streckenverlauf.
+- **Gleise und Haltnamen einheitlich:** Verbindungen von der DB hatten kein
+  Ankunftsgleis und schrieben „Hauptbahnhof, München“ statt „München Hbf“.
+  Ohne Gleis fehlte auch der Umstiegsweg zur U-Bahn am Hbf.
+- **„Frühere/Spätere Verbindungen“** verschwand manchmal, wenn die
+  Verbindungen von der DB kamen.
+- **Zuglauf nicht verfügbar** („Interner Fehler“) bei jedem Zug.
+- **Lücken in der Tagesverspätung:** Züge mit Ziel im Ausland und Tage ohne
+  Meldung am Endbahnhof fehlten; jetzt zählt der letzte bekannte Halt.
+- **Grauer Kasten beim Antippen** im hellen Modus der App.
+- **Standort in der iPhone-Web-App:** Verweigert iOS das GPS, zeigt die
+  Karte wenigstens den ungefähren Standort.
 - **Falscher Zielort in Österreich:** „Niederau Wildenbach, Wildschönau“
   führte nach Peygarten-Ottenstein in Niederösterreich, weil die DB für
   Halte im Ausland eigene Nummern hat, die die ÖBB anders liest.
