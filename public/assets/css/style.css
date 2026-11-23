@@ -5522,3 +5522,16 @@ details.is-closing > summary::before {
   cursor: pointer;
 }
 .update-hint__close:hover { color: var(--text); }
+
+/* --- Verspätung je Tag (delayChart in render.js) ---------------------- */
+.delay-chart { margin: 0.6rem 0 0.3rem; }
+.delay-chart__title { margin: 0 0 0.2rem; font-size: 0.78rem; color: var(--text-dim); }
+.delay-chart__svg { display: block; width: 100%; max-width: 420px; height: auto; }
+.delay-chart__zero { stroke: var(--border-strong); stroke-width: 1; }
+.delay-chart__bar.is-ok rect { fill: var(--green); }
+.delay-chart__bar.is-slow rect { fill: var(--amber); }
+.delay-chart__bar.is-late rect { fill: var(--rose); }
+.delay-chart__val { font-family: var(--font-mono); font-size: 9.5px; fill: var(--text-dim); }
+.delay-chart__day { font-family: var(--font-mono); font-size: 8.5px; fill: var(--text-muted); }
+.delay-chart__none { font-family: var(--font-mono); font-size: 9px; fill: var(--text-muted); }
+.delay-chart__note { margin: 0.25rem 0 0; font-size: 0.74rem; color: var(--text-muted); }
