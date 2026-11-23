@@ -160,6 +160,11 @@
 
 * { box-sizing: border-box; }
 
+/* Kein grauer Kasten beim Antippen (Android-WebView, Safari) - im hellen
+   Modus stand er sichtbar über Karten und Knöpfen. Rückmeldung geben
+   :hover/:active, die Tastatur behält :focus-visible. */
+html { -webkit-tap-highlight-color: transparent; }
+
 body {
   margin: 0;
   background: var(--bg);
