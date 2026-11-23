@@ -150,6 +150,85 @@ final class MvvEfa
     }
 
     /**
+     * Störungen und Bauarbeiten im ganzen MVV (XML_ADDINFO_REQUEST) - im
+     * selben Format wie Mvg::messages(), damit der Ticker beide mischt.
+     *
+     * Die MVG kennt nur ihr eigenes Netz: U-Bahn, Tram, Stadtbus. Die RB 40,
+     * die Regionalbusse und die Ersatzverkehre der DB stehen nur hier.
+     * Meldungen der MVG selbst (providerCode "MVG") bleiben weg - die kommen
+     * aus deren eigener Quelle, mit genaueren Zeiträumen.
+     *
+     * @return array{ok:bool,error:?string,data:array}
+     */
+    public function messages(): array
+    {
+        $basis = rtrim(preg_replace('#XML_DM_REQUEST/?$#', '', (string) $this->cfg['endpoint']), '/');
+        $res = $this->http->getJson($basis . '/XML_ADDINFO_REQUEST?' . http_build_query([
+            'outputFormat' => 'rapidJSON', 'filterPublicationStatus' => 'current',
+        ]), ['User-Agent' => (string) ($this->cfg['user_agent'] ?? 'train-maxxing')]);
+        $infos = $res['json']['infos']['current'] ?? null;
+        if (!$res['ok'] || !is_array($infos)) {
+            return ['ok' => false, 'error' => 'MVV-Meldungen: HTTP ' . ($res['status'] ?? 0), 'data' => []];
+        }
+        $out = [];
+        foreach ($infos as $m) {
+            // Nur der Verbund selbst: die Auskunft führt auch Meldungen aus
+            // Nürnberg (VAG) und der DB von Plattling bis Passau (RIS).
+            if (!is_array($m) || !in_array($m['properties']['providerCode'] ?? '', ['MVV', 'MVV_SUB'], true)) {
+                continue;
+            }
+            $lines = [];
+            foreach ((array) ($m['affected']['lines'] ?? []) as $l) {
+                $label = trim((string) ($l['number'] ?? ''));
+                if ($label === '') {
+                    continue;
+                }
+                $lines[] = [
+                    'label'         => (string) preg_replace('/^(RB|RE|S|U|X|N)\s+(\d)/', '$1$2', $label),
+                    'transportType' => self::transportType($l),
+                    'network'       => 'mvv',
+                    'sev'           => str_contains((string) ($l['name'] ?? ''), 'Ersatzverkehr'),
+                ];
+            }
+            $link = $m['infoLinks'][0] ?? [];
+            $zeiten = [];
+            foreach ((array) ($m['timestamps']['validity'] ?? []) as $z) {
+                $zeiten[] = ['from' => $z['from'] ?? null, 'to' => $z['to'] ?? null];
+            }
+            $titel = trim((string) ($link['urlText'] ?? $link['subtitle'] ?? ''));
+            $out[] = [
+                'id'          => 'mvv:' . (string) ($m['id'] ?? $titel),
+                'type'        => (string) ($m['type'] ?? ''),
+                'title'       => Text::plain($titel),
+                'description' => Text::plain((string) ($link['content'] ?? '')),
+                'validFrom'   => $m['timestamps']['availability']['from'] ?? null,
+                'validTo'     => $m['timestamps']['availability']['to'] ?? null,
+                'incidents'   => $zeiten,
+                'lines'       => $lines,
+                'provider'    => (string) ($m['properties']['providerCode'] ?? 'MVV'),
+            ];
+        }
+        return ['ok' => true, 'error' => null, 'data' => $out];
+    }
+
+    /** Verkehrsmittel einer EFA-Linie in den Typen der MVG (UBAHN, SBAHN, ...). */
+    private static function transportType(array $l): string
+    {
+        $name = (string) ($l['name'] ?? '');
+        if (str_contains($name, 'Ersatzverkehr')) {
+            return 'BUS';
+        }
+        return match ((int) ($l['product']['class'] ?? -1)) {
+            0, 13   => 'BAHN',
+            1       => 'SBAHN',
+            2       => 'UBAHN',
+            3, 4    => 'TRAM',
+            5       => 'BUS',
+            default => 'REGIONAL_BUS',
+        };
+    }
+
+    /**
      * Fahrten einer Münchner Linie nach ihrem Namen - für die Zugsuche, wo
      * die ÖBB-Auskunft passen muss: ihr JourneyMatch kennt "Bus 181" in
      * Salzburg, Gstaad und Bratislava, den Münchner nicht.
