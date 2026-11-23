@@ -46,6 +46,7 @@ require $lib . '/Providers/SwissOpenData.php';
 require $lib . '/Providers/SwissTransport.php';
 require $lib . '/Locations.php';
 require $lib . '/Punctuality.php';
+require $lib . '/Providers/SwissSiriSx.php';
 require $lib . '/MvgRail.php';
 require $lib . '/Providers/DbApi.php';
 require $lib . '/Providers/SwissOjp.php';
@@ -1175,6 +1176,30 @@ pruefe('je Tag zählt der letzte Wert, mit Grund', [count($tage), $tage[0]['v'] 
     [1, 11, 'Verspätetes Personal aus vorheriger Fahrt']);
 pruefe('nur die letzten Tage im Diagramm',
     count(Punctuality::days([['d' => '2026-11-01', 'v' => 3], ['d' => '2026-11-20', 'v' => 5]], 7, '2026-11-23')), 1);
+
+// ---------------------------------------------------------------------
+echo "\nSchweiz - geplante Unterbrüche aus SIRI-SX\n";
+
+$sxXml = '<PtSituationElement xmlns="http://www.siri.org.uk/siri"><SituationNumber>ch:1:sstid:1:x</SituationNumber>'
+    . '<ValidityPeriod><StartTime>2026-11-29T00:00:00Z</StartTime><EndTime>2026-11-30T04:00:00Z</EndTime></ValidityPeriod>'
+    . '<AlertCause>constructionWork</AlertCause><Planned>true</Planned>'
+    . '<Affects><StopPlaces>'
+    . '<AffectedStopPlace><StopPlaceRef>ch:1:sloid:113</StopPlaceRef><PlaceName>Laufen</PlaceName></AffectedStopPlace>'
+    . '<AffectedStopPlace><StopPlaceRef>ch:1:sloid:10</StopPlaceRef><PlaceName>Basel SBB</PlaceName></AffectedStopPlace>'
+    . '<AffectedStopPlace><StopPlaceRef>ch:1:sloid:4300</StopPlaceRef><PlaceName>Biel/Bienne</PlaceName></AffectedStopPlace>'
+    . '</StopPlaces></Affects>'
+    . '<Consequences><Consequence><Affects><Networks><AffectedNetwork><AffectedLine><PublishedLineName>IR56</PublishedLineName></AffectedLine></AffectedNetwork></Networks></Affects></Consequence></Consequences>'
+    . '<PublishingActions><PublishingAction><PassengerInformationAction><TextualContent><TextualContentSize>M</TextualContentSize>'
+    . '<SummaryContent><SummaryText xml:lang="DE">Unterbruch zwischen Laufen und Basel SBB</SummaryText></SummaryContent>'
+    . '</TextualContent></PassengerInformationAction></PublishingAction></PublishingActions></PtSituationElement>';
+$sx = SwissSiriSx::situation(simplexml_load_string($sxXml));
+pruefe('SIRI-SX: Bahn-Bauarbeit erkannt, Abschnitt aus dem Titel',
+    [$sx['lines'] ?? null, $sx['fromName'] ?? null, $sx['toName'] ?? null, $sx['start'] ?? null],
+    [['IR56'], 'Laufen', 'Basel SBB', '2026-11-29']);
+pruefe('SIRI-SX: Bus-Baustelle fällt weg',
+    SwissSiriSx::situation(simplexml_load_string(str_replace('IR56', '144', $sxXml))), null);
+pruefe('Haltestellen-Kennung zur Bahnhofsnummer', [SwissSiriSx::uic('ch:1:sloid:7000'), SwissSiriSx::uic('ch:1:sloid:10'), SwissSiriSx::uic('8301003')],
+    ['8507000', '8500010', '8301003']);
 
 echo "\n" . ($gesamt - $fehler) . " von $gesamt bestanden.\n";
 exit($fehler === 0 ? 0 : 1);
