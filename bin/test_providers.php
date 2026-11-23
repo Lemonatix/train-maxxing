@@ -1139,5 +1139,26 @@ pruefe('deutscher Stadthalt bleibt (gleiche Nummer bei DB und ÖBB)',
     Locations::dbForeignLocalId(['id' => '625213', 'name' => 'Stiglmaierplatz, München']), false);
 pruefe('Bahnhof mit EVA-Nummer bleibt', Locations::dbForeignLocalId(['id' => '8100013', 'name' => 'Wörgl Hbf (A)']), false);
 
+// ---------------------------------------------------------------------
+echo "\nOpenBoards - Nachfolger der Timetables-API\n";
+
+$ob = DbApi::parseOpenBoard([
+    'departures' => [[
+        'departureId' => '8000261_D_7', 'cancelled' => false, 'messages' => [7],
+        'timeSchedule' => '2026-11-23T19:35:00+01:00', 'time' => '2026-11-23T19:55:00+01:00',
+        'platformSchedule' => ['name' => '21'], 'platform' => ['name' => '22'],
+        'transport' => ['category' => 'ICE', 'journeyNumber' => 1500],
+    ], [
+        'departureId' => '8098263_D_1', 'cancelled' => true, 'messages' => [],
+        'timeSchedule' => '2026-11-23T19:32:00+01:00',
+        'transport' => ['category' => 'S', 'journeyNumber' => 6598, 'line' => ['name' => 'S5']],
+    ]],
+    'messages' => ['risCauseCodes' => [['messageID' => 7, 'descriptions' => [['text' => 'Verspätete Bereitstellung des Zuges']]]]],
+], false);
+pruefe('OpenBoards: Nummer, Plan, Ist, Gleis und Grund',
+    [$ob[0]['number'], substr($ob[0]['dp']['pt'], 11, 5), substr($ob[0]['dp']['ct'], 11, 5), $ob[0]['dp']['pp'], $ob[0]['dp']['cp'], $ob[0]['dp']['reasons'][0]],
+    ['1500', '19:35', '19:55', '21', '22', 'Verspätete Bereitstellung des Zuges']);
+pruefe('OpenBoards: Ausfall und Linie der S-Bahn', [$ob[1]['dp']['cancelled'] ?? false, $ob[1]['dp']['line']], [true, 'S5']);
+
 echo "\n" . ($gesamt - $fehler) . " von $gesamt bestanden.\n";
 exit($fehler === 0 ? 0 : 1);
