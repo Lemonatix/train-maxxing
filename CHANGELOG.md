@@ -1,6 +1,6 @@
 # Änderungen
 
-## 1.4 (in Arbeit)
+## 1.4 (November 2026)
 
 ### Neu
 
