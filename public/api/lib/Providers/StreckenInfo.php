@@ -623,6 +623,18 @@ final class StreckenInfo
         if ($p === self::REV_OK) {
             return $start;
         }
+
+        // DER STAND AUS DER LIVE-VERBINDUNG. Seit November 2026 sagt der
+        // Server bei einem falschen Stand nur noch "Ungültige Revision" -
+        // nicht mehr "zu alt" oder "existiert noch nicht", das Suchen unten
+        // kommt also nicht mehr ans Ziel. Die Webseite selbst bekommt den
+        // Stand über ihren WebSocket: HANDSHAKE senden, HANDSHAKE mit
+        // `revision` zurück. Dasselbe hier, einmal, dann gemerkt.
+        $live = $this->liveRevision();
+        if ($live !== null && $this->probeRevision($live) === self::REV_OK) {
+            $this->cache->set($key, $live);
+            return $live;
+        }
         if ($p === self::REV_ERROR) {
             return null;   // Dienst antwortet nicht - nicht weitersuchen
         }
@@ -680,6 +692,82 @@ final class StreckenInfo
         }
 
         return null;
+    }
+
+    /**
+     * Den aktuellen Stand über den WebSocket von strecken-info.de holen,
+     * wie die Webseite beim Laden: verbinden, {"type":"HANDSHAKE",
+     * "revision":null} senden, auf die HANDSHAKE-Antwort warten.
+     *
+     * Ein kleiner Client von Hand (Upgrade-Anfrage, ein maskierter
+     * Textrahmen, Rahmen lesen) - ohne Bibliothek, damit es auf jedem
+     * Webspace mit OpenSSL läuft. null, wenn etwas nicht klappt.
+     */
+    private function liveRevision(float $timeout = 8.0): ?int
+    {
+        $host = (string) (parse_url(self::ENDPOINT, PHP_URL_HOST) ?: 'strecken-info.de');
+        $ctx = stream_context_create(['ssl' => ['SNI_enabled' => true, 'peer_name' => $host]]);
+        $s = @stream_socket_client("ssl://$host:443", $errno, $err, $timeout, STREAM_CLIENT_CONNECT, $ctx);
+        if ($s === false) {
+            return null;
+        }
+        stream_set_timeout($s, (int) ceil($timeout));
+        $schluessel = base64_encode(random_bytes(16));
+        fwrite($s, "GET /api/websocket HTTP/1.1\r\nHost: $host\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            . "Sec-WebSocket-Key: $schluessel\r\nSec-WebSocket-Version: 13\r\nOrigin: https://$host\r\n"
+            . 'User-Agent: ' . (string) ($this->cfg['user_agent'] ?? 'train-maxxing') . "\r\n\r\n");
+        $kopf = '';
+        while (!str_contains($kopf, "\r\n\r\n") && !feof($s) && strlen($kopf) < 8192) {
+            $c = fread($s, 1);
+            if ($c === '' || $c === false) {
+                break;
+            }
+            $kopf .= $c;
+        }
+        if (!preg_match('#^HTTP/1\.1 101#', $kopf)) {
+            fclose($s);
+            return null;
+        }
+        // Ein Textrahmen vom Client muss maskiert sein (RFC 6455).
+        $nutzlast = (string) json_encode(['type' => 'HANDSHAKE', 'revision' => null]);
+        $maske = random_bytes(4);
+        $n = strlen($nutzlast);
+        $rahmen = chr(0x81) . ($n < 126 ? chr(0x80 | $n) : chr(0x80 | 126) . pack('n', $n)) . $maske;
+        for ($i = 0; $i < $n; $i++) {
+            $rahmen .= $nutzlast[$i] ^ $maske[$i % 4];
+        }
+        fwrite($s, $rahmen);
+
+        $ende = microtime(true) + $timeout;
+        $rev = null;
+        while ($rev === null && microtime(true) < $ende && !feof($s)) {
+            $h = fread($s, 2);
+            if (!is_string($h) || strlen($h) < 2) {
+                break;
+            }
+            $op = ord($h[0]) & 0x0f;
+            $laenge = ord($h[1]) & 0x7f;
+            if ($laenge === 126) {
+                $laenge = unpack('n', (string) fread($s, 2))[1];
+            } elseif ($laenge === 127) {
+                $laenge = unpack('J', (string) fread($s, 8))[1];
+            }
+            $daten = '';
+            while (strlen($daten) < $laenge && !feof($s) && microtime(true) < $ende) {
+                $daten .= (string) fread($s, $laenge - strlen($daten));
+            }
+            if ($op === 8) {
+                break;
+            }
+            if ($op === 1) {
+                $j = json_decode($daten, true);
+                if (($j['type'] ?? '') === 'HANDSHAKE' && is_numeric($j['revision'] ?? null)) {
+                    $rev = (int) $j['revision'];
+                }
+            }
+        }
+        fclose($s);
+        return $rev;
     }
 
     /**
