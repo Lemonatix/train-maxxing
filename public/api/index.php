@@ -774,7 +774,7 @@ function handleTrainDetails(Http $http, array $config, Cache $cache): void
     // Vorher hing sie an $t, gecacht wurde aber $res['data'] - dieselbe
     // Anfrage lieferte die Historie deshalb beim ersten Aufruf mit und
     // sechzig Sekunden lang danach nicht mehr.
-    $historie = static function (array $t) use ($config): array {
+    $historie = static function (array $t) use ($config, $http, $cache): array {
         $num = trim((string) ($t['trainNumber'] ?? ''));
         $cat = trim((string) ($t['category'] ?? ''));
         if ($num === '' || $cat === '') {
