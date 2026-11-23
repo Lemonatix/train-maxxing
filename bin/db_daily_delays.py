@@ -118,6 +118,10 @@ def compute(tag: date, plan: dict, aend: dict) -> dict:
             if p is None:
                 continue
             minuten = int(round((i - p).total_seconds() / 60)) if i else 0
+            # Mehr als 5 min zu früh: fehlende letzte Meldung oder anderes
+            # Ziel, kein echter Wert (ICE 1060 am 22.11.26: -29).
+            if minuten < -5:
+                continue
             wert = [minuten] + ([int(a[3][-1])] if a and a[3] and a[3][-1].isdigit() and minuten > 0 else [])
         # Dieselbe Nummer zweimal am Tag (selten): die größere Verspätung.
         alt = zuege.get(zug)
