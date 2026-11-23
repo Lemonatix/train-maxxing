@@ -2148,6 +2148,91 @@ async function runInto(body, leg, state, actions) {
   body.replaceChildren(...out);
 }
 
+/**
+ * VERSPÄTUNG JE TAG, wie bei delaybahn: ein Balken je Tag der letzten
+ * sieben, über der Null nach oben, zu früh nach unten. Farbe nach Höhe
+ * (grün unter 5, gelb unter 10, rot ab 10 Minuten), der Wert steht
+ * darüber, Datum darunter. Tippen/Überfahren zeigt den Grund, wo einer
+ * gemessen wurde. Darunter der Median - ein Ausreißer verschiebt ihn kaum.
+ *
+ * Tage ohne Messung bleiben leer: gemessen wird nur, wenn jemand den Zug
+ * in der App ansieht (Punctuality::record).
+ *
+ * @param {{d:string,v:number,r?:string}[]} days
+ */
+export function delayChart(days, heute = new Date()) {
+  const tage = [];
+  for (let i = 6; i >= 0; i--) {
+    const t = new Date(heute);
+    t.setDate(t.getDate() - i);
+    tage.push(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`);
+  }
+  const nachTag = new Map((days || []).map((x) => [x.d, x]));
+  const werte = tage.map((d) => nachTag.get(d)).filter(Boolean);
+  if (werte.length === 0) return null;
+
+  const box = el('div', 'delay-chart');
+  box.append(el('p', 'delay-chart__title', 'Ankunftsverspätung pro Tag – letzte 7 Tage'));
+  const NS = 'http://www.w3.org/2000/svg';
+  const W = 320, H = 138, oben = 18, unten = 30, links = 4;
+  const max = Math.max(10, ...werte.map((x) => x.v));
+  const min = Math.min(0, ...werte.map((x) => x.v));
+  const y = (v) => oben + ((max - v) / (max - min)) * (H - oben - unten);
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('class', 'delay-chart__svg');
+  svg.setAttribute('role', 'img');
+  const null0 = document.createElementNS(NS, 'line');
+  null0.setAttribute('x1', String(links)); null0.setAttribute('x2', String(W));
+  null0.setAttribute('y1', y(0).toFixed(1)); null0.setAttribute('y2', y(0).toFixed(1));
+  null0.setAttribute('class', 'delay-chart__zero');
+  svg.append(null0);
+  const spalte = (W - links) / 7;
+  const text = (x, yy, t, cls) => {
+    const n = document.createElementNS(NS, 'text');
+    n.setAttribute('x', x.toFixed(1)); n.setAttribute('y', yy.toFixed(1));
+    n.setAttribute('text-anchor', 'middle'); n.setAttribute('class', cls);
+    n.textContent = t;
+    return n;
+  };
+  tage.forEach((d, i) => {
+    const mx = links + spalte * i + spalte / 2;
+    const [, mo, ta] = d.split('-');
+    svg.append(text(mx, H - 6, `${Number(ta)}.${Number(mo)}.`, 'delay-chart__day'));
+    const x = nachTag.get(d);
+    if (!x) {
+      svg.append(text(mx, y(0) - 4, '–', 'delay-chart__none'));
+      return;
+    }
+    const v = x.v;
+    const g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', 'delay-chart__bar ' + (v >= 10 ? 'is-late' : v >= 5 ? 'is-slow' : 'is-ok'));
+    const r = document.createElementNS(NS, 'rect');
+    const top = Math.min(y(v), y(0));
+    const hoehe = Math.max(2, Math.abs(y(v) - y(0)));
+    r.setAttribute('x', (mx - spalte * 0.28).toFixed(1));
+    r.setAttribute('width', (spalte * 0.56).toFixed(1));
+    r.setAttribute('y', top.toFixed(1));
+    r.setAttribute('height', hoehe.toFixed(1));
+    r.setAttribute('rx', '2');
+    g.append(r);
+    g.append(text(mx, (v >= 0 ? top - 4 : top + hoehe + 11), `${v > 0 ? '+' : ''}${v}`, 'delay-chart__val'));
+    const titel = document.createElementNS(NS, 'title');
+    titel.textContent = `${Number(ta)}.${Number(mo)}. ${v > 0 ? '+' : ''}${v} min${x.r ? ` – ${x.r}` : ''}`;
+    g.append(titel);
+    svg.append(g);
+  });
+  box.append(svg);
+
+  const sortiert = werte.map((x) => x.v).sort((a, b) => a - b);
+  const m = sortiert.length % 2 ? sortiert[(sortiert.length - 1) / 2]
+    : Math.round((sortiert[sortiert.length / 2 - 1] + sortiert[sortiert.length / 2]) / 2);
+  box.append(el('p', 'delay-chart__note',
+    `Median ${m > 0 ? '+' : ''}${m} min an ${werte.length} von 7 Tagen – einzelne Ausreißer verschieben ihn kaum. `
+    + 'Gemessen, wenn jemand den Zug in train-maxxing angesehen hat; Tage ohne Balken fehlen dort.'));
+  return box;
+}
+
 /** Reiter "Zug": was über das Fahrzeug und diese Zugnummer bekannt ist. */
 function trainFacts(journey, leg, comfortEntry, state) {
   const out = [];
@@ -2185,6 +2270,8 @@ function trainFacts(journey, leg, comfortEntry, state) {
     zeile('Pünktlich', `${Math.round((h.rate ?? 0) * 100)} % · Ø +${num(h.avg)} min`
       + (h.samples7d > 0 ? ` · letzte 7 Tage Ø +${num(h.avg7d)} min` : ''),
     h.source === 'baseline' ? 'Näherung aus der Jahresstatistik des Betreibers.' : 'Aus eigenen Messungen.');
+    const diagramm = delayChart(h.days);
+    if (diagramm) out.push(diagramm);
   }
   if (out.length === 1) out.push(el('p', 'fahrt__muted', 'Mehr ist über diesen Zug gerade nicht bekannt.'));
   return out;
