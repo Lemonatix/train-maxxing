@@ -133,6 +133,7 @@ require __DIR__ . '/lib/Walks.php';
 require __DIR__ . '/lib/StationWalks.php';
 require __DIR__ . '/lib/MvgRail.php';
 require __DIR__ . '/lib/WebPush.php';
+require __DIR__ . '/lib/Fcm.php';
 require __DIR__ . '/lib/PushWatch.php';
 require __DIR__ . '/lib/Providers/OebbHafas.php';
 require __DIR__ . '/lib/Providers/DbVendo.php';
@@ -2924,7 +2925,7 @@ function handleJourneys(Http $http, array $config, Cache $cache): void
 /** Der öffentliche VAPID-Schlüssel - der Browser braucht ihn zum Anmelden. */
 function handlePushKey(Http $http, array $config): void
 {
-    $push = new WebPush($http, $config['push'] ?? []);
+    $push = new WebPush($http, ($config['push'] ?? []) + ['cache_dir' => (string) $config['cache_dir']]);
     if (!$push->isConfigured()) {
         fail('Benachrichtigungen per Push sind auf diesem Server nicht eingerichtet.', 404);
     }
@@ -2964,7 +2965,7 @@ function pushBody(): array
  */
 function handlePushSubscribe(Http $http, array $config): void
 {
-    $push = new WebPush($http, $config['push'] ?? []);
+    $push = new WebPush($http, ($config['push'] ?? []) + ['cache_dir' => (string) $config['cache_dir']]);
     if (!$push->isConfigured()) {
         fail('Benachrichtigungen per Push sind auf diesem Server nicht eingerichtet.', 404);
     }
@@ -2975,9 +2976,13 @@ function handlePushSubscribe(Http $http, array $config): void
     $body = pushBody();
     $sub = $body['subscription'] ?? null;
     $endpoint = (string) ($sub['endpoint'] ?? '');
-    if (!is_array($sub) || !WebPush::allowedEndpoint($endpoint)
+    $fcm = str_starts_with($endpoint, 'fcm:');
+    if ($fcm && !(new Fcm($http, ($config['push'] ?? []) + ['cache_dir' => (string) $config['cache_dir']]))->isConfigured()) {
+        fail('Push für die App ist auf diesem Server nicht eingerichtet.', 404);
+    }
+    if (!is_array($sub) || ($fcm ? !Fcm::validToken(substr($endpoint, 4)) : (!WebPush::allowedEndpoint($endpoint)
         || strlen(WebPush::ub64((string) ($sub['keys']['p256dh'] ?? ''))) !== 65
-        || strlen(WebPush::ub64((string) ($sub['keys']['auth'] ?? ''))) < 16) {
+        || strlen(WebPush::ub64((string) ($sub['keys']['auth'] ?? ''))) < 16))) {
         fail('Ungültige Push-Anmeldung.', 400);
     }
     $journey = $body['journey'] ?? null;
@@ -3078,7 +3083,7 @@ function handlePushTick(Http $http, array $config, Cache $cache): void
     if (!$vonCron && ($key === '' || !hash_equals($key, (string) ($_GET['key'] ?? '')))) {
         fail('Nicht erlaubt.', 403);
     }
-    $push = new WebPush($http, $config['push'] ?? []);
+    $push = new WebPush($http, ($config['push'] ?? []) + ['cache_dir' => (string) $config['cache_dir']]);
     if (!$push->isConfigured()) {
         fail('Benachrichtigungen per Push sind auf diesem Server nicht eingerichtet.', 404);
     }
