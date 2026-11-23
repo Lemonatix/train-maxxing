@@ -2007,6 +2007,7 @@ function renderTrainInfo(journey, leg, comfortEntry, state, actions) {
   if (canSequence(leg, actions)) reiter.push(['reihung', 'Wagenreihung']);
   if (actions?.loadRun && actions.canRun?.(leg)) reiter.push(['lauf', 'Zuglauf']);
   reiter.push(['zug', 'Zug']);
+  if (historyOf(journey, leg)) reiter.push(['puenktlich', 'Pünktlichkeit']);
 
   const key = halteKey(leg);
   const panel = el('div', 'fahrt');
@@ -2043,6 +2044,7 @@ function renderTrainInfo(journey, leg, comfortEntry, state, actions) {
     panel.replaceChildren(leiste, body);
     if (aktiv === 'reihung') sequenceInto(body, leg, actions);
     else if (aktiv === 'lauf') runInto(body, leg, state, actions);
+    else if (aktiv === 'puenktlich') body.append(...punctualityFacts(journey, leg));
     else body.append(...trainFacts(journey, leg, comfortEntry, state));
   };
 
@@ -2275,16 +2277,30 @@ function trainFacts(journey, leg, comfortEntry, state) {
     out.push(box);
   }
 
-  const h = journey.history?.[`${String(leg.category || '').trim()} ${String(leg.trainNumber || '').trim()}`];
-  if (h) {
-    const num = (v) => (typeof v === 'number' ? v.toFixed(1).replace('.', ',') : '?');
-    zeile('Pünktlich', `${Math.round((h.rate ?? 0) * 100)} % · Ø +${num(h.avg)} min`
-      + (h.samples7d > 0 ? ` · letzte 7 Tage Ø +${num(h.avg7d)} min` : ''),
-    h.source === 'baseline' ? 'Näherung aus der Jahresstatistik des Betreibers.' : 'Aus eigenen Messungen.');
-    const diagramm = delayChart(h.days);
-    if (diagramm) out.push(diagramm);
-  }
   if (out.length === 1) out.push(el('p', 'fahrt__muted', 'Mehr ist über diesen Zug gerade nicht bekannt.'));
+  return out;
+}
+
+/** Die Pünktlichkeitsstatistik eines Abschnitts, falls es eine gibt. */
+function historyOf(journey, leg) {
+  return journey.history?.[`${String(leg.category || '').trim()} ${String(leg.trainNumber || '').trim()}`] || null;
+}
+
+/** Reiter "Pünktlichkeit": Quote, Schnitt und die Tage der letzten Woche. */
+function punctualityFacts(journey, leg) {
+  const h = historyOf(journey, leg);
+  if (!h) return [el('p', 'fahrt__muted', 'Für diesen Zug gibt es noch keine Statistik.')];
+  const out = [];
+  const num = (v) => (typeof v === 'number' ? v.toFixed(1).replace('.', ',') : '?');
+  const p = el('p', 'fahrt__fact');
+  p.append(el('span', 'fahrt__label', 'Pünktlich'), el('span', null,
+    `${Math.round((h.rate ?? 0) * 100)} % · Ø +${num(h.avg)} min`
+    + (h.samples7d > 0 ? ` · letzte 7 Tage Ø +${num(h.avg7d)} min` : '')));
+  p.title = h.source === 'baseline' ? 'Näherung aus der Jahresstatistik des Betreibers.' : 'Aus eigenen Messungen.';
+  out.push(p);
+  const diagramm = delayChart(h.days);
+  if (diagramm) out.push(diagramm);
+  else out.push(el('p', 'fahrt__muted', 'Tageswerte gibt es für diesen Zug noch nicht.'));
   return out;
 }
 
