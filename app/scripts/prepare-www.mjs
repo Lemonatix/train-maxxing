@@ -71,9 +71,14 @@ if (i < 0) {
   console.error('index.html: kein <script> gefunden - wo soll die App-Kennung hin?');
   process.exit(1);
 }
-const kennung = `<script>window.TRAIN_MAXXING_APP = ${JSON.stringify({ site: siteUrl })};`
+// Version und Build-Nummer aus build.gradle: daran erkennt die App, ob es
+// eine neuere gibt (update.js fragt den Server, action=appversion).
+const gradle = await readFile(path.join(appDir, 'android', 'app', 'build.gradle'), 'utf8').catch(() => '');
+const version = gradle.match(/versionName\s+"([^"]+)"/)?.[1] || '';
+const build = Number(gradle.match(/versionCode\s+(\d+)/)?.[1] || 0);
+const kennung = `<script>window.TRAIN_MAXXING_APP = ${JSON.stringify({ site: siteUrl, version, build })};`
   + "document.documentElement.classList.add('in-app');</script>\n  ";
 html = html.slice(0, i) + kennung + html.slice(i);
 await writeFile(indexPfad, html);
 
-console.log(`www/ erzeugt aus public/ - Daten von ${siteUrl}api/`);
+console.log(`www/ erzeugt aus public/ - Daten von ${siteUrl}api/, App ${version} (Build ${build})`);
