@@ -21,7 +21,8 @@ return [
             // im Umstiegsplan und die Baureihe Schweizer Züge.
             'formation_token' => '',
             // "SIRI-SX Planned" - eigener Token: geplante Bauarbeiten und
-            // Unterbrüche in der Schweiz für die Baustellen-Karte.
+            // Unterbrüche in der Schweiz für die Baustellen-Karte. Er muss
+            // den Datensatz la/siri-sx öffnen (SwissSiriSx.php).
             'sirisx_planned_token' => '',
             // "SIRI-SX Unplanned" - eigener Token: kurzfristige Störungen
             // (noch nicht genutzt).
