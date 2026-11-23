@@ -2725,6 +2725,31 @@ details.live__msg .live__msg-text {
 
 .journey__arrow { color: var(--text-muted); }
 
+/* Einstieg und Ausstieg mit Gleis auf der zugeklappten Karte. */
+.journey__stations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.45rem;
+  margin: 0.15rem 0 0.25rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+.journey__stations .journey__arrow { color: var(--text-muted); }
+.journey__station { min-width: 0; overflow-wrap: anywhere; }
+.journey__station-dir { color: var(--text-muted); font-size: 0.74rem; }
+.journey__station-time { font-family: var(--font-mono); color: var(--text-dim); }
+.journey__platform {
+  margin-left: 0.35rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
 .journey__meta {
   display: flex;
   flex-wrap: wrap;
