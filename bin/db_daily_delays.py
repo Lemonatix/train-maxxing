@@ -10,7 +10,8 @@ Parquet, rund 140 MB: `plan` (Sollfahrplan je Bahnhof und Stunde) und `fchg`
 
 RECHNUNG:
   - Aus `plan`: je Halt die Kennung (s id), Zug (Gattung + Nummer) und ob
-    der Zug dort endet - eine Ankunft ohne Abfahrt.
+    der Zug dort endet - eine Ankunft ohne Abfahrt. Fehlt der Endbahnhof
+    (Ziel im Ausland, fehlende Stunde), zählt der letzte bekannte Halt.
   - Aus `fchg`: je Halt die zuletzt gemeldete Ist-Ankunft (ct), Ausfall
     (cs="c") und die Gründe (m t="d", Codes wie bei DbApi::GRUENDE).
   - Verspätung = Ist minus Soll am Endbahnhof, in Minuten. Steht ein
@@ -103,13 +104,21 @@ def parse(dateien: list[str]):
 
 def compute(tag: date, plan: dict, aend: dict) -> dict:
     kennung = tag.strftime('%y%m%d')
-    zuege = {}
+    # Je Fahrt der letzte Halt, den das Archiv kennt: der Endbahnhof, oder -
+    # endet der Zug im Ausland (RJ, EC) oder fehlt die Stunde mit seiner
+    # Ankunft - der letzte deutsche Halt davor. Sonst fehlten solche Tage.
+    letzter = {}
     for sid, (zug, soll, endet) in plan.items():
-        if not endet or not zug:
-            continue
         teile = sid.rsplit('-', 2)
-        if len(teile) != 3 or not teile[1].startswith(kennung):
+        if not zug or len(teile) != 3 or not teile[1].startswith(kennung) or not teile[2].isdigit():
             continue
+        fahrt = teile[0] + '-' + teile[1]
+        alt = letzter.get(fahrt)
+        if alt is None or (endet, int(teile[2])) > (alt[1], alt[0]):
+            letzter[fahrt] = (int(teile[2]), endet, sid)
+    zuege = {}
+    for _, _, sid in letzter.values():
+        zug, soll, endet = plan[sid]
         a = aend.get(sid)
         if a is not None and a[2]:
             wert = ['x']
