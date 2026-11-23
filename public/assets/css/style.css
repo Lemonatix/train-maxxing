@@ -16,8 +16,8 @@
 
   /* Flächen — hell mit dezenter Bläue, damit die Akzentfarben
      nicht auf sterilem Weiß liegen */
-  --bg: #f5f7fb;
-  --bg-deep: #e6ebf3;
+  --bg: #f4f5f7;
+  --bg-deep: #e8ebef;
   --surface: rgba(255, 255, 255, 0.78);
   --surface-solid: #ffffff;
   --surface-hover: rgba(255, 255, 255, 0.95);
@@ -40,7 +40,7 @@
   --surface-card-hover: #f6f8fc;
 
   /* Ränder — Slate mit niedriger Deckkraft, sichtbar aber dezent */
-  --border: rgba(15, 23, 42, 0.09);
+  --border: rgba(15, 23, 42, 0.08);
   --border-strong: rgba(15, 23, 42, 0.18);
 
   /* Text — kräftige Slate-Töne für hohen Kontrast */
@@ -48,24 +48,26 @@
   --text-dim: #475569;
   --text-muted: #64748b;
 
-  /* Akzente — gegenüber dem Dark-Theme leicht abgedunkelt,
-     damit sie auf hellem Grund sattigend wirken */
-  --accent: #0284c7;
-  --accent-soft: rgba(2, 132, 199, 0.11);
-  --purple: #7c3aed;
-  --purple-soft: rgba(124, 58, 237, 0.10);
-  --green: #059669;
-  --green-soft: rgba(5, 150, 105, 0.11);
-  --amber: #b45309;
+  /* Akzente — im hellen Modus GEDÄMPFT und aufeinander abgestimmt (1.4):
+     vorher standen ein grelles Himmelblau, ein sattes Violett, Smaragd,
+     Bernstein und Signalrot gleich laut nebeneinander. Jetzt dieselben
+     Farbfamilien mit ähnlicher Sättigung, auf einem neutraleren Grau. */
+  --accent: #1d6fa3;
+  --accent-soft: rgba(29, 111, 163, 0.09);
+  --purple: #6b5fb3;
+  --purple-soft: rgba(107, 95, 179, 0.08);
+  --green: #17855c;
+  --green-soft: rgba(23, 133, 92, 0.09);
+  --amber: #a5620c;
   /* Laufweg im Umstiegsplan: kräftiges Gelb, auf hellen Kacheln noch sichtbar. */
   --xwalk: #eab308;
-  --amber-soft: rgba(234, 179, 8, 0.15);
-  --rose: #e11d48;
-  --rose-soft: rgba(225, 29, 72, 0.10);
+  --amber-soft: rgba(202, 138, 4, 0.12);
+  --rose: #c43a55;
+  --rose-soft: rgba(196, 58, 85, 0.08);
 
   /* Verkehrsrot — Signalfarbe für Fernverkehr, wie im DB-Navigator */
-  --db-red: #dc2626;
-  --db-red-soft: rgba(220, 38, 38, 0.11);
+  --db-red: #c4362f;
+  --db-red-soft: rgba(196, 54, 47, 0.09);
 
   /* Typografie */
   --font-main: 'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -75,7 +77,7 @@
   --radius: 12px;
   --radius-sm: 8px;
   --radius-xs: 4px;
-  --glow-accent: 0 6px 22px rgba(2, 132, 199, 0.18);
+  --glow-accent: 0 6px 22px rgba(29, 111, 163, 0.14);
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
   --shadow-lg: 0 14px 40px rgba(15, 23, 42, 0.14), 0 4px 12px rgba(15, 23, 42, 0.06);
@@ -193,8 +195,8 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(1200px 700px at 12% -8%, var(--bg-glow-1, rgba(2, 132, 199, 0.10)), transparent 60%),
-    radial-gradient(900px 520px at 88% 4%, var(--bg-glow-2, rgba(124, 58, 237, 0.07)), transparent 60%);
+    radial-gradient(1200px 700px at 12% -8%, var(--bg-glow-1, rgba(29, 111, 163, 0.10)), transparent 60%),
+    radial-gradient(900px 520px at 88% 4%, var(--bg-glow-2, rgba(107, 95, 179, 0.05)), transparent 60%);
 }
 
 .wrap {
@@ -292,7 +294,7 @@ body::before {
 .mode-btn.is-active {
   background: var(--surface-solid);
   color: var(--accent);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 0 0 1px rgba(2, 132, 199, 0.25);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 0 0 1px rgba(29, 111, 163, 0.25);
 }
 
 /* --- Theme-Umschalter ---------------------------------------------- */
@@ -1009,7 +1011,7 @@ input[type="range"]::-moz-range-progress {
   background: var(--accent);
   border-color: var(--accent);
   color: #ffffff;
-  box-shadow: 0 1px 2px rgba(2, 132, 199, 0.15), 0 4px 12px rgba(2, 132, 199, 0.20);
+  box-shadow: 0 1px 2px rgba(29, 111, 163, 0.15), 0 4px 12px rgba(29, 111, 163, 0.20);
 }
 
 .btn--primary:hover {
@@ -2687,7 +2689,7 @@ details.live__msg .live__msg-text {
 }
 
 .journey--best {
-  border-color: rgba(2, 132, 199, 0.45);
+  border-color: rgba(29, 111, 163, 0.45);
   box-shadow: var(--glow-accent);
 }
 
@@ -2962,7 +2964,7 @@ details.live__msg .live__msg-text {
   border-radius: var(--radius-sm);
   /* Je günstiger das Fenster, desto kräftiger die Füllung. */
   background: linear-gradient(to top,
-    rgba(2, 132, 199, calc(0.32 * var(--fill, 0.5))) 0%,
+    rgba(29, 111, 163, calc(0.32 * var(--fill, 0.5))) 0%,
     transparent 100%);
   color: var(--text-dim);
   font-family: var(--font-mono);
@@ -2973,7 +2975,7 @@ details.live__msg .live__msg-text {
 .bp__bar:hover { border-color: var(--accent); color: var(--text); }
 
 .bp__bar.is-best {
-  border-color: rgba(5, 150, 105, 0.55);
+  border-color: rgba(23, 133, 92, 0.5);
   color: var(--green);
 }
 
@@ -4092,7 +4094,7 @@ details.live__msg .live__msg-text {
   align-items: center;
   min-height: 34px;
   padding: 0.25rem 0.7rem;
-  border: 1px solid rgba(2, 132, 199, 0.3);
+  border: 1px solid rgba(29, 111, 163, 0.3);
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
@@ -4103,7 +4105,7 @@ details.live__msg .live__msg-text {
   transition: var(--transition);
 }
 
-.shops__link:hover { background: rgba(2, 132, 199, 0.18); box-shadow: var(--glow-accent); }
+.shops__link:hover { background: rgba(29, 111, 163, 0.18); box-shadow: var(--glow-accent); }
 
 .shops__link--manual {
   border-color: var(--border);
