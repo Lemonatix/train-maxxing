@@ -155,6 +155,8 @@ final class Locations
         // ÖBB: ergänzt AT/CH-Halte, die die DB nicht kennt.
         // MVG: schließt die Münchner Nahverkehrslücke (Odeonsplatz & Co).
         $umwandeln = ['db' => 'fromDb', 'oebb' => 'fromOebb', 'mvg' => 'fromMvg'];
+        $ausland = [];   // DB-Halte im Ausland mit DB-eigener Nummer, siehe unten
+        $oebbHalte = [];
         foreach ($antworten as $quelle => $res) {
             $sources[$quelle] = $res['ok'];
             if (!$res['ok']) {
@@ -162,11 +164,33 @@ final class Locations
                 continue;
             }
             foreach ($res['data'] as $i => $loc) {
-                $this->merge($byId, $this->{$umwandeln[$quelle]}($loc, $i));
+                $l = $this->{$umwandeln[$quelle]}($loc, $i);
+                if ($quelle === 'db' && self::dbForeignLocalId($l)) {
+                    $ausland[] = $l;
+                    continue;
+                }
+                if ($quelle === 'oebb') {
+                    $oebbHalte[] = $l;
+                }
+                $this->merge($byId, $l);
             }
             // Die MVG liefert nur Haltestellen; Adressen kommen von DB und ÖBB.
             if ($quelle !== 'mvg') {
                 array_push($orte, ...($res['places'] ?? []));
+            }
+        }
+
+        // DB-NUMMERN IM AUSLAND: Für Halte in Österreich und der Schweiz hat
+        // die DB eigene Nummern ("Niederau Wildenbach, Wildschönau (A)" ist
+        // 313363). Die Verbindungssuche fragt aber die ÖBB, und die liest
+        // 313363 als ihre eigene Nummer - Peygarten-Ottenstein in
+        // Niederösterreich. In Deutschland sind die Nummern beider gleich.
+        // Also: die ÖBB-Haltestelle an derselben Stelle nehmen; gibt es
+        // keine, den Treffer weglassen statt in einen falschen Ort zu führen.
+        foreach ($ausland as $l) {
+            $nah = self::nearest($l, $oebbHalte, 300);
+            if ($nah !== null) {
+                $this->merge($byId, ['id' => $nah['id']] + $l);
             }
         }
 
@@ -303,6 +327,36 @@ final class Locations
         // Adressen vor POIs.
         usort($out, static fn($a, $b) => ($a['kind'] === 'poi') <=> ($b['kind'] === 'poi'));
         return $out;
+    }
+
+    /**
+     * Ein Halt aus der DB-Suche mit DB-eigener Nummer im Ausland: keine
+     * siebenstellige Bahnhofsnummer, und der Name endet mit dem Länderzusatz
+     * der DB ("(A)", "(CH)").
+     */
+    public static function dbForeignLocalId(array $loc): bool
+    {
+        return !preg_match('/^\d{7}$/', (string) ($loc['id'] ?? ''))
+            && preg_match('/\((A|CH|I|F|CZ|SK|SLO|H|FL)\)\s*$/u', (string) ($loc['name'] ?? '')) === 1;
+    }
+
+    /** Der nächste Halt aus $liste höchstens $maxM Meter von $loc, sonst null. */
+    private static function nearest(array $loc, array $liste, float $maxM): ?array
+    {
+        if (!isset($loc['lat'], $loc['lon'])) {
+            return null;
+        }
+        $best = null;
+        foreach ($liste as $o) {
+            if (!isset($o['lat'], $o['lon'])) {
+                continue;
+            }
+            $m = hypot(($o['lat'] - $loc['lat']) * 111320, ($o['lon'] - $loc['lon']) * 111320 * cos(deg2rad($loc['lat'])));
+            if ($m <= $maxM && ($best === null || $m < $best[0])) {
+                $best = [$m, $o];
+            }
+        }
+        return $best[1] ?? null;
     }
 
     /** Hausnummer oder typische Straßenendung in der Eingabe? */
