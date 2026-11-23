@@ -31,3 +31,6 @@ export const SITE = IN_APP
 export function siteUrl(path = '') {
   return new URL(path, SITE).href;
 }
+
+/** Version und Build-Nummer der App (aus build.gradle), im Browser null. */
+export const APP_VERSION = IN_APP ? { version: String(app.version || ''), build: Number(app.build) || 0 } : null;
