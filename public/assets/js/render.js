@@ -2240,7 +2240,10 @@ function renderLegs(journey, entry, state, actions) {
     if (leg.mode === 'walk') {
       // Wechselt der Halt, läuft man wirklich ein Stück — das gehört
       // sichtbar gemacht, samt Start und Ziel des Fußwegs.
-      const walksBetween = leg.changesPlace && leg.from?.name && leg.to?.name;
+      // Gemerkte Reisen aus Version 1.3 kennen changesPlace nicht: dann
+      // zählt, ob die Halte verschieden heißen.
+      const wechselt = leg.changesPlace ?? (leg.from?.name !== leg.to?.name);
+      const walksBetween = wechselt && leg.from?.name && leg.to?.name;
       if (!walksBetween && (leg.durationMin || 0) < 1) continue;
 
       // Gehzeit und Länge - "ca.", wo sie geschätzt sind (Walks.php).
