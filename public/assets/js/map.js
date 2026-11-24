@@ -2722,15 +2722,16 @@ export class RouteMap {
     // GEKOPPELTE ZÜGE: Nightjets fahren als mehrere Teile (NJ 420, NJ 492,
     // NJ 40490) mit genau derselben Position. Übereinander gezeichnet sah
     // man einen gelben Punkt mit grünem Ring. Jetzt ein Punkt, gefärbt nach
-    // der größten Verspätung, mit allen Teilen im Tooltip. U-Bahn und Tram
-    // bleiben einzeln: an einem Halt stehen oft zwei Züge verschiedener
-    // Linien am selben Fleck.
+    // der größten Verspätung, mit allen Teilen im Tooltip. Nur Nachtzüge:
+    // Busse und S-Bahnen stehen an einer Haltestelle oft am selben Fleck,
+    // ohne gekoppelt zu sein.
     const gekoppelt = new Map();
     const zuZeichnen = [];
     for (const t of trains) {
       if (t.lat == null || t.lon == null) continue;
-      const stadtZug = t.category === 'U' || /^(tram|str)$/i.test(t.category || '') || t.source === 'mvg-plan';
-      const k = stadtZug ? null : `${t.lat.toFixed(5)},${t.lon.toFixed(5)}`;
+      const nacht = /^(NJ|EN|D)$/i.test(String(t.category || '').trim())
+        || /^(NJ|EN)\s/i.test(String(t.name || ''));
+      const k = nacht ? `${t.lat.toFixed(5)},${t.lon.toFixed(5)}` : null;
       const gruppe = k && gekoppelt.get(k);
       if (gruppe) { gruppe.push(t); continue; }
       const neu = [t];
