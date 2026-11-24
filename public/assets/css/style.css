@@ -3923,6 +3923,18 @@ details.live__msg .live__msg-text {
 .stop__real.is-bad { color: var(--rose); }
 
 .stop__name { min-width: 0; overflow-wrap: anywhere; }
+.stop__platform {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  vertical-align: 0.05em;
+}
 
 .stop__meta {
   grid-column: 2;
