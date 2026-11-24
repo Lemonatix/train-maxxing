@@ -31,6 +31,11 @@
   und dem Balken je Tag.
 - **Klappt der Umstieg?** Bei knappen Umstiegen steht, an wie vielen der
   letzten Tage der Puffer gereicht hätte.
+- **Verspätung jetzt und am Ziel:** Gehen beide auseinander, zeigt die
+  Live-Verfolgung „jetzt +66 · Ziel +11 min“. Außerhalb von Österreich und
+  der Schweiz gelten dabei die Zeiten der DB, die dort die Echtzeit erzeugt.
+- **Gekoppelte Nachtzüge** (z. B. NJ 420 / NJ 40490) sind auf der Live-Karte
+  ein Punkt; ein Tipp auf einen Zug übernimmt die Verspätung aus seinem Lauf.
 - **Favoriten zuerst:** Beginnt ein Favorit mit dem Getippten, steht er in
   den Vorschlägen ganz oben.
 - **Hinweis auf eine neue App-Version:** Ist die installierte App älter als
@@ -53,6 +58,8 @@
 - **Zuglauf nicht verfügbar** („Interner Fehler“) bei jedem Zug.
 - **Lücken in der Tagesverspätung:** Züge mit Ziel im Ausland und Tage ohne
   Meldung am Endbahnhof fehlten; jetzt zählt der letzte bekannte Halt.
+- **Gleis der Zwischenhalte** rutschte bei Verspätung in die Zeile darunter;
+  jetzt steht es direkt neben dem Halt.
 - **Grauer Kasten beim Antippen** im hellen Modus der App.
 - **Standort in der iPhone-Web-App:** Verweigert iOS das GPS, zeigt die
   Karte wenigstens den ungefähren Standort.
