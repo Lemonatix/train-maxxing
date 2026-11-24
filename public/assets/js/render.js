@@ -1835,6 +1835,9 @@ function stopRow(s, nerd, land) {
     name.append(b);
   }
   if (s.country) land.last = s.country;
+  // Gleis direkt hinter den Namen, wie bei Ein- und Ausstieg - nicht in
+  // die Zeile darunter, wo es bei Verspätung neben der Echtzeit landete.
+  if (nerd && s.platform) name.append(el('span', 'stop__platform', `Gl. ${s.platform}`));
   li.append(name);
 
   const halt = s.arrival && s.departure ? lateBy(s.arrival, s.departure) : null;
@@ -1847,7 +1850,6 @@ function stopRow(s, nerd, land) {
   if (nerd) {
     const meta = [];
     if (halt != null && halt >= 2 && halt < LONG_DWELL_MIN) meta.push(`${halt} min Halt`);
-    if (s.platform) meta.push(`Gl. ${s.platform}`);
     if (meta.length) li.append(el('span', 'stop__meta', meta.join(' · ')));
   }
   if (s.cancelled) li.append(el('span', 'stop__meta stop__meta--bad', 'Halt entfällt'));
