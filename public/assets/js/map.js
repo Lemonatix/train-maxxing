@@ -2719,8 +2719,30 @@ export class RouteMap {
     // unsichtbar, den man verfolgt.
     const { trains, own, focus } = this.trainsOnMap();
 
+    // GEKOPPELTE ZÜGE: Nightjets fahren als mehrere Teile (NJ 420, NJ 492,
+    // NJ 40490) mit genau derselben Position. Übereinander gezeichnet sah
+    // man einen gelben Punkt mit grünem Ring. Jetzt ein Punkt, gefärbt nach
+    // der größten Verspätung, mit allen Teilen im Tooltip. U-Bahn und Tram
+    // bleiben einzeln: an einem Halt stehen oft zwei Züge verschiedener
+    // Linien am selben Fleck.
+    const gekoppelt = new Map();
+    const zuZeichnen = [];
     for (const t of trains) {
       if (t.lat == null || t.lon == null) continue;
+      const stadtZug = t.category === 'U' || /^(tram|str)$/i.test(t.category || '') || t.source === 'mvg-plan';
+      const k = stadtZug ? null : `${t.lat.toFixed(5)},${t.lon.toFixed(5)}`;
+      const gruppe = k && gekoppelt.get(k);
+      if (gruppe) { gruppe.push(t); continue; }
+      const neu = [t];
+      if (k) gekoppelt.set(k, neu);
+      zuZeichnen.push(neu);
+    }
+    const vertreter = (g) => g.find((x) => x === own) || g.find((x) => x === focus)
+      || [...g].sort((a, b) => (b.delay ?? -1) - (a.delay ?? -1))[0];
+
+    for (const gruppe of zuZeichnen) {
+      const t = vertreter(gruppe);
+      const andere = gruppe.filter((x) => x !== t);
       const [x, y] = toPx([t.lat, t.lon]);
       if (x < 0 || y < 0 || x > w || y > h) continue;
 
@@ -2776,6 +2798,7 @@ export class RouteMap {
         + (t.delay > 0 ? ` · +${t.delay} min` : t.delay === 0 ? ' · pünktlich' : '')
         + (t.nextStop ? ` — nächster Halt ${t.nextStop}` : '')
         + (t.estimated ? ' — Position aus dem Fahrplan geschätzt' : '')
+        + (andere.length ? ` — gekoppelt mit ${andere.map((x) => trainLabel(x)).join(', ')}` : '')
         + (t.jid ? ' (antippen für Details)' : '');
       g.append(title);
 
