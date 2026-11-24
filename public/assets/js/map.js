@@ -2671,8 +2671,23 @@ export class RouteMap {
    *
    * @returns {{trains: Array, own: ?object}}
    */
+  /**
+   * Verspätung aus dem Zuglauf für den Punkt übernehmen. Die Positionsmeldung
+   * der ÖBB hinkt manchmal weit hinterher: NJ 40490 stand mit +9 auf der
+   * Karte, der Zuglauf und die DB sagten +63. Gilt zehn Minuten.
+   */
+  setTrainDelay(jid, delay) {
+    if (!jid || typeof delay !== 'number') return;
+    (this.delayFix ??= new Map()).set(jid, { delay, at: Date.now() });
+    this.render();
+  }
+
   trainsOnMap() {
-    const trains = this.liveTrains.slice();
+    const fix = this.delayFix;
+    const trains = this.liveTrains.map((t) => {
+      const f = fix?.get(t.jid);
+      return f && Date.now() - f.at < 600_000 ? { ...t, delay: f.delay } : t;
+    });
     // Der Zug aus der Zugsuche: gemeldet, wenn er in den Live-Zügen steht,
     // sonst an seiner geschätzten Stelle ergänzt - auch wenn der Filter
     // ("nur High-speed") ihn sonst ausblenden würde.
@@ -2743,6 +2758,9 @@ export class RouteMap {
 
     for (const gruppe of zuZeichnen) {
       const t = vertreter(gruppe);
+      // Gekoppelt heißt gleich spät: die größte Verspätung gilt für alle.
+      const max = Math.max(...gruppe.map((x) => (typeof x.delay === 'number' ? x.delay : -Infinity)));
+      const delay = Number.isFinite(max) ? max : t.delay;
       const andere = gruppe.filter((x) => x !== t);
       const [x, y] = toPx([t.lat, t.lon]);
       if (x < 0 || y < 0 || x > w || y > h) continue;
@@ -2759,7 +2777,7 @@ export class RouteMap {
         + (t.source === 'mvg-plan' ? ' is-plan' : '')
         // Pünktlichkeit als Farbe: grün, ab 3 min gelb, ab 10 rot; grau,
         // wo HAFAS keine Echtzeit hat und die Stelle nur gerechnet ist.
-        + (t.delay == null ? ' is-nort' : t.delay >= 10 ? ' is-late' : t.delay >= 3 ? ' is-slow' : '')
+        + (delay == null ? ' is-nort' : delay >= 10 ? ' is-late' : delay >= 3 ? ' is-slow' : '')
         // Hochgerechnete Position: derselbe Punkt, nur hohl - damit man
         // sieht, dass die Stelle geschätzt und nicht gemeldet ist.
         + (t.estimated ? ' is-estimated' : ''));
@@ -2796,7 +2814,7 @@ export class RouteMap {
 
       const title = document.createElementNS(NS, 'title');
       title.textContent = `${trainLabel(t)}${t.direction ? ' → ' + t.direction : ''}`
-        + (t.delay > 0 ? ` · +${t.delay} min` : t.delay === 0 ? ' · pünktlich' : '')
+        + (delay > 0 ? ` · +${delay} min` : delay === 0 ? ' · pünktlich' : '')
         + (t.nextStop ? ` — nächster Halt ${t.nextStop}` : '')
         + (t.estimated ? ' — Position aus dem Fahrplan geschätzt' : '')
         + (andere.length ? ` — gekoppelt mit ${andere.map((x) => trainLabel(x)).join(', ')}` : '')
