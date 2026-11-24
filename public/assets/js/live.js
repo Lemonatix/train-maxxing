@@ -460,14 +460,16 @@ ${url.href}`);
   }
 
   /**
-   * Ist-Zeiten der DB in einen Zuglauf von HAFAS einsetzen - nur an
-   * deutschen Halten (Nummer 80xxxxx), dort erzeugt die DB die Echtzeit.
+   * Ist-Zeiten der DB in einen Zuglauf von HAFAS einsetzen - außer an
+   * Halten in Österreich und der Schweiz, wo ÖBB und SBB selbst messen.
    * Die Verspätung des Laufs ist danach die am nächsten Halt.
    */
   static withDbTimes(run, db) {
     const nachId = new Map((db.stops || []).map((s) => [String(s.id), s]));
     const stops = (run.stops || []).map((s) => {
-      const d = /^80\d{5}$/.test(String(s.id)) ? nachId.get(String(s.id)) : null;
+      // Österreich (81…) und die Schweiz (85…) messen selbst; überall sonst
+      // rechnet die DB weiter (auch in die Niederlande hinein).
+      const d = /^8[15]\d{5}$/.test(String(s.id)) ? null : nachId.get(String(s.id));
       if (!d || (d.arrivalReal == null && d.departureReal == null)) return s;
       return { ...s, arrivalReal: d.arrivalReal ?? s.arrivalReal, departureReal: d.departureReal ?? s.departureReal, delay: d.delay ?? s.delay };
     });
@@ -2206,6 +2208,15 @@ ${url.href}`);
     } else if (!echtzeit) {
       badge.textContent = 'keine Echtzeitdaten';
       badge.dataset.state = 'unknown';
+    } else if (typeof data?.delay === 'number' && delay != null && Math.abs(data.delay - delay) >= 5) {
+      // JETZT UND AM AUSSTIEG GEHEN AUSEINANDER: NJ 40490 war unterwegs
+      // +66, holte bis Amsterdam aber auf +6 auf. Nur die Zahl am Ausstieg
+      // las sich wie ein Widerspruch zur Karte und zu den Zeiten darunter.
+      const fmt = (d) => (d > 0 ? `+${d}` : d === 0 ? '±0' : String(d));
+      badge.textContent = `jetzt ${fmt(data.delay)} · Ziel ${fmt(delay)} min`;
+      badge.title = `Gerade ${data.delay} min verspätet, an ${leg.to?.name || 'deinem Ausstieg'} laut Prognose ${delay} min.`;
+      const m = Math.max(data.delay, delay);
+      badge.dataset.state = m >= 5 ? 'bad' : m > 0 ? 'warn' : 'good';
     } else if (delay > 0) {
       badge.textContent = `+${delay} min`;
       badge.dataset.state = delay >= 5 ? 'bad' : 'warn';
