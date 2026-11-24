@@ -459,18 +459,47 @@ ${url.href}`);
     return null;
   }
 
+  /**
+   * Ist-Zeiten der DB in einen Zuglauf von HAFAS einsetzen - nur an
+   * deutschen Halten (Nummer 80xxxxx), dort erzeugt die DB die Echtzeit.
+   * Die Verspätung des Laufs ist danach die am nächsten Halt.
+   */
+  static withDbTimes(run, db) {
+    const nachId = new Map((db.stops || []).map((s) => [String(s.id), s]));
+    const stops = (run.stops || []).map((s) => {
+      const d = /^80\d{5}$/.test(String(s.id)) ? nachId.get(String(s.id)) : null;
+      if (!d || (d.arrivalReal == null && d.departureReal == null)) return s;
+      return { ...s, arrivalReal: d.arrivalReal ?? s.arrivalReal, departureReal: d.departureReal ?? s.departureReal, delay: d.delay ?? s.delay };
+    });
+    const jetzt = Date.now();
+    let delay = run.delay;
+    for (const s of stops) {
+      if (typeof s.delay !== 'number') continue;
+      delay = s.delay;
+      const wann = Date.parse(s.arrivalReal || s.departureReal || s.arrival || s.departure || '');
+      if (wann > jetzt) break;
+    }
+    return { ...run, stops, delay };
+  }
+
   /** Den Zuglauf eines Abschnitts aus seiner Quelle holen. */
   static async fetchRun(entry) {
     const leg = entry.leg;
     if (entry.src === 'hafas') {
       const res = await api.trainDetails(entry.jid);
-      // Die Münchner S-Bahn kennt HAFAS oft nur nach Fahrplan. Hat die DB
-      // für denselben Zug Ist-Zeiten, gelten die.
-      if (!res.train?.hasRealtime && leg.dbJourneyId) {
+      // DIE DB HAT IN DEUTSCHLAND DAS LETZTE WORT. Die Münchner S-Bahn kennt
+      // HAFAS oft nur nach Fahrplan, und manchmal hinkt die ÖBB der DB weit
+      // hinterher: NJ 420 stand dort mit +4 in Würzburg, die DB sagte +62
+      // (technische Störung). Hat der Abschnitt eine DB-Kennung, gelten an
+      // deutschen Halten die Ist-Zeiten der DB.
+      if (leg.dbJourneyId) {
         try {
           const db = await api.trainRun({ db: leg.dbJourneyId });
-          if (db.train?.hasRealtime) return db;
-        } catch { /* dann eben der Fahrplan von HAFAS */ }
+          if (db.train?.hasRealtime) {
+            if (!res.train?.hasRealtime) return db;
+            res.train = LiveTracker.withDbTimes(res.train, db.train);
+          }
+        } catch { /* dann eben der Stand von HAFAS */ }
       }
       // DER SCHWEIZER TEIL: die Prognose der SBB - über OJP, wenn der Server
       // einen Schlüssel hat, sonst über opendata.ch -, eingesetzt in den
