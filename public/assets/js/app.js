@@ -2080,6 +2080,19 @@ async function showMore() {
   }
 }
 
+/** Verspätung am nächsten noch nicht erreichten Halt eines Zuglaufs, in Minuten. */
+function nextStopDelay(stops) {
+  const jetzt = Date.now();
+  for (const st of stops || []) {
+    const plan = st.arrival || st.departure;
+    const ist = st.arrivalReal || st.departureReal;
+    if (!plan || !ist) continue;
+    if (Date.parse(ist) < jetzt) continue;
+    return Math.round((Date.parse(ist) - Date.parse(plan)) / 60000);
+  }
+  return null;
+}
+
 /**
  * Eine Seite früherer Abfahrten holen.
  *
@@ -2949,6 +2962,10 @@ async function showTrainDetails(train, { focus = false } = {}) {
       res = await api.trainDetails(train.jid, { signal: trainAbort.signal });
     }
     renderTrainPanel(panel, head, res.train);
+    // Der Zuglauf ist genauer als die Positionsmeldung: seine Verspätung am
+    // nächsten Halt gilt jetzt auch für den Punkt auf der Karte.
+    const naechste = nextStopDelay(res.train?.stops);
+    if (naechste != null && train.jid) map?.setTrainDelay(train.jid, naechste);
     // Aus der Zugsuche und gerade unterwegs: den Punkt auf der Karte zeigen.
     if (focus && train.lat == null) {
       const pos = runPosition(res.train?.stops);
